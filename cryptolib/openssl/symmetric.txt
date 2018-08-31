@@ -1,0 +1,6 @@
+aes-128-ecb 128
+bf-ecb 128
+camellia-128-ecb 128
+cast5-ecb 128
+des-ecb 64
+des3 192

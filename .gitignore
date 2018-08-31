@@ -1,0 +1,15 @@
+config.mk
+*.pyc
+analysis/.pyenv/
+analysis/build/
+cryptolib/common/cleanenv
+cryptolib/common/cleanenv.txt
+cryptolib/openssl/lastresults
+cryptolib/openssl/openssl/
+cryptolib/python/lastresults
+pin/pin
+pin/*.tar.gz
+pin/pin-*/
+pintool/addrtrace.so
+pintool/obj-*/
+results/

@@ -1,0 +1,52 @@
+"""
+Copyright (C) 2017-2018
+Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+"""
+
+##
+# @package analysis.utils
+# @file utils.py
+# @brief Util functions.
+# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
+# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
+# @license This project is released under the GNU GPLv3 License.
+# @version 0.1
+
+"""
+*************************************************************************
+"""
+
+import sys
+
+debug_level = 0
+do_assert = False
+
+def debuglevel(level):
+    return debug_level >= level
+
+def set_debuglevel(level):
+    global debug_level
+    if level >= 0:
+        debug_level = level
+
+def debug(level, fstr, values = ()):
+    if debug_level >= level:
+        print(fstr % values)
+        sys.stdout.flush()
+
+def sorted_keys(mymap):
+    return sorted(mymap.keys())
+
