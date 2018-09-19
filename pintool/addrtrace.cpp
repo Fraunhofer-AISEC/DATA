@@ -973,7 +973,7 @@ void domalloc(ADDRINT addr, ADDRINT size, uint32_t objid) {
   
   DEBUG(2) std::cout << "Domalloc " << std::hex << addr << " " << size << std::endl;
   /* Keep heap vector sorted */
-  HEAPVEC::iterator prev = heap.end();
+  HEAPVEC::iterator prev = heap.begin();
   HEAPVEC::iterator found = heap.end();
   for(HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
     if (it->used) {
@@ -996,7 +996,7 @@ void domalloc(ADDRINT addr, ADDRINT size, uint32_t objid) {
   } else {
     if (prev == heap.end() || prev->used) {
         /* We cannot reuse prev, insert at 'found' */
-        if(prev->used && prev->base + prev->size > obj.base) {
+        if(prev->used && prev->base + prev->size < obj.base) {
           DEBUG(2) printheap();
           ASSERT(false, "[Error] Corrupted heap?!");
         }
