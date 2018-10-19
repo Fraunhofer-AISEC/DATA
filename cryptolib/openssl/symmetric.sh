@@ -1,8 +1,7 @@
 #!/bin/bash
 
 #########################################################################
-# Copyright (C) 2017-2018
-# Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+# Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,10 +18,9 @@
 #########################################################################
 # @file symmetric.sh
 # @brief Test script for OpenSSL symmetric ciphers.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 #########################################################################
 
 #------------------------------------------------------------------------
@@ -89,7 +87,7 @@ export SPECIFIC_LEAKAGE_CALLBACK=${ANALYSISDIR}/leakage_models/sym_byte_value.py
 # is invoked once inside the current directory before analysis starts.
 # Implement framework-specific tasks here like framework compilation.
 function cb_prepare_framework {
-  make
+  make -s
 }
 
 # DATA callback for generating keys. This callback is invoked every

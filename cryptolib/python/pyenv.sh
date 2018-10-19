@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #########################################################################
 # Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 #
@@ -14,6 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #########################################################################
+# @file pyenv.sh
+# @brief Sets up a Python virtual environment.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
 # @version 0.2
@@ -22,52 +26,17 @@
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
-
-# Project Name
-PROJ := DATA - Pin
-
-# Pin Version and Source
-VER=pin-3.7-97619-g0d0c92f4f-gcc-linux
-TAR=$(VER).tar.gz
-URL=https://software.intel.com/sites/landingpage/pintool/downloads/$(TAR)
-
-# config.mk Handling
-REPL=$(shell echo $(CURDIR) | sed 's/\//\\\//g')
+ENV=.pyenv27
 
 #------------------------------------------------------------------------
-# Targets
+# Create Environment
 #------------------------------------------------------------------------
-.PHONY: all clean
-
-all: $(TAR) pin config.mk
-
-$(TAR):
-	wget $(URL)
-
-$(VER)/pin:
-	tar -xvf $(TAR)
-
-pin: $(VER)/pin
-	ln -sf $^ $@
-
-config.mk:
-	@if [ -f ../config.mk ] && grep -q PIN_ROOT ../config.mk; then \
-		sed -i 's/PIN_ROOT=.*/PIN_ROOT=$(REPL)\/$(VER)/g' ../config.mk; \
-	else \
-		echo "PIN_ROOT=$(CURDIR)/$(VER)" >> ../config.mk; \
-	fi;
-
-clean:
-	rm -f pin
-	rm -f $(TAR)
-	rm -rf $(VER)
-
-help:
-	@echo
-	@echo "$(PROJ)"
-	@echo
-	@echo "  make [all] ............. Prepare and/or compile."
-	@echo "  make help .............. Show this text."
-	@echo "  make clean ............. Clean up."
-	@echo
-
+if ! [[ -f ${ENV}/.done ]]; then
+  LOAD_PYENV_INTERPRETER=/usr/bin/python2.7
+  virtualenv -p ${LOAD_PYENV_INTERPRETER} ${ENV} || exit 1
+  source ${ENV}/bin/activate
+  pip install -U pip
+  pip install -U setuptools
+  pip install click pycrypto
+  touch ${ENV}/.done
+fi

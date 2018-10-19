@@ -1,8 +1,7 @@
-#!/usr/bin/python2
+#!/usr/bin/env python
 
 """
-Copyright (C) 2017-2018
-Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -22,33 +21,32 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @package analysis.analyze
 # @file analyze.py
 # @brief Main analysis script.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 
 """
 *************************************************************************
 """
 
 import sys
-import click
 import os
-import gzip
+import click
 import struct
 import copy
 import numpy
 import types
-import cPickle as pickle
 from collections import Counter
 import kuipertest
 import rdctest
-from utils import debug,debuglevel,set_debuglevel
-from SymbolInfo import SymbolInfo
-from printer import XmlLeakPrinter,BinLeakPrinter
-from leaks import FUNC_ENTRY_BIN,FUNC_EXIT_BIN,bs,CallHistory,CallStack,\
-CFLeak,CFLeakEntry,Context,DataLeak,DataLeakEntry,Entry,EvidenceEntry,\
-EvidenceSource, Lookahead,MergePoint,NSLeak,NSPType,SPLeak,TraceQueue,Type
+from datastub.SymbolInfo import SymbolInfo
+from datastub.utils import debug,debuglevel,set_debuglevel
+from datastub.printer import XmlLeakPrinter,BinLeakPrinter
+from datastub.export import storepickle,loadpickle,export_leaks
+from datastub.leaks import FUNC_ENTRY_BIN,FUNC_EXIT_BIN,bs,CallHistory,\
+CallStack,CFLeak,CFLeakEntry,Context,DataLeak,DataLeakEntry,Entry,\
+EvidenceEntry,EvidenceSource, Lookahead,MergePoint,NSLeak,NSPType,\
+SPLeak,TraceQueue,Type
 
 """
 *************************************************************************
@@ -91,10 +89,10 @@ def report_cfleak(callstack, bp, mp, e1, len1, e2, len2):
 def consume_call_ret(queues):
     assert(queues[0].chunk is not None)
     assert(len(queues[0].chunk) % bs == 0)
-    cblocks = len(queues[0].chunk)/bs
+    cblocks = int(len(queues[0].chunk)/bs)
     for i in range(0, cblocks):
         idx = 17*i
-        typ = queues[0].chunk[idx]
+        typ = queues[0].chunk[idx:idx+1]
         if typ == FUNC_ENTRY_BIN or typ == FUNC_EXIT_BIN:
             e = Entry(struct.unpack("<BQQ", queues[0].chunk[idx:idx+17]))
             queues[0].callstack.update_context(e)
@@ -145,7 +143,7 @@ def fast_forward(queues, bp, bdepth):
         if queues[0].chunk != queues[1].chunk:
             break
         newbp = queues[0].peak_last_branch_from_chunk()
-        # It could happen by increadibly bad luck that last chunk does not contain a branch
+        # It could happen by incredibly bad luck that last chunk does not contain a branch
         # In this case reuse previous bp.
         if newbp is not None:
             bp = newbp
@@ -238,7 +236,12 @@ def iterate_queue(files, fast = True):
                     queues[0].callstack.doprint_reverse()
                 
                 assert(queues[0].lookahead(0).ip == queues[1].lookahead(0).ip)
-                assert(queues[0].callstack == queues[1].callstack)
+                #assert(queues[0].callstack == queues[1].callstack)
+                if not queues[0].callstack == queues[1].callstack:
+                    queues[0].callstack.doprint_reverse()
+                    print("====")
+                    queues[1].callstack.doprint_reverse()
+                    assert False
                 assert(Type.isbranch(bp))
                 report_cfleak(bcallstack, bp.ip, mergepoint, e1b, len1, e2b, len2)
             
@@ -280,21 +283,19 @@ def iterate_queue(files, fast = True):
 
 def load_leaks(files, keys, source):
     for i in range(0, len(files)):
-        f = open(files[i], 'rb')
-        chunk = f.read()
-        f.close()
+        with open(files[i], 'rb') as f:
+            chunk = f.read()
         
         if keys is not None:
-            fk = open(keys[i], 'rb')
-            k = fk.read()
-            fk.close()
+            with open(keys[i], 'rb') as fk:
+                k = fk.read()
         else:
             k = None
         
         idx = 0
         cs = CallStack()
         while idx < len(chunk):
-            typ = struct.unpack('B', chunk[idx])[0]
+            typ = struct.unpack('B', chunk[idx:idx+1])[0]
             idx += 1
             if typ == Type.FUNC_ENTRY.value:
                 (caller, callee) = struct.unpack('<QQ', chunk[idx:idx+16])
@@ -667,14 +668,14 @@ def specific_leakage_test(random, callback):
         with open(callback) as fp:
             code = compile(fp.read(), callback, "exec")
         splcb = types.ModuleType("<config>")
-        exec code in splcb.__dict__
+        exec(code, splcb.__dict__)
     except Exception as e:
         debug(0, "Unable to load specific leakage test callback function!")
         debug(0, str(e))
         assert (False)
     assert(splcb.specific_leakage_callback)
     xtarget = str(os.path.splitext(os.path.basename(callback))[0])
-    
+
     # print test types
     debug(1, "Test Types:")
     debug(1, "    2 .... number of accesses per address")
@@ -776,7 +777,7 @@ def specific_leakage_test(random, callback):
             lfound = False
             for c in rdic.keys():
                 (R, L, I) = rdctest.RDC.test(X[:,j], rdic[c], 0.9999)
-                if not I:
+                if I == False:
                     lfound = True
                     noleakdetected = False
                     cleak = SPLeak(NSPType.Type2, j, c, None, R, L, I, xtarget, 0.9999)
@@ -792,7 +793,7 @@ def specific_leakage_test(random, callback):
             lfound = False
             for c in rdic_pos.keys():
                 (R, L, I) = rdctest.RDC.test(X[:,j], rdic_pos[c], 0.9999)
-                if not I:
+                if I == False:
                     lfound = True
                     noleakdetected = False
                     cleak = SPLeak(NSPType.Type3, j, c, None, R, L, I, xtarget, 0.9999)
@@ -924,16 +925,6 @@ def print_leaks(leaks, printer, doflatten = False, printerFlat = None):
 *************************************************************************
 """
 
-def storepickle(pfile):
-    global leaks
-    with gzip.GzipFile(pfile, 'wb') as f:
-        pickle.dump(leaks, f)
-
-def loadpickle(pfile):
-    with gzip.GzipFile(pfile, 'rb') as f:
-        new = pickle.load(f)
-    return new
-
 def loadleaksglob(pfile):
     global leaks
     try:
@@ -995,7 +986,7 @@ def merge(pickle_a, pickle_b, syms, xml, pickle, debug):
     leakB = loadpickle(pickle_b)
     merge_leaks(leakB)
     if pickle is not None:
-        storepickle(pickle)
+        storepickle(pickle, leaks)
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 
@@ -1026,7 +1017,7 @@ def loadleaks(pickle, files, filepattern, keypattern, start, end, source, debug)
         keys = None
     load_leaks(files, keys, source)
     if pickle is not None:
-        storepickle(pickle)
+        storepickle(pickle, leaks)
     
 """
 Print, convert leaks to/from binary/xml/pickle.
@@ -1051,6 +1042,22 @@ def show(picklefile, syms, xml, leakout, debug):
         print_leaks(leaks, BinLeakPrinter(leakout))
 
 """
+Export results and framework files (ELF, sources) in a compressed zip file. 
+"""
+@cli.command('export')
+@click.argument('picklefile', type=str)
+@click.argument('zipfile', type=str)
+@click.option('--syms', default=None, type=click.File('r'))
+@click.option('--debug', default=-1, type=int)
+def export(picklefile, zipfile, syms, debug):
+    global leaks
+    set_debuglevel(debug)
+    assert(syms is not None)
+    SymbolInfo.open(syms)
+    assert(loadleaksglob(picklefile))
+    export_leaks(leaks, zipfile, syms)
+
+"""
 Analyze two trace files and extract all differences.
 """
 @cli.command('diff')
@@ -1069,7 +1076,7 @@ def diff(file1, file2, syms, pickle, xml, fast, debug):
         loadleaksglob(pickle)
     iterate_queue([file1, file2], fast)
     if pickle is not None:
-        storepickle(pickle)
+        storepickle(pickle, leaks)
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 
@@ -1093,7 +1100,7 @@ def generic(fixedpickle, randompickle, pickle, syms, xml, debug):
     generic_leakage_test(fixed, random)
     leaks = random
     if pickle is not None:
-        storepickle(pickle)
+        storepickle(pickle, leaks)
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 
@@ -1115,7 +1122,7 @@ def specific(randompickle, callback, pickle, syms, xml, debug):
     leaks = loadpickle(randompickle)
     specific_leakage_test(leaks, callback)
     if pickle is not None:
-        storepickle(pickle)
+        storepickle(pickle, leaks)
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 

@@ -1,8 +1,7 @@
-#!/usr/bin/python2
+#!/usr/bin/env python
 
 """
-Copyright (C) 2017-2018
-Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -22,10 +21,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @package cryptolib.common.genkey
 # @file genkey.py
 # @brief Creates a random key of the byte length provided as commandline argument.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 
 """
 *************************************************************************
@@ -33,8 +31,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import os
 import sys
+import codecs
 
 kbytes = int(sys.argv[-1])
 fmt = '%0' + str(kbytes*2) + 'x'
-sys.stdout.write(str.format(fmt % int(os.urandom(kbytes).encode('hex'),16)))
+sys.stdout.write(str.format(fmt % int(os.urandom(kbytes).hex(),16)))
 

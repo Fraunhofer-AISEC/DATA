@@ -1,8 +1,7 @@
-#!/usr/bin/python2
+#!/usr/bin/env python
 
 """
-Copyright (C) 2017-2018
-Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -22,10 +21,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @package cryptolib.python.symmetric
 # @file symmetric.py
 # @brief Creates a random key for the cipher provided as commandline argument.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 
 """
 *************************************************************************
@@ -74,17 +72,17 @@ def run(algo, keyfile=None, textfile=None):
       key = keyfile.read()
     else:
       key = os.urandom(keybytes)
-    
+
     if textfile is not None:
       text = textfile.read()
     else:
       text = 64 * "0"
-    
+
     IV = A.block_size * '\x00'
     if algo == "ARC4":
-      cipher = A.new(str(key))
+      cipher = A.new(key)
     else:
-      cipher = A.new(str(key), A.MODE_CBC, IV=IV)
+      cipher = A.new(key, A.MODE_CBC, IV=IV)
     cipher.encrypt(text)
 
 @cli.command('version')

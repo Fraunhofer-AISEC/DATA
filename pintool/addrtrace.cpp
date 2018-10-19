@@ -1,6 +1,5 @@
 /************************************************************************
- * Copyright (C) 2017-2018
- * Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+ * Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,10 +18,9 @@
 /**
  * @file addrtrace.cpp
  * @brief DATA tracing tool for Pin.
- * @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
- * @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
- * @license This project is released under the GNU GPLv3 License.
- * @version 0.1
+ * @license This project is released under the GNU GPLv3+ License.
+ * @author See AUTHORS file.
+ * @version 0.2
  */
 
 /***********************************************************************/
@@ -67,6 +65,9 @@ KNOB<bool> KnobTrackHeap(KNOB_MODE_WRITEONCE, "pintool",
 
 KNOB<string> KnobSyms(KNOB_MODE_WRITEONCE, "pintool",
         "syms", "", "Output file for image information.");
+
+KNOB<string> KnobVDSO(KNOB_MODE_WRITEONCE, "pintool",
+        "vdso", "vdso.so", "Output file for the vdso shared library.");
 
 KNOB<bool> KnobLeaks(KNOB_MODE_WRITEONCE, "pintool",
         "leaks", "0", "Enable fast recording of leaks, provided via leakin.");
@@ -155,6 +156,7 @@ enum entry_type_t {
 
 std::vector<entry_t> trace; /* Contains all traced instructions */
 ofstream imgfile;           /* Holds memory layout with function symbols */
+ofstream vdsofile;          /* Holds vdso shared library */
 
 /***********************************************************************/
 /* Heap tracking */
@@ -1344,10 +1346,24 @@ VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins, const CONTE
 VOID instrumentMainAndAlloc(IMG img, VOID *v)
 {
   string name = IMG_Name(img);
-  uintptr_t high = IMG_HighAddress(img);
-  uintptr_t low = IMG_LowAddress(img);
-
   if (imgfile.is_open()) {
+    uintptr_t high = IMG_HighAddress(img);
+    uintptr_t low = IMG_LowAddress(img);
+
+    if (vdsofile.is_open() && IMG_IsVDSO(img)) {
+      /* For VDSO, the HighAddress does not point to end of ELF file, 
+       * leading to a truncated ELF file. We over-approximate the ELF size
+       * with IMG_SizeMapped instead.
+       */
+      high = low + IMG_SizeMapped(img);
+      DEBUG(1) std::cout << "VDSO low:   0x" << std::hex << low << std::endl;
+      DEBUG(1) std::cout << "VDSO high:  0x" << std::hex << high << std::endl;
+      DEBUG(1) std::cout << "VDSO size mapped:  0x" << std::hex << IMG_SizeMapped(img) << std::endl;
+      vdsofile.write((const char*)low, IMG_SizeMapped(img));
+      vdsofile.close();
+      name = KnobVDSO.Value();
+    }
+
     imgfile << "Image:" << std::endl;
     imgfile << name << std::endl;
     imgfile << std::hex << low << ":" << high << std::endl;
@@ -1758,6 +1774,9 @@ int main(int argc, char *argv[])
   IMG_AddInstrumentFunction(instrumentMainAndAlloc, 0);
   if (!KnobSyms.Value().empty()) {
       imgfile.open(KnobSyms.Value().c_str());
+  }
+  if (!KnobVDSO.Value().empty()) {
+      vdsofile.open(KnobVDSO.Value().c_str());
   }
   
   if (!KnobLeaks.Value()) {

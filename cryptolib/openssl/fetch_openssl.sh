@@ -1,8 +1,7 @@
 #!/bin/bash
 
 #########################################################################
-# Copyright (C) 2017-2018
-# Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+# Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,32 +18,27 @@
 #########################################################################
 # @file fetch_openssl.sh
 # @brief Retrieves and compiles OpenSSL.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 #########################################################################
 
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
 OPENSSLDIR=openssl
+set -e
 
 #------------------------------------------------------------------------
 # Fetch and Build
 #------------------------------------------------------------------------
 if [[ ! -d ${OPENSSLDIR} ]]; then
-  git clone --depth 1 --branch OpenSSL_1_1_0f git://git.openssl.org/openssl.git
-else
-  echo "Skipping repo cloning"
+  git clone --depth 1 --branch OpenSSL_1_1_1 git://git.openssl.org/openssl.git
 fi
 cd ${OPENSSLDIR}
 if [[ ! -f libcrypto.so ]]; then
   # Build openssl with debug symbols
   ./config -g
-  make -j4
-else
-  echo "Skipping build"
+  make -j"$(nproc)"
 fi
-echo "Done."
 

@@ -1,8 +1,7 @@
 #!/bin/bash
 
 #########################################################################
-# Copyright (C) 2017-2018
-# Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+# Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,10 +18,9 @@
 #########################################################################
 # @file common.sh
 # @brief Main framework script.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 #########################################################################
 
 #------------------------------------------------------------------------
@@ -77,6 +75,7 @@ DO_CLEANUP=0
 DO_PARALLEL=0
 DO_TRACE_REUSE=0
 DO_FINAL=0
+DO_EXPORT=0
 DO_DRY=0
 
 # Extension for trace files
@@ -94,6 +93,7 @@ RESXMLFILE_PHASE2=result_phase2.xml
 RESXMLFILE_PHASE3=result_phase3
 RESXMLFILE_FINAL=result_final.xml
 LEAKFILE=leaks.bin
+EXPORTFILE=framework.zip
 DEBUG=0
 
 # Measurement phases
@@ -246,6 +246,8 @@ function getpeakmemory {
       fi
     fi
   done < "${LOGFILE}"
+  PEAK_MEMORY=$(divfloat "${PEAK_MEMORY}" "1024")
+  PEAK_MEMORY=$(printf "%.2f" "${PEAK_MEMORY}")
   leave_workdir
 }
 
@@ -940,6 +942,17 @@ function analyze_phase3 {
 # Report Generation
 #------------------------------------------------------------------------
 
+function export_framework_files {
+  enter_workdir
+  CMD_EXPORT="export"
+  log_info "Exporting framework files"
+  if ! [[ -f ${EXPORTFILE} ]]; then
+    execute "${ANALYZE}" ${CMD_EXPORT} "${RESPICFILE_PHASE1}" "${EXPORTFILE}" --syms ${EXTSYMFILE} --debug 0
+  fi
+  log_info "Exporting completed."
+  leave_workdir
+}
+
 # Generate final XMLs
 function generate_final_result_XMLs {
   enter_workdir
@@ -999,6 +1012,9 @@ function DATA_run {
     fi
     if [[ "${DO_PHASE1_ANALYZE}" -eq "1" ]]; then
       analyze_phase1
+    fi
+    if [[ "${DO_EXPORT}" -eq "1" ]]; then
+      export_framework_files
     fi
 
     enter_workdir
@@ -1098,6 +1114,10 @@ function DATA_parse {
         DO_FINAL=1
         shift
         ;;
+        -e|--export)
+        DO_EXPORT=1
+        shift
+        ;;
         -f|--full)
         DO_GENKEYS=1
         DO_PHASE1_MEASURE=1
@@ -1146,7 +1166,7 @@ function DATA_parse {
       if [[ ${PEAK_MEMORY} == 0 ]]; then
         print_info "$(printf "Testing '$LINE' completed in %.2f seconds (or %.2f CPU seconds)" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
       else
-        print_info "$(printf "Testing '$LINE' completed in %.2f seconds (or %.2f CPU seconds) with a peak RAM usage of ${PEAK_MEMORY} Kbytes" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
+        print_info "$(printf "Testing '$LINE' completed in %.2f seconds (or %.2f CPU seconds) with a peak RAM usage of ${PEAK_MEMORY} MiB" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
       fi
       leave_frameworkdir
       echo "============================================================"
@@ -1179,7 +1199,7 @@ function DATA_parse {
       if [[ ${PEAK_MEMORY} == 0 ]]; then
         print_info "$(printf "Testing '$ALGOCMDLINE' completed in %.2f seconds (or %.2f CPU seconds)" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
       else
-        print_info "$(printf "Testing '$ALGOCMDLINE' completed in %.2f seconds (or %.2f CPU seconds) with a peak RAM usage of ${PEAK_MEMORY} Kbytes" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
+        print_info "$(printf "Testing '$ALGOCMDLINE' completed in %.2f seconds (or %.2f CPU seconds) with a peak RAM usage of ${PEAK_MEMORY} MiB" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
       fi
       leave_frameworkdir
       echo "============================================================"
@@ -1206,7 +1226,8 @@ function help {
   echo "-u|--reusetraces  Phase3: Re-use existing traces from generic tests for specific tests"
   echo "-as|--alyzesp     Phase3: Analyze traces for specific leakage and create xml reports"
   echo "-p|--parallel     Run tasks in parallel"
-  echo "-i|--final        Generate final XML result files"
+  echo "-i|--final        Generate final result XML files"
+  echo "-e|--export       Export framework files (ELF/asm/src) in a zip archive"
   echo "-c|--cleanup      Delete phase1 trace files afterwards"
   echo "--dry             Dry-run phase1 (-g and --diff) to test your script with extended debug output"
   echo "-f|--full         Run -g -d -ad -ns -an -sp -as -i"

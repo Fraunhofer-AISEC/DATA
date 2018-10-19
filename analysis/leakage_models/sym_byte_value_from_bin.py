@@ -1,6 +1,5 @@
 """
-Copyright (C) 2017-2018
-Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -20,10 +19,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @package analysis.leakage_models.sym_byte_value_from_bin
 # @file sym_byte_value_from_bin.py
 # @brief Specific leakage test callback (Symmetric key byte-wise from binary format)
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 
 """
 *************************************************************************

@@ -1,0 +1,164 @@
+"""
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+"""
+
+##
+# @package analysis.datastub.export
+# @file export.py
+# @brief Everything related to storing and loading leaks and more.
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
+
+"""
+*************************************************************************
+"""
+
+import os
+import gzip
+import subprocess
+import _pickle as pickle
+from datastub.DataFS import DataFS
+from datastub.IpInfoShort import IpInfoShort,IP_INFO_FILE
+from datastub.SymbolInfo import SymbolInfo
+
+"""
+*************************************************************************
+"""
+
+def storepickle(pfile, leaks):
+    with gzip.GzipFile(pfile, 'wb') as f:
+        pickle.dump(leaks, f)
+
+"""
+*************************************************************************
+"""
+
+def loadpickle(pfile):
+    with gzip.GzipFile(pfile, 'rb') as f:
+        new = pickle.load(f, encoding='latin1')
+    return new
+
+"""
+*************************************************************************
+"""
+
+def getSourceFileInfo(addr, binary_path):
+    # e.g., addr2line 0x42d4b9 -e openssl
+    #   -> file_name:line_nr
+    # from man pages:
+    # if the filename cannot be determined -> print two question marks
+    # if the line nr cannot be determined  -> print 0
+    try:
+        output = subprocess.check_output(["addr2line", addr, "-e", binary_path], universal_newlines=True)
+        infos = output.split(":")
+        source_file_path, source_line_number = infos[0], infos[1]
+        if "??" == source_file_path:
+            raise subprocess.CalledProcessError
+    except:
+        print("[SRC] unavailable for " + addr + " in " + binary_path)
+        return None, 0
+    if "discriminator" in source_line_number:
+        source_line_number = source_line_number.split()[0]
+    return source_file_path, int(source_line_number)
+
+"""
+*************************************************************************
+"""
+
+def getAsmFileInfo(addr, asm_dump):
+    line_count = 0
+    search_str = format(addr, 'x') + ":"
+    for asm_line in asm_dump.splitlines():
+        if search_str in asm_line:
+            return line_count
+        line_count += 1
+    return -1
+
+"""
+*************************************************************************
+"""
+
+def export_ip(ip, datafs, imgmap, info_map):
+    if ip is None or ip == 0:
+        return
+    if not ip in info_map:
+        sym = SymbolInfo.lookup(ip)
+        assert(sym is not None)
+        if sym.img.dynamic:
+            addr = ip - sym.img.lower
+        else:
+            addr = ip
+        bin_file_path = sym.img.name
+        asm_file_path = bin_file_path + ".asm"
+        # Add binary (ELF) + ASM objdump to datafs
+        if not bin_file_path in imgmap:
+            datafs.add_file(bin_file_path)
+            asm_dump = ""
+            try:
+                print("[ASM] objdump {}".format(bin_file_path))
+                # asm_dump = subprocess.check_output(["objdump", "-Dj", ".text", bin_file_path], universal_newlines=True)
+                with datafs.create_file(asm_file_path) as f:
+                    subprocess.call(["objdump", "-d", bin_file_path], universal_newlines=True, stdout=f)
+                    f.seek(0)
+                    asm_dump = f.read().decode('utf-8')
+            except subprocess.CalledProcessError as err:
+                print("error_code: {}".format(err.returncode))
+                asm_dump = None
+            imgmap[bin_file_path] = asm_dump
+        if not ip in info_map:
+            # Search for leak in asm dump
+            asm_dump = imgmap[bin_file_path]
+            asm_line_nr = getAsmFileInfo(addr, asm_dump)
+            if asm_line_nr < 0:
+                print("[ASM] unavailable for " + hex(addr) + " in " + bin_file_path)
+            # Search for leak in source code
+            src_file_path, src_line_nr = getSourceFileInfo(hex(addr), bin_file_path)
+            if src_file_path is not None and os.path.exists(src_file_path):
+                datafs.add_file(src_file_path)
+            ip_info = IpInfoShort(asm_file_path, asm_line_nr, src_file_path, src_line_nr)
+            info_map[ip] = ip_info
+
+"""
+*************************************************************************
+"""
+
+def export_ip_recursive(leaks, datafs, imgmap, info_map):
+    if leaks.ctxt is not None:
+        export_ip(leaks.ctxt.caller, datafs, imgmap, info_map)
+        export_ip(leaks.ctxt.callee, datafs, imgmap, info_map)
+    for l in leaks.dataleaks:
+        export_ip(l.ip, datafs, imgmap, info_map)
+    for l in leaks.cfleaks:
+        export_ip(l.ip, datafs, imgmap, info_map)
+    for k in leaks.children:
+        child = leaks.children[k]
+        export_ip_recursive(child, datafs, imgmap, info_map)
+
+"""
+*************************************************************************
+"""
+
+def export_leaks(callHistory, zipfile, syms):
+    datafs = DataFS(zipfile, write=True)
+    imgmap = {}
+    info_map = {}
+    export_ip_recursive(callHistory, datafs, imgmap, info_map)
+    with datafs.create_file(IP_INFO_FILE) as f:
+        pickle.dump(info_map, f)
+    datafs.add_file(syms.name)
+    datafs.close()
+

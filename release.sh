@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #########################################################################
 # Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 #
@@ -14,6 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #########################################################################
+# @file release.sh
+# @brief Increases the version number in all license headers.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
 # @version 0.2
@@ -22,52 +26,25 @@
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
-
-# Project Name
-PROJ := DATA - Pin
-
-# Pin Version and Source
-VER=pin-3.7-97619-g0d0c92f4f-gcc-linux
-TAR=$(VER).tar.gz
-URL=https://software.intel.com/sites/landingpage/pintool/downloads/$(TAR)
-
-# config.mk Handling
-REPL=$(shell echo $(CURDIR) | sed 's/\//\\\//g')
+VER=0.2
 
 #------------------------------------------------------------------------
-# Targets
+# Update version number in all license headers
 #------------------------------------------------------------------------
-.PHONY: all clean
+for f in $(git ls-files); do
+  grep "@version" "$f" > /dev/null
+  if [[ "$?" -eq "0" ]]; then
+    echo "Setting version number in $f"
+    # search for '@version' string and 
+    # replace the following version number with ${VER}
+    # xxx can be digits and dots
+    sed -i "s/\(@version\s\+\)[.0-9]\+/\1${VER}/g" "$f"
+  fi
+done
 
-all: $(TAR) pin config.mk
-
-$(TAR):
-	wget $(URL)
-
-$(VER)/pin:
-	tar -xvf $(TAR)
-
-pin: $(VER)/pin
-	ln -sf $^ $@
-
-config.mk:
-	@if [ -f ../config.mk ] && grep -q PIN_ROOT ../config.mk; then \
-		sed -i 's/PIN_ROOT=.*/PIN_ROOT=$(REPL)\/$(VER)/g' ../config.mk; \
-	else \
-		echo "PIN_ROOT=$(CURDIR)/$(VER)" >> ../config.mk; \
-	fi;
-
-clean:
-	rm -f pin
-	rm -f $(TAR)
-	rm -rf $(VER)
-
-help:
-	@echo
-	@echo "$(PROJ)"
-	@echo
-	@echo "  make [all] ............. Prepare and/or compile."
-	@echo "  make help .............. Show this text."
-	@echo "  make clean ............. Clean up."
-	@echo
+UNTRACKED=$(git status --porcelain | grep -e "^??")
+if ! [[ -z "${UNTRACKED}" ]]; then
+  echo "You have untracked files. They are not be updated!"
+  echo "${UNTRACKED}"
+fi
 

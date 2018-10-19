@@ -38,9 +38,12 @@ good starting point.
 - [Run The Analysis](#run-the-analysis)
 - [Analysis Steps](#analysis-steps)
 - [Analysis Reports](#analysis-reports)
+- [Graphical User Interface (GUI)](#graphical-user-interface-gui)
 - [Usage Tips](#usage-tips)
+- [About Us](#about-us)
 - [Contact Us](#contact-us)
 - [License](#license)
+- [Changelog](#changelog)
 - [Publication](#publication)
 
 ## Tool Description
@@ -73,8 +76,8 @@ with a custom [Pintool](./pintool/addrtrace.cpp) that dumps the addresses of all
 instructions and all accessed operands. It preserves the call hierarchy and implements basic
 tracking of dynamic memory objects.
 
-The detection of information leaks is done with [Kuiper's test](./analysis/kuipertest.c). This
-metric is closely related to the
+The detection of information leaks is done with
+[Kuiper's test](./analysis/kuipertest/kuipertest.c). This metric is closely related to the
 [Kolmogorov-Smirnov](https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test) statistic, a
 non-parametric equality test of probability distributions. In DATA, Kuiper's test is used to
 compare the address distributions observed at a given control-flow or data difference. If these
@@ -96,6 +99,7 @@ linear or non-linear relation between the observations of two random variables.
 | -------------------------------------------------------- |----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [cryptolib](./cryptolib)                                 | Crypto frameworks (programs under test). Currently, OpenSSL and pyCrypto are supported. <br> Each framework provides bash script(s) that invoke the DATA scripts.    |
 | &ensp;&#8627;[common](./cryptolib/common)                | Shared DATA scripts that coordinate all phases of DATA and invoke Intel Pin <br> as well as the Python analysis scripts                                              |
+| [data-gui](https://github.com/IAIK/data-gui)             | Graphical user interface (GUI) as git submodule                                                                                                                      |
 | [pin](./pin)                                             | Root directory of the Intel Pin DBI framework                                                                                                                        |
 | [pintool](./pintool)                                     | DATA's Pintool extension to generate address traces                                                                                                                  |
 | [analysis](./analysis)                                   | Python analysis scripts for trace analysis, statistical tests, and reporting                                                                                         |
@@ -108,7 +112,7 @@ DATA is currently implemented for 64-bit x86 Linux systems. It has been tested o
 well as Debian 8.3 and 9.4. On Debian/Ubuntu, the following packages are required to run DATA:
 
 ```
-sudo apt-get install coreutils util-linux bash sed grep wget tar mawk time build-essential xdg-utils git python python-dev python-virtualenv
+sudo apt-get install coreutils util-linux bash sed grep wget tar mawk time build-essential git python3.5 python3.5-dev python-virtualenv
 ```
 
 ## Build
@@ -164,8 +168,8 @@ make phase3
 ```
 
 This might be helpful to play with analysis parameters and to get a better understanding of what
-each phase is doing. After each phase is completed, the Makefile automatically opens the
-(intermediate) analysis reports with the system's preferred application for viewing XMLs.
+each phase is doing. After each phase is completed, the Makefile displays the paths to the
+(intermediate) analysis reports.
 
 ### Analyzing Other Algorithms
 
@@ -189,7 +193,7 @@ All configurable [Makefile](./Makefile) variables are listed here:
 |     Variable     |                                                                               Description                                                                              |
 |------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `FRAMEWORK`      | Framework directory path in `cryptolib/`                                                                                                                               |
-| `SCRIPT`         | Framework bash script in `cryptolib/${FRAMEWORK}                                                                                                                       |
+| `SCRIPT`         | Framework bash script in `cryptolib/${FRAMEWORK}`                                                                                                                      |
 | `ALGO`           | Framework algorithm. For a list of algorithms, execute <br> `cd cryptolib/${FRAMEWORK}; ./${SCRIPT} -l`. <br> This will print optional key sizes in the second column. |
 | `KS`             | Key size of `ALGO`. Set `KS=`, if not needed by `ALGO`.                                                                                                                |
 | `PARALLEL`       | Set `PARALLEL=` to disable parallel execution                                                                                                                          |
@@ -513,6 +517,29 @@ The `<Specific>` element shows that `6` control-flow and `24` data leaks exhibit
 relations to the Hamming weight of the secret input, a DSA private key in this example. Since
 multiple leakage models can be tested, reports can contain multiple `<Specific>` result elements.
 
+## Graphical User Interface (GUI)
+
+DATA comes with a standalone graphical user interface (GUI) to visualize leakage results. You can
+launch the GUI with the results of the example analysis run by issuing
+
+```
+make gui
+```
+
+This exports essential framework files to the archive file `framework.zip` and starts the GUI. If
+you want to run the GUI with your own results, simply export the framework files, source the Python
+virtual environment, and start the GUI manually:
+
+```
+make export
+source analysis/.pyenv/bin/activate
+datagui
+```
+
+The GUI then asks for the `result_*.pickle` as well as the exported `framework.zip`, which is
+located in the same directory as the pickle file. For more information about the GUI check out the
+[ReadMe](https://github.com/IAIK/data-gui/README.md).
+
 ## Usage Tips
 
 The following sections contain usage recommendations that help improve your experience with DATA.
@@ -565,6 +592,13 @@ among the dropped differences. Finally, increase `NTRACE_SPE` to reveal faint re
 specific leakage tests. Note that increasing `NTRACE_DIFF` requires new measurements for phases 2
 and 3, if the additional traces in phase 1 reveal new differences.
 
+## About Us
+
+DATA is currently developed by the Institute of Applied Information Processing and Communications
+([IAIK](https://www.iaik.tugraz.at/)) at TUGraz and the Fraunhofer Institute for Applied and
+Integrated Security ([AISEC](https://www.aisec.fraunhofer.de/en.html)). The list of contributing
+authors can be found [here](./AUTHORS.md).
+
 ## Contact Us
 
 DATA is under active development and we always welcome feedback of any kind -- from bug reports to
@@ -574,8 +608,12 @@ directly to [us](mailto:data@iaik.tugraz.at).
 
 ## License
 
-This project is released under the GNU GPLv3 [License](./LICENSE). For more permissive commercial
+This project is released under the GNU GPLv3+ [License](./LICENSE). For more permissive commercial
 licenses, please contact [us](mailto:data@iaik.tugraz.at).
+
+## Changelog
+
+The version history of DATA and all corresponding changes can be found [here](./CHANGES.md).
 
 ## Publication
 

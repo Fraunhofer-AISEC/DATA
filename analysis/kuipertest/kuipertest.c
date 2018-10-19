@@ -1,6 +1,5 @@
 /************************************************************************
- * Copyright (C) 2017-2018
- * Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+ * Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,10 +18,9 @@
 /**
  * @file kuipertest.c
  * @brief Kuiper test statistic.
- * @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
- * @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
- * @license This project is released under the GNU GPLv3 License.
- * @version 0.1
+ * @license This project is released under the GNU GPLv3+ License.
+ * @author See AUTHORS file.
+ * @version 0.2
  */
 
 /***********************************************************************/
@@ -345,7 +343,7 @@ result:
 }
 
 /************************************************************************/
-
+ 
 /***
  * Define function in module.
  */
@@ -357,11 +355,39 @@ static PyMethodDef kuipertest_methods[] =
 };
 
 /**
- * Python 2.x Code
+ * Resolve compatibility issues between Python2 and Python3:
+ * http://python3porting.com/cextensions.html
  */
-PyMODINIT_FUNC initkuipertest(void)
+#if PY_MAJOR_VERSION >= 3
+    static struct PyModuleDef moduledef = {
+        PyModuleDef_HEAD_INIT,
+        "kuipertest",        /* m_name */
+        "kuipertest",        /* m_doc */
+        -1,                  /* m_size */
+        kuipertest_methods,  /* m_methods */
+        NULL,                /* m_reload */
+        NULL,                /* m_traverse */
+        NULL,                /* m_clear */
+        NULL,                /* m_free */
+    };
+#endif
+
+#if PY_MAJOR_VERSION >= 3
+# define MODULE_MAIN PyInit_kuipertest
+#else
+# define MODULE_MAIN initkuipertest
+#endif
+
+PyMODINIT_FUNC MODULE_MAIN(void)
 {
-  (void) Py_InitModule("kuipertest", kuipertest_methods);
-  import_array();
+#if PY_MAJOR_VERSION >= 3
+    PyObject *m;
+    m = PyModule_Create(&moduledef);
+    _import_array();
+    return m;
+#else
+    Py_InitModule("kuipertest", kuipertest_methods);
+    import_array();
+#endif
 }
 

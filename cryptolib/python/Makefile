@@ -24,43 +24,20 @@
 #------------------------------------------------------------------------
 
 # Project Name
-PROJ := DATA - Pin
-
-# Pin Version and Source
-VER=pin-3.7-97619-g0d0c92f4f-gcc-linux
-TAR=$(VER).tar.gz
-URL=https://software.intel.com/sites/landingpage/pintool/downloads/$(TAR)
-
-# config.mk Handling
-REPL=$(shell echo $(CURDIR) | sed 's/\//\\\//g')
+PROJ := DATA - Cryptolib PyCrypto
 
 #------------------------------------------------------------------------
 # Targets
 #------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all fetch clean
 
-all: $(TAR) pin config.mk
+all: fetch
 
-$(TAR):
-	wget $(URL)
-
-$(VER)/pin:
-	tar -xvf $(TAR)
-
-pin: $(VER)/pin
-	ln -sf $^ $@
-
-config.mk:
-	@if [ -f ../config.mk ] && grep -q PIN_ROOT ../config.mk; then \
-		sed -i 's/PIN_ROOT=.*/PIN_ROOT=$(REPL)\/$(VER)/g' ../config.mk; \
-	else \
-		echo "PIN_ROOT=$(CURDIR)/$(VER)" >> ../config.mk; \
-	fi;
+fetch:
+	@./pyenv.sh
 
 clean:
-	rm -f pin
-	rm -f $(TAR)
-	rm -rf $(VER)
+	rm -rf .pyenv27
 
 help:
 	@echo

@@ -1,6 +1,5 @@
 """
-Copyright (C) 2017-2018
-Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,23 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 ##
-# @package analysis.SymbolInfo
+# @package analysis.datastub.symbolinfo
 # @file SymbolInfo.py
 # @brief Binary symbol information.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 
 """
 *************************************************************************
 """
 
-from utils import debug
-from operator import itemgetter
-from SortedCollection import SortedCollection
+import sys
 import os.path
 import subprocess
+from operator import itemgetter
+from datastub.SortedCollection import SortedCollection
+from datastub.utils import debug
 
 """
 *************************************************************************
@@ -42,12 +41,13 @@ import subprocess
 def readelfsyms(fname, image):
     try:
         command = "objdump -f %s" % (fname)
-        output = subprocess.check_output(command.split(' '))
+        output = subprocess.check_output(command.split(' ')).decode('utf-8')
         image.dynamic = output.find("DYNAMIC") >= 0
         command = "nm -nS --defined-only %s" % (fname)
-        lines = subprocess.check_output(command.split(' ')).splitlines()
+        output = subprocess.check_output(command.split(' ')).decode('utf-8')
+        lines = output.splitlines()
     except:
-        debug(0, "Exception")
+        debug(0, "Exception reading ELF symbols: %s", (sys.exc_info()))
         return None
     
     if lines is None or len(lines) == 0:
@@ -87,13 +87,17 @@ class SymbolInfo:
         
     @classmethod
     def open(cls, fname):
-        assert(cls.instance is None)
+        if cls.instance:
+            cls.close()
         if fname is not None:
             cls.instance = SymbolInfo(fname)
+            
+    @classmethod
+    def close(cls):
+        cls.instance = None
     
     @classmethod
     def isopen(cls):
-        assert(cls.instance is not None)
         return cls.instance is not None
 
     def insert_update_symbol(self, symbol):
@@ -206,7 +210,6 @@ class Symbol:
     def setname(self, name):
         if name is None:
             return
-        assert(isinstance(name, str))
         if len(name) == 0:
             return
         if not name in self.name:

@@ -16,9 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 ##
-# @package analysis.leakage_models.sym_byte_value
-# @file sym_byte_value.py
-# @brief Specific leakage test callback (Symmetric key byte-wise)
+# @package analysis.datastub.ipinfoshort
+# @file IpInfoShort.py
+# @brief Class for storing assembly and source code infos.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
 # @version 0.2
@@ -27,13 +27,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 *************************************************************************
 """
 
-import numpy
+IP_INFO_FILE = u'ip_info.pickle'
 
-"""
-Input: Symmetric keys -- 2D list/array, one key per row
-Output: Values of key bytes -- 2D numpy array, one key per row
-"""
-def specific_leakage_callback(inputs):
-    blist = [bytearray.fromhex(inputs[i].decode('utf-8')) for i in range(0, len(inputs))]
-    iconv = numpy.asarray(blist, dtype=numpy.uint8)
-    return (iconv)
+class IpInfoShort:
+    def __init__(self, asm_file, asm_line_nr, src_file, src_line_nr):
+        self.asm_file = asm_file
+        self.asm_line_nr = asm_line_nr
+        self.src_file = src_file
+        self.src_line_nr = src_line_nr
+

@@ -1,7 +1,8 @@
 config.mk
+.setup
 *.pyc
 analysis/.pyenv/
-analysis/build/
+analysis/kuipertest/build/
 cryptolib/common/cleanenv
 cryptolib/common/cleanenv.txt
 cryptolib/openssl/lastresults

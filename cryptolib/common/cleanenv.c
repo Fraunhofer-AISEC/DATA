@@ -1,6 +1,5 @@
 /************************************************************************
- * Copyright (C) 2017-2018
- * Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+ * Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,10 +18,9 @@
 /**
  * @file cleanenv.c
  * @brief Provides a clean execution environment.
- * @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
- * @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
- * @license This project is released under the GNU GPLv3 License.
- * @version 0.1
+ * @license This project is released under the GNU GPLv3+ License.
+ * @author See AUTHORS file.
+ * @version 0.2
  */
 
 /***********************************************************************/

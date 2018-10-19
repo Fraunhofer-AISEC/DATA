@@ -1,6 +1,5 @@
 """
-Copyright (C) 2017-2018
-Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,23 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 ##
-# @package analysis.printer
+# @package analysis.datastub.printer
 # @file printer.py
 # @brief Prints and formats internal data types and structures.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 
 """
 *************************************************************************
 """
 
 import struct
-from utils import debug
-from SymbolInfo import SymbolInfo
-from leaks import LeakCounter,CallHistory,sorted_keys,CFLeak,DataLeak,\
-CFLeakEntry,DataLeakEntry,LeakStatus,LibHierarchy,Library,FunctionLeak,Type
+from datastub.utils import debug
+from datastub.SymbolInfo import SymbolInfo
+from datastub.leaks import LeakCounter,CallHistory,sorted_keys,CFLeak,\
+DataLeak,CFLeakEntry,DataLeakEntry,LeakStatus,LibHierarchy,Library,\
+FunctionLeak,Type
 
 """
 *************************************************************************
@@ -133,11 +132,11 @@ class XmlLeakPrinter:
                 for sp in combinedset:
                     self.startNode("Specific")
                     self.doprint_line("leakage-model: %s" % str(sp))
-                    if obj.cflow_leaks_specific.has_key(sp):
+                    if sp in obj.cflow_leaks_specific:
                         self.doprint_summary("cflow", obj.cflow_leaks_specific[sp])
                     else:
                         self.doprint_summary("cflow", 0)
-                    if obj.data_leaks_specific.has_key(sp):
+                    if sp in obj.data_leaks_specific:
                         self.doprint_summary("data", obj.data_leaks_specific[sp])
                     else:
                         self.doprint_summary("data", 0)

@@ -1,6 +1,5 @@
 """
-Copyright (C) 2017-2018
-Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,13 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 ##
-# @package analysis.kuipertest_setup
-# @file kuipertest_setup.py
+# @package analysis.kuipertest.setup
+# @file setup.py
 # @brief Script to compile kuipertest.c for a specific machine.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 
 """
 *************************************************************************
@@ -34,8 +32,8 @@ import numpy
 
 """
 *************************************************************************
-python kuipertest_setup.py build
-python kuipertest_setup.py install
+python setup.py build
+python setup.py install
 *************************************************************************
 """
 
@@ -44,7 +42,15 @@ kuipertest = Extension('kuipertest',
                        include_dirs=[numpy.get_include()])
 
 setup (name = 'kuipertest',
-       version = '0.1',
+       version = '0.2',
+       license='GPLv3+',
+       author='TUGraz IAIK, Fraunhofer AISEC',
+       author_email='data@iaik.tugraz.at',
+       url='https://github.com/Fraunhofer-AISEC/DATA',
        description = 'Calculate Kuiper test statistic.',
+       classifiers=[
+         "Programming Language :: Python :: 2",
+         "Programming Language :: Python :: 3",
+         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",],
        ext_modules = [kuipertest])
 

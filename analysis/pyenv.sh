@@ -1,8 +1,7 @@
 #!/bin/bash
 
 #########################################################################
-# Copyright (C) 2017-2018
-# Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+# Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,31 +18,35 @@
 #########################################################################
 # @file pyenv.sh
 # @brief Sets up a Python virtual environment.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 #########################################################################
 
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
 ENV=.pyenv
+set -e
+DATAGUI=../data-gui/
 
 #------------------------------------------------------------------------
 # Create Environment
 #------------------------------------------------------------------------
 if ! [[ -f ${ENV}/.done ]]; then
-  LOAD_PYENV_INTERPRETER=/usr/bin/python2.7
+  LOAD_PYENV_INTERPRETER=/usr/bin/python3.5
   virtualenv -p ${LOAD_PYENV_INTERPRETER} ${ENV} || exit 1
   source ${ENV}/bin/activate
+  pip install -U pip
   pip install -U setuptools
-  pip install click cffi ipaddress enum34 numpy scipy scikit-learn cryptography pycrypto || exit 1
-  python kuipertest_setup.py build install || exit 1
+  pip install click cffi ipaddress enum34 numpy scipy scikit-learn cryptography fs || exit 1
+  pushd kuipertest
+  python setup.py build install || exit 1
+  popd
+  if [[ -f "${DATAGUI}/setup.py" ]]; then
+    pip install -e "${DATAGUI}"
+  fi
   touch ${ENV}/.done
-else
-  echo "Skipping virtualenv setup"
 fi
 source ${ENV}/bin/activate
-echo "Done."
 

@@ -1,6 +1,5 @@
 """
-Copyright (C) 2017-2018
-Samuel Weiser (IAIK TU Graz) and Andreas Zankl (Fraunhofer AISEC)
+Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -17,13 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 ##
-# @package analysis.leaks
+# @package analysis.datastub.leaks
 # @file leaks.py
 # @brief Everything related to control-flow and data leaks.
-# @author Samuel Weiser <samuel.weiser@iaik.tugraz.at>
-# @author Andreas Zankl <andreas.zankl@aisec.fraunhofer.de>
-# @license This project is released under the GNU GPLv3 License.
-# @version 0.1
+# @license This project is released under the GNU GPLv3+ License.
+# @author See AUTHORS file.
+# @version 0.2
 
 """
 *************************************************************************
@@ -31,12 +29,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import sys
 import os
-from enum import Enum
-from Queue import Queue
-from SymbolInfo import Image,Symbol,SymbolInfo
-from utils import debug,sorted_keys,debuglevel
 import struct
 import copy
+from enum import Enum
+from queue import Queue
+from datastub.SymbolInfo import Image,Symbol,SymbolInfo
+from datastub.utils import debug,sorted_keys,debuglevel
 
 """
 *************************************************************************
@@ -52,32 +50,34 @@ CFLEAK = "leak"
 *************************************************************************
 """
 
+TYPE_A = 0
+TYPE_B = 1
+TYPE_C = 2
+TYPE_D = 3
+
+MASK_NONE = 0
+MASK_BRANCH = 4
+MASK_HEAP = 8
+MASK_LEAK = 16
+
 class Type(Enum):
-    A = 0
-    B = 1
-    C = 2
-    D = 3
- 
-    MASK_NONE = 0
-    READ  = MASK_NONE | A
-    WRITE = MASK_NONE | B
 
-    MASK_BRANCH = 4
-    BRANCH     = MASK_BRANCH | A
-    FUNC_ENTRY = MASK_BRANCH | B
-    FUNC_EXIT  = MASK_BRANCH | C
-    FUNC_BBL   = MASK_BRANCH | D
-  
-    MASK_HEAP = 8
-    HREAD  = MASK_HEAP | READ
-    HWRITE = MASK_HEAP | WRITE
-    HALLOC = MASK_HEAP | C
-    HFREE  = MASK_HEAP | D
+    READ  = MASK_NONE | TYPE_A
+    WRITE = MASK_NONE | TYPE_B
 
-    MASK_LEAK = 16
-    DLEAK  = MASK_LEAK | A
-    CFLEAK = MASK_LEAK | B
-  
+    BRANCH     = MASK_BRANCH | TYPE_A
+    FUNC_ENTRY = MASK_BRANCH | TYPE_B
+    FUNC_EXIT  = MASK_BRANCH | TYPE_C
+    FUNC_BBL   = MASK_BRANCH | TYPE_D
+
+    HREAD  = MASK_HEAP | TYPE_A
+    HWRITE = MASK_HEAP | TYPE_B
+    HALLOC = MASK_HEAP | TYPE_C
+    HFREE  = MASK_HEAP | TYPE_D
+
+    DLEAK  = MASK_LEAK | TYPE_A
+    CFLEAK = MASK_LEAK | TYPE_B
+
     @classmethod
     def isbranch(cls, e):
         return (e.type & cls.BRANCH.value) == cls.BRANCH.value
@@ -274,13 +274,13 @@ class MergeMap:
             debug(0, newmap.__class__)
             debug(0, "Wrong class instance: %s vs %s", (str(newmap.__class__), str(self.mytype)))
         assert(isinstance(newmap, self.mytype))
-        if not self.mymap.has_key(newmap):
+        if not newmap in self.mymap:
             self.mymap[newmap] = newmap
         else:
             self.mymap[newmap].merge(newmap)
     
     def has_key(self, key):
-        return self.mymap.has_key(key)
+        return key in self.mymap
     
     def keys(self):
         return self.mymap.keys()
@@ -491,10 +491,11 @@ class NSLeak(object):
         self.isleak = isleak
     
     def __lt__(self, other):
-        if (self.nstype == other.nstype) and \
-           (self.address is not None) and \
-           (other.address is not None):
-            return self.address < other.address
+        if ((self.nstype in [NSPType.Type1a, NSPType.Type1b]) and \
+           (other.nstype in [NSPType.Type1a, NSPType.Type1b])) or \
+           ((self.nstype in [NSPType.Type2]) and \
+           (other.nstype in [NSPType.Type2])):
+            return self.teststat < other.teststat
         else:
             return self.nstype < other.nstype
 
@@ -543,10 +544,15 @@ class SPLeak(object):
         self.confidence = conf
         self.isleak = not ind
         self.target = target
-        
+
     def __lt__(self, other):
         if self.sptype == other.sptype:
-            return self.property < other.property
+            if self.property == other.property:
+                srdc = 0.0 if self.rdc is None else self.rdc
+                ordc = 0.0 if other.rdc is None else other.rdc
+                return srdc < ordc
+            else:
+                return self.property < other.property
         else:
             return self.sptype < other.sptype
 
@@ -614,6 +620,7 @@ class Leak:
         self.ip = ip
         self.status = LeakStatus()
         self.evidence = [] # Evidence is not merged but chained in a list of EvidenceEntries
+        self.meta = None
 
     def clone_collapsed(self, mask, collapse_cfleaks = False):
         clone = self.__class__(self.ip & mask)
@@ -836,8 +843,8 @@ class CallHistory:
                 debug(5, "Handling ctxt %08x--%08x", (ctxt.caller, ctxt.callee))
                  
             if nocreate:
-                assert(self.children.has_key(ctxt))
-            elif not self.children.has_key(ctxt):
+                assert(ctxt in self.children)
+            elif not ctxt in self.children:
                 self.children[ctxt] = CallHistory(ctxt, self)
             self.children[ctxt].report_leak(callstack[1:], leak)
       
@@ -894,7 +901,7 @@ class CallHistory:
                 for ci in callstack:
                     debug(3, "%08x--%08x", (ci.caller, ci.callee))
             
-            if self.children.has_key(ctxt):
+            if ctxt in self.children:
                 return self.children[ctxt].has_leak(callstack[1:], leak)
 
 """
@@ -922,7 +929,7 @@ class LeakCounter:
         self.cflow_diff_total_untested += other.cflow_diff_total_untested
         self.cflow_leaks_generic += other.cflow_leaks_generic
         for sp in other.cflow_leaks_specific.keys():
-            if self.cflow_leaks_specific.has_key(sp):
+            if sp in self.cflow_leaks_specific:
                 self.cflow_leaks_specific[sp] += other.cflow_leaks_specific[sp]
             else:
                 self.cflow_leaks_specific[sp] = other.cflow_leaks_specific[sp]
@@ -932,7 +939,7 @@ class LeakCounter:
         self.data_diff_total_untested += other.data_diff_total_untested
         self.data_leaks_generic += other.data_leaks_generic
         for sp in other.data_leaks_specific.keys():
-            if self.data_leaks_specific.has_key(sp):
+            if sp in self.data_leaks_specific:
                 self.data_leaks_specific[sp] += other.data_leaks_specific[sp]
             else:
                 self.data_leaks_specific[sp] = other.data_leaks_specific[sp]
@@ -968,7 +975,7 @@ class LeakCounter:
                         continue
                     if sp.target in counted_targets:
                         continue
-                    if not counter.data_leaks_specific.has_key(sp.target):
+                    if not sp.target in counter.data_leaks_specific:
                         counter.data_leaks_specific[sp.target] = 1
                     else:
                         counter.data_leaks_specific[sp.target] += 1
@@ -1003,7 +1010,7 @@ class LeakCounter:
                         continue
                     if sp.target in counted_targets:
                         continue
-                    if not counter.cflow_leaks_specific.has_key(sp.target):
+                    if not sp.target in counter.cflow_leaks_specific:
                         counter.cflow_leaks_specific[sp.target] = 1
                     else:
                         counter.cflow_leaks_specific[sp.target] += 1
@@ -1120,7 +1127,7 @@ class TraceQueue:
     def refill_chunk(self):
         assert(self.chunk is not None)
         assert(len(self.chunk) % bs == 0)
-        cblocks = len(self.chunk)/bs
+        cblocks = int(len(self.chunk)/bs)
         unpacked = struct.unpack("<" + "BQQ" * cblocks, self.chunk)
         for i in range(0, cblocks):
             e = Entry(unpacked[i*3:(i+1)*3])
