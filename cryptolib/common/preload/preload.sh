@@ -30,8 +30,16 @@ else
   # (re)generate clean environment file
   rm -rf "${CLEANENVFILE}"
   echo "LD_BIND_NOW=1" >> "${CLEANENVFILE}"
-  if [[ -e libc.so ]]; then
-    echo "LD_PRELOAD=${PRELOAD}/libc.so" >> "${CLEANENVFILE}"
-  fi
+  # Link all shared libraries for pre-loading
+  PRELOAD_LIBS=""
+  for f in *.so; do
+    if [[ -e "$f" ]]; then
+      if [[ "${PRELOAD_LIBS}" == "" ]]; then
+        PRELOAD_LIBS="${PRELOAD}/$f"
+      else
+        PRELOAD_LIBS="${PRELOAD_LIBS}:${PRELOAD}/$f"
+      fi
+    fi
+  done
+  echo "LD_PRELOAD=${PRELOAD_LIBS}" >> "${CLEANENVFILE}"
 fi
-

@@ -34,6 +34,7 @@ import _pickle as pickle
 from datastub.DataFS import DataFS
 from datastub.IpInfoShort import IpInfoShort,IP_INFO_FILE
 from datastub.SymbolInfo import SymbolInfo
+from datastub.utils import debug
 
 """
 *************************************************************************
@@ -69,10 +70,11 @@ def getSourceFileInfo(addr, binary_path):
         if "??" == source_file_path:
             raise subprocess.CalledProcessError
     except:
-        print("[SRC] unavailable for " + addr + " in " + binary_path)
+        debug(2, "[SRC] unavailable for %s in %s", (addr, binary_path))
         return None, 0
-    if "discriminator" in source_line_number:
-        source_line_number = source_line_number.split()[0]
+    # Sometimes, source line number is followed by additional text, e.g. "/path/to/file.c:350 (discriminator 2)"
+    # Strip this away
+    source_line_number = source_line_number.split()[0]
     return source_file_path, int(source_line_number)
 
 """
@@ -109,14 +111,14 @@ def export_ip(ip, datafs, imgmap, info_map):
             datafs.add_file(bin_file_path)
             asm_dump = ""
             try:
-                print("[ASM] objdump {}".format(bin_file_path))
+                debug(1, "[ASM] objdump %s", (str(bin_file_path)))
                 # asm_dump = subprocess.check_output(["objdump", "-Dj", ".text", bin_file_path], universal_newlines=True)
                 with datafs.create_file(asm_file_path) as f:
                     subprocess.call(["objdump", "-d", bin_file_path], universal_newlines=True, stdout=f)
                     f.seek(0)
                     asm_dump = f.read().decode('utf-8')
             except subprocess.CalledProcessError as err:
-                print("error_code: {}".format(err.returncode))
+                debug(0, "[ASM] objdump %s failed with error_code: %s", (str(bin_file_path), str(err.returncode)))
                 asm_dump = None
             imgmap[bin_file_path] = asm_dump
         if not ip in info_map:
@@ -124,11 +126,16 @@ def export_ip(ip, datafs, imgmap, info_map):
             asm_dump = imgmap[bin_file_path]
             asm_line_nr = getAsmFileInfo(addr, asm_dump)
             if asm_line_nr < 0:
-                print("[ASM] unavailable for " + hex(addr) + " in " + bin_file_path)
+                debug(1, "[ASM] unavailable for %s in %s", (hex(addr), bin_file_path))
             # Search for leak in source code
             src_file_path, src_line_nr = getSourceFileInfo(hex(addr), bin_file_path)
             if src_file_path is not None and os.path.exists(src_file_path):
                 datafs.add_file(src_file_path)
+            else:
+                if src_file_path is None:
+                    debug(1, "[SRC] unavailable for %s in %s", (hex(addr), bin_file_path))
+                else:
+                    debug(1, "[SRC] source file %s missing", (src_file_path))
             ip_info = IpInfoShort(asm_file_path, asm_line_nr, src_file_path, src_line_nr)
             info_map[ip] = ip_info
 

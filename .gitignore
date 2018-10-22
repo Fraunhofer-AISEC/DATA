@@ -5,9 +5,7 @@ analysis/.pyenv/
 analysis/kuipertest/build/
 cryptolib/common/cleanenv
 cryptolib/common/cleanenv.txt
-cryptolib/openssl/lastresults
-cryptolib/openssl/openssl/
-cryptolib/python/lastresults
+lastresults
 pin/pin
 pin/*.tar.gz
 pin/pin-*/

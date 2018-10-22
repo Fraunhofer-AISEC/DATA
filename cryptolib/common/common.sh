@@ -282,7 +282,7 @@ function init_for_run {
     new_folder
   fi
   pushd "${PRELOAD}" &> /dev/null
-  source glibc_bind.sh
+  source preload.sh
   popd &> /dev/null
   cb_prepare_framework
 }
@@ -468,6 +468,12 @@ function dryrun_phase1 {
   CURCMD=$(cb_run_command ${KEYFILE})
   log_info "Dry-run: cb_run_command returned '${CURCMD}'"
   log_info "Dry-run: Executing '${CURCMD}'"
+
+  if [[ ! -f "${CLEANENVFILE}" ]]; then
+    log_error "Environment file ${CLEANENVFILE} missing"
+  fi
+  cp "${CLEANENVFILE}" ${ENVFILE}
+
   execute_clean "${CURCMD}"
 
   log_info "Dry-run: Executing cb_post_run"
