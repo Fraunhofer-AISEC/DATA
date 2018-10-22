@@ -71,7 +71,7 @@ setup: .setup
 	echo "DATA_ROOT=$(PWD)" > config.mk
 	echo "RESULTDIR=$(PWD)/results" >> config.mk
 	git submodule init
-	git submodule update --remote
+	git submodule update --recursive
 	touch .setup
 
 all: setup

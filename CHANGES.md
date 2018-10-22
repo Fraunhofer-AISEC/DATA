@@ -15,11 +15,17 @@ This files contains all notable changes for each version of DATA.
   [here](https://github.com/IAIK/data-gui).
 - Command to start GUI with example analysis (`make gui`).
 - Changelog to track versions and changes.
+- README.md for PyCrypto.
 
 ### Changed
 
 - Framework now requires Python v3.5.
 - Authors are now listed in seperate AUTHORS.md file.
+
+### Fixed
+
+- Created leak objects with invalid RDC result under certain
+  circumstances.
 
 ## v0.1
 
