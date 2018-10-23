@@ -12,15 +12,20 @@ This files contains all notable changes for each version of DATA.
 ### Added
 
 - Support for the graphical user interface (GUI) available
-  [here](https://github.com/IAIK/data-gui).
+  [here](https://github.com/IAIK/data-gui). Note that DATA
+  v0.2 is compatible with DATA GUI v1.1, but not necessarily
+  other versions.
 - Command to start GUI with example analysis (`make gui`).
-- Changelog to track versions and changes.
+- Template directory to simplify adding new cryptolibs.
+- README.md that explains how to preload shared libraries.
 - README.md for PyCrypto.
+- Changelog to track versions and changes.
 
 ### Changed
 
-- Framework now requires Python v3.5.
-- Authors are now listed in seperate AUTHORS.md file.
+- DATA framework now requires Python v3.5.
+- Authors are now listed in separate AUTHORS.md file.
+- Improved support for preloading shared libraries.
 
 ### Fixed
 
