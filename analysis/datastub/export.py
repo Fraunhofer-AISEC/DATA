@@ -30,7 +30,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import os
 import gzip
 import subprocess
-import _pickle as pickle
+import pickle
 from datastub.DataFS import DataFS
 from datastub.IpInfoShort import IpInfoShort,IP_INFO_FILE
 from datastub.SymbolInfo import SymbolInfo
@@ -48,9 +48,40 @@ def storepickle(pfile, leaks):
 *************************************************************************
 """
 
+class MyUnpickler(pickle.Unpickler):
+
+    def find_class(self, module, name):
+        result = None
+        # These files have been moved into 'datastub' package
+        mapper = ["leaks", "IpInfoShort", "DataFS", "export", "printer", "SortedCollection", "SymbolInfo"]
+        if module in mapper:
+            module = "datastub." + module
+        try:
+            result = super().find_class(module, name)
+        except Exception as e:
+            debug(0, "Error unpickling module %s, object %s" % (module, name))
+            debug(1, "Exception: " + str(e))
+            raise e
+        return result
+
+    def load_global(self):
+        module = self.readline()[:-1].decode("utf-8")
+        print("Module: " + module)
+        name = self.readline()[:-1].decode("utf-8")
+        print("Name: " + module)
+        klass = self.find_class(module, name)
+        print("Class: " + klass)
+        pdb.set_trace()
+        self.append(klass)
+
+"""
+*************************************************************************
+"""
+
 def loadpickle(pfile):
     with gzip.GzipFile(pfile, 'rb') as f:
-        new = pickle.load(f, encoding='latin1')
+        unp = MyUnpickler(f, encoding='latin1')
+        new = unp.load()
     return new
 
 """
@@ -72,9 +103,8 @@ def getSourceFileInfo(addr, binary_path):
     except:
         debug(2, "[SRC] unavailable for %s in %s", (addr, binary_path))
         return None, 0
-    # Sometimes, source line number is followed by additional text, e.g. "/path/to/file.c:350 (discriminator 2)"
-    # Strip this away
-    source_line_number = source_line_number.split()[0]
+    if "discriminator" in source_line_number:
+        source_line_number = source_line_number.split()[0]
     return source_file_path, int(source_line_number)
 
 """

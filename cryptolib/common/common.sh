@@ -359,6 +359,7 @@ function execute_noerror {
 
 function execute_clean {
   log_verbose "[$BASHPID] RUNNING ${CLEANENV} ${ENVFILE} $*"
+  touch "${ENVFILE}"
   /usr/bin/time -f "system=%S\nuser=%U\ntotal=%e\nmemory=%M" -a -o "${LOGFILE}" "${CLEANENV}" ${ENVFILE} $* &>> ${LOGFILE}
   RES=$?
   log_verbose "[$BASHPID] run_status=$RES"

@@ -16,8 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #########################################################################
-# @file asymmetric.sh
-# @brief Test script for OpenSSL asymmetric ciphers.
+# @file symmetric.sh
+# @brief Example test script.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
 # @version 0.2
@@ -28,13 +28,13 @@
 #------------------------------------------------------------------------
 
 # The name of the framework. Do not use spaces or special characters.
-export FRAMEWORK=openssl
+export FRAMEWORK=example
 
 # The file containing all supported algorithms
-export TARGETFILE=asymmetric.txt
+export TARGETFILE=symmetric.txt
 
 # The number of measurements for difference detection (phase1)
-export NTRACE_DIFF=5
+export NTRACE_DIFF=3
 
 # The number of constant keys for generic tests (phase2)
 # Make sure that NREPS_GEN <= NTRACE_DIFF
@@ -51,7 +51,7 @@ export NTRACE_SPE=200
 #                  symbol must exist, otherwise this will yield empty traces!
 #  -heap           Trace heap allocations and replace heap addresses with 
 #                  relative offset
-export PINTOOL_ARGS=" -heap"
+export PINTOOL_ARGS=""
 
 #########################################################################
 # DO NOT CHANGE: Preparing DATA
@@ -76,8 +76,11 @@ source "${COMMON}common.sh"
 # Available for cb_pre_run, cb_run_command, cb_post_run
 #   $ENVFILE
 
-export LD_LIBRARY_PATH=${PWD}/openssl
-export OPENSSL=${PWD}/openssl/apps/openssl
+export BINARY=${PWD}/main
+
+# The leakage model of phase 3.
+# See ${ANALYSISDIR}/leakage_models for all options.
+export SPECIFIC_LEAKAGE_CALLBACK=${ANALYSISDIR}/leakage_models/sym_byte_value.py
 
 # DATA callback for setting up the framework to analyze. This callback
 # is invoked once inside the current directory before analysis starts.
@@ -91,25 +94,9 @@ function cb_prepare_framework {
 # your algorithm and store the generated key inside a file named $2.
 #
 # $1 ... key file name
-# $ALGO ... rsa/dsa/ec
-# $CURVE ... for ec only. Curves listed in ec.txt
 function cb_genkey {
-  if [[ "${ALGO}" == "rsa" ]]; then
-    ${OPENSSL} genpkey -algorithm "${ALGO}" -out "$1" &> /dev/null
-    RES=$((RES + $?))
-  elif [[ "${ALGO}" == "ec" ]]; then
-    ${OPENSSL} genpkey -genparam -algorithm "${ALGO}" -pkeyopt "ec_paramgen_curve:${CURVE}" -out "${ALGO}.param" &> /dev/null
-    RES=$((RES + $?))
-    ${OPENSSL} genpkey -paramfile "${ALGO}.param" -out "$1" &> /dev/null
-    RES=$((RES + $?))
-  elif [[ "${ALGO}" == "dsa" ]]; then
-    ${OPENSSL} genpkey -genparam -algorithm "${ALGO}" -pkeyopt "dsa_paramgen_q_bits:256" -out "${ALGO}.param" &> /dev/null
-    RES=$((RES + $?))
-    ${OPENSSL} genpkey -paramfile "${ALGO}.param" -out "$1" &> /dev/null
-    RES=$((RES + $?))
-  else
-    pass
-  fi
+  dd if=/dev/urandom of="$1" bs=1 count="${KEYBYTES}" &> /dev/null
+  RES=$((RES + $?))
 }
 
 # DATA callback for custom commands that are executed immediately before 
@@ -120,13 +107,6 @@ function cb_genkey {
 #
 # $1 ... key file name
 function cb_pre_run {
-  # Create input file
-  # RSA input must match exactly size of modulus N.
-  # Hence, we use sha1 instead, which is 20 bytes.
-  echo -n "00000000000000000000" > input.bin
-  
-  # Update environment to use our own OpenSSL compilation
-  echo "LD_LIBRARY_PATH=${BASEDIR}/openssl" >> "${ENVFILE}"
   log_verbose "running with key $1"
 }
 
@@ -138,7 +118,7 @@ function cb_pre_run {
 #
 # $1 ... key file name
 function cb_run_command {
-  echo "${OPENSSL} pkeyutl -sign -in input.bin -out output.bin -inkey $1 -pkeyopt digest:sha1"
+  echo "${BINARY} $1"
 }
 
 # DATA callback for custom commands that are executed immediately after 
@@ -147,18 +127,7 @@ function cb_run_command {
 #
 # $1 ... key file name
 function cb_post_run {
-  rm -f "$1.A" "$1.B" input.bin output.bin
-}
-
-# Sets callback for specific leakage test
-function update_leakage_model {
-  if [[ "${ALGO}" == "rsa" ]]; then
-    export SPECIFIC_LEAKAGE_CALLBACK=${ANALYSISDIR}/leakage_models/rsa_privkey_hw.py
-  elif  [[ "${ALGO}" == "dsa" ]]; then
-    export SPECIFIC_LEAKAGE_CALLBACK=${ANALYSISDIR}/leakage_models/dsa_privkey_hw.py
-  elif  [[ "${ALGO}" == "ec" ]]; then
-    export SPECIFIC_LEAKAGE_CALLBACK=${ANALYSISDIR}/leakage_models/ecdsa_privkey_hw.py
-  fi
+  :
 }
 
 # DATA callback for testing an individual algorithm. It shall parse
@@ -169,15 +138,10 @@ function update_leakage_model {
 # $* ... algorithm string from the commandline
 function cb_run_single {
   ALGO=$1
-  CURVE=
-  if [[ "${ALGO}" == "ec" ]]; then
-    CURVE=$2
-    SHIFT=$((SHIFT+1))
-  fi
-  update_leakage_model
-
-  # Run DATA on $FRAMEWORK/$ALGO/$CURVE
-  DATA_run "${CURVE}"
+  KEYBITS=$2
+  KEYBYTES=$(( KEYBITS / 8 ))
+  DATA_run
+  SHIFT=$((SHIFT+1))
 }
 
 #########################################################################

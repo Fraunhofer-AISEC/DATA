@@ -55,28 +55,29 @@ TYPE_B = 1
 TYPE_C = 2
 TYPE_D = 3
 
-MASK_NONE = 0
-MASK_BRANCH = 4
-MASK_HEAP = 8
-MASK_LEAK = 16
+class MaskType(Enum):
+    NONE = 0
+    BRANCH = 4
+    HEAP = 8
+    LEAK = 16
 
 class Type(Enum):
 
-    READ  = MASK_NONE | TYPE_A
-    WRITE = MASK_NONE | TYPE_B
+    READ  = MaskType.NONE.value | TYPE_A
+    WRITE = MaskType.NONE.value | TYPE_B
 
-    BRANCH     = MASK_BRANCH | TYPE_A
-    FUNC_ENTRY = MASK_BRANCH | TYPE_B
-    FUNC_EXIT  = MASK_BRANCH | TYPE_C
-    FUNC_BBL   = MASK_BRANCH | TYPE_D
+    BRANCH     = MaskType.BRANCH.value | TYPE_A
+    FUNC_ENTRY = MaskType.BRANCH.value | TYPE_B
+    FUNC_EXIT  = MaskType.BRANCH.value | TYPE_C
+    FUNC_BBL   = MaskType.BRANCH.value | TYPE_D
 
-    HREAD  = MASK_HEAP | TYPE_A
-    HWRITE = MASK_HEAP | TYPE_B
-    HALLOC = MASK_HEAP | TYPE_C
-    HFREE  = MASK_HEAP | TYPE_D
+    HREAD  = MaskType.HEAP.value | TYPE_A
+    HWRITE = MaskType.HEAP.value | TYPE_B
+    HALLOC = MaskType.HEAP.value | TYPE_C
+    HFREE  = MaskType.HEAP.value | TYPE_D
 
-    DLEAK  = MASK_LEAK | TYPE_A
-    CFLEAK = MASK_LEAK | TYPE_B
+    DLEAK  = MaskType.LEAK.value | TYPE_A
+    CFLEAK = MaskType.LEAK.value | TYPE_B
 
     @classmethod
     def isbranch(cls, e):

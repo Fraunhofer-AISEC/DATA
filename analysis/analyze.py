@@ -28,7 +28,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 *************************************************************************
 """
-
 import sys
 import os
 import click
@@ -46,7 +45,7 @@ from datastub.export import storepickle,loadpickle,export_leaks
 from datastub.leaks import FUNC_ENTRY_BIN,FUNC_EXIT_BIN,bs,CallHistory,\
 CallStack,CFLeak,CFLeakEntry,Context,DataLeak,DataLeakEntry,Entry,\
 EvidenceEntry,EvidenceSource, Lookahead,MergePoint,NSLeak,NSPType,\
-SPLeak,TraceQueue,Type
+SPLeak,TraceQueue,Type,MaskType
 
 """
 *************************************************************************
@@ -262,10 +261,10 @@ def iterate_queue(files, fast = True):
             if Type(e2.type) in (Type.READ, Type.WRITE, Type.HREAD, Type.HWRITE):
                 # Mixture of heap and non-heap read/write. Maybe, heap tracking is imprecise
                 # We require that both elements are either (h)read or (h)write
-                assert((e1.type | Type.MASK_HEAP.value) == (e2.type | Type.MASK_HEAP.value))
-                if (e1.type | Type.MASK_HEAP.value) > 0:
+                assert((e1.type | MaskType.HEAP.value) == (e2.type | MaskType.HEAP.value))
+                if (e1.type | MaskType.HEAP.value) > 0:
                     e1.data &= 0x00000000FFFFFFFF
-                if (e2.type | Type.MASK_HEAP.value) > 0:
+                if (e2.type | MaskType.HEAP.value) > 0:
                     e2.data &= 0x00000000FFFFFFFF
                 report_dataleak(queues[0].callstack, e1, e2)
             else:

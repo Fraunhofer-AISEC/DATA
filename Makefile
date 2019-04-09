@@ -71,7 +71,7 @@ setup: .setup
 	echo "DATA_ROOT=$(PWD)" > config.mk
 	echo "RESULTDIR=$(PWD)/results" >> config.mk
 	git submodule init
-	git submodule update --recursive
+	git submodule update --remote
 	touch .setup
 
 all: setup
@@ -103,6 +103,8 @@ export: setup
 
 gui:	export
 	@source analysis/.pyenv/bin/activate ;\
+	datagui cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/result_phase3.pickle cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/framework.zip || \
+	datagui cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/result_phase2.pickle cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/framework.zip || \
 	datagui cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/result_phase1.pickle cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/framework.zip &
 
 clean:

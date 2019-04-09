@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
   FILE* fh = fopen(argv[1], "r");
   if (!fh) {
     free(line);
-    perror("fopen");
+    perror("cleanenv: fopen failed!");
     return (-1);
   }
   while (fgets(line, line_size, fh) != NULL) {
@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
         }
       }
       fclose(fh);
-      fprintf(stderr, "Too many environment variables!");
+      fprintf(stderr, "cleanenv: too many environment variables!");
       return (-2);
     }
     newenv[idx] = NULL;
@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
 
   /* call execve */
   if (execve(setarch, execveargs, newenv)) {
-    perror("execve");
+    perror("cleanenv: execve failed");
     return -3;
   }
   return (0);
