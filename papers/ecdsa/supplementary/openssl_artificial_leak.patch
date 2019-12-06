@@ -1,0 +1,27 @@
+diff --git a/crypto/ec/ec_mult.c b/crypto/ec/ec_mult.c
+index 7e1b3650..932c12f9 100644
+--- a/crypto/ec/ec_mult.c
++++ b/crypto/ec/ec_mult.c
+@@ -348,10 +348,13 @@ int ec_scalar_mul_ladder(const EC_GROUP *group, EC_POINT *r,
+      *
+      * This is XOR. pbit tracks the previous bit of k.
+      */
+-
++    volatile int cnt = 0;
+     for (i = cardinality_bits - 1; i >= 0; i--) {
+         kbit = BN_is_bit_set(k, i) ^ pbit;
+         EC_POINT_CSWAP(kbit, r, s, group_top, Z_is_one);
++        if (BN_is_bit_set(k, i)) {
++          cnt++;
++        }
+ 
+         /* Perform a single step of the Montgomery ladder */
+         if (!ec_point_ladder_step(group, r, s, p, ctx)) {
+@@ -364,6 +367,7 @@ int ec_scalar_mul_ladder(const EC_GROUP *group, EC_POINT *r,
+          */
+         pbit ^= kbit;
+     }
++    (void)cnt;
+     /* one final cswap to move the right value into r */
+     EC_POINT_CSWAP(pbit, r, s, group_top, Z_is_one);
+ #undef EC_POINT_CSWAP

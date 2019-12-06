@@ -20,36 +20,53 @@
 # @brief Main framework script.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
 
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
 
-# Custom options
-source "../../config.mk"
+if [[ "${DATA_ROOT}" == "" ]]; then
+  echo "DATA not loaded! 'source data.sh' first"
+  return 1
+fi
 
-# Ensure multiple invocations of pin to have the same memory layout
-export PINFLAGS="-ifeellucky -restrict_memory 0x50000000:0x70000000 -pin_memory_range 0x100000000:0xF00000000"
+# DEBUG can be any non-negative digit
+if [[ "${DEBUG}" =~ "^[0-9]+$" ]] && [[ "${DEBUG}" -gt "0" ]]; then
+  export DEBUG=${DEBUG}
+else
+  export DEBUG=0
+fi
+
+# PinTool architecture
+if [[ -z "${SETARCH}" ]]; then
+  SETARCH=$(arch)
+fi
+
+export PIN=${PIN_ROOT}/pin
+export PINTOOL=${DATA_ROOT}/pintool/${SETARCH}/addrtrace.so
 
 # PinTool arguments
-export STDARGS="-debug 0 -bbl -func -mem -cs"
+#
+# By restricting memory, we ensure that multiple invocations of Pin have the same memory layout
+# If Pin segfaults, try to find a better memory layout
+if [[ "${SETARCH}" == "i386" ]]; then
+export PINFLAGS="-ifeellucky -restrict_memory 0x10000000:0x50000000 -pin_memory_range 0x100000000:0xF00000000"
+else
+export PINFLAGS="-ifeellucky -restrict_memory 0x50000000:0x70000000 -pin_memory_range 0x100000000:0xF00000000"
+fi
+
+export STDARGS="-debug ${DEBUG} -bbl -func -mem -cs"
 export OUTFMT="-raw"
 export LEAKIN="-leakin"
 export LEAKOUT="-leakout"
 
 # Directories
-export ANALYSISDIR=${DATA_ROOT}/analysis/
-export PRELOAD=${COMMON}/preload/
-export LASTRESULTS="lastresults"
-
-# Files and scripts
-export PIN=${PIN_ROOT}/pin
-export PINTOOL=${DATA_ROOT}/pintool/addrtrace.so
-export CLEANENV=${COMMON}/cleanenv
-export CLEANENVFILE=${COMMON}/cleanenv.txt
-export ANALYZE="python ${ANALYSISDIR}analyze.py"
+export PRELOAD=${DATA_ROOT}/cryptolib/common/preload/
+export CLEANENV=${DATA_ROOT}/cryptolib/common/cleanenv
+export CLEANENVVAR=""
+export ANALYZE="python ${DATA_ROOT}/analysis/analyze.py"
 export LOGFILE="test.log"
 export ENVFILE="env.txt"
 export NODIFFFILE="nodiff"
@@ -63,7 +80,6 @@ export LC_NUMERIC="en_US.UTF-8"
 
 # Commands
 ABORT_ON_ERROR=1
-DO_NEWFOLDER=0
 DO_GENKEYS=0
 DO_PHASE1_MEASURE=0
 DO_PHASE1_ANALYZE=0
@@ -77,9 +93,20 @@ DO_TRACE_REUSE=0
 DO_FINAL=0
 DO_EXPORT=0
 DO_DRY=0
+DO_GUI=0
 
 # Extension for trace files
 TRACEEXT=trace
+
+# Intermediate files / directories
+PHASE2_FIXDIR="gen_trc_fix"
+PHASE2_RNDDIR="gen_trc_rnd"
+PHASE2_KEYDIR="gen_key_rnd"
+PHASE2_RNDPIC="gen_rnd.pickle"
+PHASE2_FIXPICS="gen_fix_[0-9]*.pickle result_gen_[0-9]*.pickle"
+PHASE3_RNDDIR="spe_trc_rnd"
+PHASE3_KEYDIR="spe_key_rnd"
+PHASE3_RNDPIC="spe_rnd.pickle"
 
 # Analysis variables
 SYMFILE=pinsyms.txt
@@ -94,7 +121,6 @@ RESXMLFILE_PHASE3=result_phase3
 RESXMLFILE_FINAL=result_final.xml
 LEAKFILE=leaks.bin
 EXPORTFILE=framework.zip
-DEBUG=0
 
 # Measurement phases
 PHASE1="1"
@@ -120,10 +146,34 @@ CLK_TCK_SEC=$(getconf CLK_TCK)
 
 # Parallel execution
 NUMPROC=$(nproc)
+declare -a WAITPIDS
+RES=0
 
 #------------------------------------------------------------------------
 # Helper Functions
 #------------------------------------------------------------------------
+
+# Starts the GUI with the latest result
+# Requires "datagui" to be in the PATH variable
+function start_gui {
+  enter_workdir
+  local LATEST=${RESPICFILE_FINAL}
+  local FRAMEWORK_FILE=$(readlink -f ${EXPORTFILE})
+ 
+  if [[ ! -f "${LATEST}" ]]; then
+    LATEST=${RESPICFILE_PHASE2}
+  fi
+
+  if [[ ! -f "${LATEST}" ]]; then
+    LATEST=${RESPICFILE_PHASE1}
+  fi
+
+  LATEST=$(readlink -f ${LATEST})
+
+  leave_workdir
+
+  datagui "${LATEST}" "${FRAMEWORK_FILE}"
+}
 
 # Log
 function print_color {
@@ -132,18 +182,29 @@ function print_color {
       printf "${2}[%s]${NC}" "${3}"
     else
       printf "[${1}][%s]" "${3}"
-    fi 
+    fi
   else
     if [ -t 1 ]; then
-      printf "${2}[%s/%s]${NC}" "${3}" "${4}"
+      printf "${2}[%s%s]${NC}" "${3}" "${4}"
     else
-      printf "[${1}][%s/%s]" "${3}" "${4}"
+      printf "[${1}][%s%s]" "${3}" "${4}"
     fi
   fi
 }
 
+function GET_ID {
+  if ! [[ -z "${WORKDIR}" ]]; then
+    ID="${WORKDIR}"
+  elif ! [[ -z "${FRAMEWORK}" ]]; then
+    ID="${FRAMEWORK}"
+  else
+    ID="DATA"
+  fi
+  echo "${ID}"
+}
+
 function print_error {
-  print_color "${LL_ERR}" "${RED}" "${FRAMEWORK}" "${ALGO}"
+  print_color "${LL_ERR}" "${RED}" "$(GET_ID)"
   echo "$*"
 }
 
@@ -152,14 +213,19 @@ function log_error {
   print_error "$*"
 }
 
+function print_warning {
+  print_color "${LL_WARN}" "${YELLOW}" "$(GET_ID)"
+  echo "$*"
+}
+
 function log_warning {
   echo "$*" >> ${LOGFILE}
-  print_color "${LL_WARN}" "${YELLOW}" "${FRAMEWORK}" "${ALGO}"
+  print_color "${LL_WARN}" "${YELLOW}" "$(GET_ID)"
   echo "$*"
 }
 
 function print_info {
-  print_color "${LL_INFO}" "${GREEN}" "${FRAMEWORK}" "${ALGO}"
+  print_color "${LL_INFO}" "${GREEN}" "$(GET_ID)"
   echo "$*"
 }
 
@@ -174,15 +240,9 @@ function log_verbose {
 
 # Directories
 function enter_workdir {
-  WORKDIR=${LASTRESULTS}/${FRAMEWORK}/${ALGO}/${SUBALGO}
-  mkdir -p "${WORKDIR}"
-  pushd "${WORKDIR}" &> /dev/null
-}
-
-function enter_frameworkdir {
-  FRAMEWORKDIR=${LASTRESULTS}/${FRAMEWORK}
-  mkdir -p "${FRAMEWORKDIR}"
-  pushd "${FRAMEWORKDIR}" &> /dev/null
+  local L_WORKDIR=${RESULTDIR}/${WORKDIR}
+  mkdir -p "${L_WORKDIR}"
+  pushd "${L_WORKDIR}" &> /dev/null
 }
 
 function leave_workdir {
@@ -193,21 +253,22 @@ function leave_frameworkdir {
   leave_workdir
 }
 
-function new_folder {
-  if [[ "${RESULTDIR}" == "" ]]; then
-    log_error "Unable to create result folder. Result path not specified!"
-    exit 1
-  fi
-  NEWDIR="${RESULTDIR}/$(date +"%Y_%m_%d-%H:%M:%S")/"
-  print_info "Creating new result folder: ${NEWDIR}"
-  mkdir -p "${NEWDIR}"
-  rm -f ${LASTRESULTS}
-  ln -s "${NEWDIR}" ${LASTRESULTS}
-}
 function cleanup {
   enter_workdir
   log_info "Cleaning up working directory."
+  # Remove phase1 trace files
   rm -f ./*.${TRACEEXT}
+  # Remove phase1 intermediate pickle files
+  rm -f phase1*[0-9]*-[0-9]*.pickle
+  # Remove phase2 traces
+  rm -f ./${PHASE2_FIXDIR}/*.${TRACEEXT}
+  rm -f ./${PHASE2_RNDDIR}/*.${TRACEEXT}
+  # Remove phase 2 intermediate pickle files
+  rm -f ${PHASE2_RNDPIC} ${PHASE2_FIXPICS}
+  # Remove phase 3 traces
+  rm -f ./${PHASE3_RNDDIR}/*.${TRACEEXT}
+  # Keep phase 3 intermediate pickle file, as it might be used with different leakage models
+  # ${PHASE3_RNDPIC}
   log_info "Cleaning up completed."
   leave_workdir
 }
@@ -238,53 +299,58 @@ function getelapsedtime {
 function getpeakmemory {
   enter_workdir
   PEAK_MEMORY=0
-  while read -r LLINE || [[ -n "$LLINE" ]]; do
-    if echo "${LLINE}" | grep -q "memory="; then
-      CURMEM=$(echo "${LLINE}" | cut -f2 -d=)
-      if (( CURMEM > PEAK_MEMORY )); then
-        PEAK_MEMORY=${CURMEM}
-      fi
-    fi
-  done < "${LOGFILE}"
-  PEAK_MEMORY=$(divfloat "${PEAK_MEMORY}" "1024")
-  PEAK_MEMORY=$(printf "%.2f" "${PEAK_MEMORY}")
+  if [[ -f "${LOGFILE}" ]]; then
+    PEAK_MEMORY=$(awk -F "=" '/memory=/ {printf "%1.2f\n", $2 / 1024}' "${LOGFILE}" | sort -g | tail -n 1)
+  fi
   leave_workdir
 }
 
-# parallel
+# Interprets the supplied arguments as a command and runs it.
+# If DO_PARALLEL set to 1 the command runs in the background, WAITPIDS will 
+# be filled, and wait_subprocesses has to be called to wait for the 
+# background processes.
 function execpar {
-  while [ "$(jobs | wc -l)" -ge "${NUMPROC}" ]; do
-    sleep 1
-  done
+  if [[ "${DO_PARALLEL}" -eq "1" ]]; then
+    while [ "$(jobs | wc -l)" -ge "${NUMPROC}" ]; do
+      sleep 1
+    done
+    # run command in background:
+    "$@" &
+    # add background task to wait list
+    WAITPIDS+=($!)
+  else
+    # run command
+    "$@"
+  fi
 }
 
-#------------------------------------------------------------------------
-# Framework Initialization and Preparation
-#------------------------------------------------------------------------
-
-# Is called by each framework script
-function init {
-  BASEDIR=$PWD
-  PYENV=${ANALYSISDIR}.pyenv/bin/activate
-  if [[ ! -f "${PYENV}" ]]; then
-     print_color "${LL_ERR}" "${RED}" "${FRAMEWORK}" 
-     echo "Virtual python environment does not exist under ${PYENV}!"
-     exit -1
-  else
-    source "${ANALYSISDIR}"/.pyenv/bin/activate
-  fi
+# Wait for all subprocesses that are listed in WAITPIDS.
+# Sets RES to the cumulated result of the processes
+function wait_subprocesses {
+  RES=0
+  # wait for all WAITPIDS
+  for pid in ${WAITPIDS[*]}; do
+      wait $pid
+      RES=$(($RES + $?))
+  done
+  WAITPIDS=()
 }
 
 # Is called before actual work is done
-# FRAMEWORK is already specified but ALGO is not
+# FRAMEWORK is already specified
 function init_for_run {
-  if ! [[ -L ${LASTRESULTS} ]] || ! [[ -a ${LASTRESULTS} ]]; then
-    new_folder
+  if [[ -z ${RESULTDIR} ]]; then
+    print_warning "RESULTDIR not specified! Using current directory"
+    export RESULTDIR="$PWD/results"
   fi
   pushd "${PRELOAD}" &> /dev/null
-  source preload.sh
+  CLEANENVVAR=$(./preload.sh) || RES=$?
   popd &> /dev/null
+  abortonerror
+
+  RES=0
   cb_prepare_framework
+  abortonerror
 }
 
 # $1 ... keyfile
@@ -304,12 +370,13 @@ function gen_random_binkey_file {
   dd if=/dev/urandom of="$1" bs="$2" count=1 2> /dev/null
 }
 
-# $NTRACE_DIFF ... number keys to generate for phase 1
+# $PHASE1_TRACES ... number keys to generate for phase 1
 function gen_keys {
   enter_workdir
-  NK=$NTRACE_DIFF
-  if [[ "$NREPS_GEN" -gt "$NK" ]]; then
-    NK=$NREPS_GEN
+  NK=$PHASE1_TRACES
+  if [[ "$PHASE2_FIXEDKEYS" -gt "$NK" ]]; then
+    log_warning "PHASE2_FIXEDKEYS > PHASE1_TRACES (${PHASE2_FIXEDKEYS} > ${PHASE1_TRACES}). Using ${PHASE2_FIXEDKEYS} keys."
+    NK=$PHASE2_FIXEDKEYS
   fi
   log_info "Generating $NK keys"
   for i in $(seq 1 "$NK"); do
@@ -322,9 +389,10 @@ function gen_keys {
 }
 
 function list_targets {
+  echo "List of supported target algorithms:"
+  echo "====================================="
+
   if [[ -f ${TARGETFILE} ]]; then
-    echo "List of supported target algorithms:"
-    echo "====================================="
     while read LINE; do
       if [[ "${LINE}" == "" ]] || [[ ${LINE} == "#*" ]]; then
         # Skip comments and empty lines
@@ -333,9 +401,14 @@ function list_targets {
       echo "${LINE}"
     done < "${TARGETFILE}"
   else
-    exit 1
+    echo "No TARGETFILE specified"
   fi
-  exit 0
+
+  # If cb_targets is specified, call it
+  type cb_targets &>/dev/null
+  if [[ "$?" -eq "0" ]]; then
+    cb_targets
+  fi
 }
 
 #------------------------------------------------------------------------
@@ -359,13 +432,13 @@ function execute_noerror {
 
 function execute_clean {
   log_verbose "[$BASHPID] RUNNING ${CLEANENV} ${ENVFILE} $*"
+  touch "${ENVFILE}"
   /usr/bin/time -f "system=%S\nuser=%U\ntotal=%e\nmemory=%M" -a -o "${LOGFILE}" "${CLEANENV}" ${ENVFILE} $* &>> ${LOGFILE}
   RES=$?
   log_verbose "[$BASHPID] run_status=$RES"
-  abortonerror
 }
 
-# Run program with PIN instrumentation. 
+# Run program with PIN instrumentation.
 # This function is thread-safe.
 #
 # $1 ... phase, either "1", "2", or "3".
@@ -393,15 +466,13 @@ function run_pin {
   if [[ -f ${TARGETDIR}/${INFILE} ]]; then
     ln -s "${TARGETDIR}"/${INFILE} ${INFILE}
   fi
-  if [[ ! -f "${CLEANENVFILE}" ]]; then
-    log_error "Environment file ${CLEANENVFILE} missing"
-  fi
-  cp "${CLEANENVFILE}" ${ENVFILE}
+
+  echo "${CLEANENVVAR}" > ${ENVFILE}
   # Custom pre_run has to copy other necessary files from ${WORKDIR} to ${PWD} (which is ${SUBDIR})
-  RES=0
   if [[ "${DO_DRY}" -ne "0" ]]; then
     log_info "Dry-run: Executing inside ${PWD}"
   fi
+  RES=0
   cb_pre_run "${TMPKEY}"
   abortonerror
   CURCMD=$(cb_run_command ${TMPKEY})
@@ -411,19 +482,28 @@ function run_pin {
     FASTRECORDING=1
   fi
   execute_clean "${PIN} ${PINFLAGS} -t ${PINTOOL} ${PINTOOL_ARGS} -leaks ${FASTRECORDING} ${STDARGS} ${OUTFMT} ${TMPTRACE} ${LEAKOUT} ${TMPTRACE} ${LEAKIN} ${INFILE} -syms ${SYMFILE} -- ${CURCMD}"
+  cat "${LOGFILE}" >> "../"${LOGFILE} # merge logfile from subdir
+  abortonerror
+
   RES=0
   cb_post_run "${TMPKEY}"
   abortonerror
+
   popd &> /dev/null
-  # copy results back to main result folder
-  cat "${SUBDIR}"/"${LOGFILE}" >> ${LOGFILE} # merge logfile from subdir
+
   if [[ "${DO_DRY}" -eq "0" ]]; then
     rm -f "${SUBDIR}"/"${LOGFILE}" "${SUBDIR}"/"${TMPKEY}" "${SUBDIR}"/"${INFILE}"
     if [[ -f ${SUBDIR}/${TMPTRACE} ]]; then
       mv "${SUBDIR}"/"${TMPTRACE}" "${OUTFILE}"
     fi
-    mv "${SUBDIR}"/* .
-    rm -rf "${SUBDIR}"
+    mv "${SUBDIR}"/"${SYMFILE}" . &>/dev/null
+    mv "${SUBDIR}"/"${EXTSYMFILE}" . &>/dev/null
+    mv "${SUBDIR}/vdso.so" . &>/dev/null
+    if [[ "${PERSIST_ARTIFACTS}" -eq "1" ]]; then
+        mv "${SUBDIR}" "${OUTFILE}.artifacts"
+    else
+        rm -rf "${SUBDIR}"
+    fi
   fi
 }
 
@@ -457,33 +537,32 @@ function dryrun_phase1 {
   log_info "Dry-run: Running without trace recording"
   log_info "Dry-run: Executing inside ${PWD}"
   log_info "Dry-run: Aborting on any error"
-  set -e
+
+  echo "${CLEANENVVAR}" > ${ENVFILE}
 
   log_info "Dry-run: Executing cb_pre_run"
-  set -x
+  RES=0
   cb_pre_run "${KEYFILE}"
-  set +x
+  abortonerror
+
+  log_info "Dry-run: Environment env.txt:"
+  cat ${ENVFILE}
 
   log_info "Dry-run: Executing cb_run_command"
   CURCMD=$(cb_run_command ${KEYFILE})
   log_info "Dry-run: cb_run_command returned '${CURCMD}'"
   log_info "Dry-run: Executing '${CURCMD}'"
 
-  if [[ ! -f "${CLEANENVFILE}" ]]; then
-    log_error "Environment file ${CLEANENVFILE} missing"
-  fi
-  cp "${CLEANENVFILE}" ${ENVFILE}
-
   execute_clean "${CURCMD}"
+  abortonerror
 
   log_info "Dry-run: Executing cb_post_run"
-  set -x
+  RES=0
   cb_post_run "${KEYFILE}"
-  set +x
+  abortonerror
 
-  set +e
   log_info "Dry-run: Running all again with Pin trace recording to ${TRACE}"
-  run_pin ${PHASE1} "${TRACE}" "${KEYFILE}" 
+  run_pin ${PHASE1} "${TRACE}" "${KEYFILE}"
 
   leave_workdir
 }
@@ -493,25 +572,28 @@ function dryrun_phase1 {
 #------------------------------------------------------------------------
 
 # Requires function cb_run_command
-# NTRACE_DIFF ... number of traces to record
+# PHASE1_TRACES ... number of traces to record
 function measure_phase1 {
   enter_workdir
   log_info "Phase1: Recording traces."
+
+  if [[ -f ${RESPICFILE_PHASE1} ]]; then
+    log_info "Phase1: Already analyzed. Skipping."
+    return
+  fi
+
   getelapsedtime
   TSR=$CUR_TIME_REAL
   TSC=$CUR_TIME_CPU
-  for i in $(seq 1 "$NTRACE_DIFF"); do
+  for i in $(seq 1 "$PHASE1_TRACES"); do
     TRACE=$(tracefile "$i" 1)
     KEYFILE=key$i.key
     if ! [[ -f ${TRACE} ]]; then
-      if [[ "${DO_PARALLEL}" -eq "1" ]]; then
-        execpar; run_pin ${PHASE1} "${TRACE}" "${KEYFILE}" &
-      else
-        run_pin ${PHASE1} "${TRACE}" "${KEYFILE}" 
-      fi
+      execpar run_pin ${PHASE1} "${TRACE}" "${KEYFILE}"
     fi
   done
-  wait
+  wait_subprocesses
+  abortonerror
   getelapsedtime
   TDR=$(printf "%.2f" "$(subfloat "${CUR_TIME_REAL}" "${TSR}")")
   TDC=$(printf "%.2f" "$(subfloat "${CUR_TIME_CPU}" "${TSC}")")
@@ -544,17 +626,31 @@ function diff_quick {
 function analyze_phase1 {
   enter_workdir
   log_info "Phase1: Starting analysis of traces."
+
   getelapsedtime
   TSR=$CUR_TIME_REAL
   TSC=$CUR_TIME_CPU
-  N=${NTRACE_DIFF}
+  N=${PHASE1_TRACES}
   ALLDIFF=0
   NODIFF=0
   # ELF symbols
-  if ! [[ -f ${EXTSYMFILE} ]]; then
+  if ! [[ -f "${SYMFILE}" ]]; then
+    log_error "Symbol file missing!"
+    abort
+  fi
+  if ! [[ -f "${EXTSYMFILE}" ]]; then
     log_info "Phase1: Extending ELF symbols."
-    execute "${ANALYZE} addsyms ${SYMFILE} ${EXTSYMFILE} --debug ${DEBUG}"
+    execute_noerror "${ANALYZE} addsyms ${SYMFILE} ${EXTSYMFILE} --debug ${DEBUG}"
+    if [[ "${RES}" -ne "0" ]]; then
+      log_warning "Error adding ELF symbol information. Falling back to symbols exported by Pin. Address-to-symbol mapping might be imprecise!"
+      cp "${SYMFILE}" "${EXTSYMFILE}"
+    fi
     log_info "Phase1: Extending completed."
+  fi
+
+  if [[ -f ${RESXMLFILE_PHASE1} ]]; then
+    log_info "Phase1: Already merged. Skipping."
+    return
   fi
 
   # Traces
@@ -570,14 +666,11 @@ function analyze_phase1 {
             diff_quick "${TRACE1}" "${TRACE2}"
             # Do expensive analysis only if quick-diff finds differences
             if [[ "${RES}" -eq "1" ]]; then
+              RES=0
               if [[ -f ${PICKLE} ]]; then
                 continue
               fi
-              if [[ "${DO_PARALLEL}" -eq "1" ]]; then
-                execpar; diff_full "${TRACE1}" "${TRACE2}" "${PICKLE}" &
-              else
-                diff_full "${TRACE1}" "${TRACE2}" "${PICKLE}"
-              fi
+              execpar diff_full "${TRACE1}" "${TRACE2}" "${PICKLE}"
             else
               NODIFF=$((NODIFF+1))
             fi
@@ -587,17 +680,16 @@ function analyze_phase1 {
         fi
     done
   done
-  wait
+  wait_subprocesses
+  abortonerror
   log_info "Phase1: Scanning completed."
   log_info "Phase1: Merging results."
   if [[ "$ALLDIFF" -eq "$NODIFF" ]]; then
     log_info "Phase1: No difference found"
     touch ${NODIFFFILE}
   else
-    collect_parallel_results phase1_ "${N}"
-    if [[ -f phase1_merged.pickle ]]; then
-        cp phase1_merged.pickle ${RESPICFILE_PHASE1}
-    fi
+    PICKLEFILES="phase1_[0-9]*-[0-9]*.pickle"
+    execute "${ANALYZE}" merge ${PICKLEFILES} --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE1} --debug ${DEBUG}
     execute "${ANALYZE}" show ${RESPICFILE_PHASE1} --xml ${RESXMLFILE_PHASE1} --syms ${EXTSYMFILE} -${LEAKOUT} ${LEAKFILE} --debug ${DEBUG}
   fi
   log_info "Phase1: Merging completed."
@@ -605,50 +697,10 @@ function analyze_phase1 {
   TDR=$(printf "%.2f" "$(subfloat "${CUR_TIME_REAL}" "${TSR}")")
   TDC=$(printf "%.2f" "$(subfloat "${CUR_TIME_CPU}" "${TSC}")")
   log_info "Phase1: Analysis completed in ${TDR} seconds (or ${TDC} CPU seconds)."
-  leave_workdir
-}
-
-# Analyze traces pairwise
-# $1 ... prefix
-# $2 ... number of traces
-function collect_parallel_results {
-  TYPE=$1
-  N=$2
-  RESPICKLE=${TYPE}merged.pickle
-  rm -f "${RESPICKLE}"
-  for i in $(seq 2 "$N"); do
-    for j in $(seq 1 "$i"); do
-      if ! [[ "$i" -eq "$j" ]]; then
-        PICKLE=${TYPE}$j-$i.pickle
-        if ! [[ -f ${PICKLE} ]]; then
-          log_warning "collect_parallel_results: file ${PICKLE} missing"
-          continue
-        fi
-        if ! [[ -f ${RESPICKLE} ]]; then
-          cp "${PICKLE}" "${RESPICKLE}"
-        else
-          merge "${PICKLE}" "${RESPICKLE}" "${RESPICKLE}"
-        fi
-      fi
-    done
-    if [[ -f ${RESPICKLE} ]]; then
-      cp "${RESPICKLE}" "${TYPE}collect_1-$i.pickle"
-    fi
-  done
-}
-
-# $1 ... pickle file A
-# $2 ... pickle file B
-# $3 ... merged pickle file
-# $4 ... xmlfile
-function merge {
-  PICKLE=$3
-  XML=$4
-  EXEC="${ANALYZE} merge $1 $2 --syms ${EXTSYMFILE} --pickle ${PICKLE} --debug ${DEBUG}"
-  if [[ "${XML}" != "" ]]; then
-    EXEC+=" --xml ${XML}"
+  if [[ -f ${RESXMLFILE_PHASE1} ]]; then
+    log_info "Phase1: Results generated: $(readlink -f $RESXMLFILE_PHASE1)"
   fi
-  execute "${EXEC}"
+  leave_workdir
 }
 
 #------------------------------------------------------------------------
@@ -657,16 +709,19 @@ function merge {
 
 # Requires function cb_run_command
 # Requires function cb_genkey
-# NREPS_GEN ... number of fixed inputs to consider
-# NTRACE_GEN ... number of generic measurements to take (fixed, random)
+# PHASE2_FIXEDKEYS ... number of fixed inputs to consider
+# PHASE2_TRACES ... number of generic measurements to take (fixed, random)
 # LEAKFILE ... previous leaks stored in binary file format
 function measure_phase2 {
   enter_workdir
-  FIXDIR="gen_trc_fix"
-  RNDDIR="gen_trc_rnd"
-  KEYDIR="gen_key_rnd"
 
   log_info "Phase2: Recording traces for generic leakage test."
+
+  if [[ -f ${RESPICFILE_PHASE2} ]]; then
+    log_info "Phase2: Already analyzed. Skipping."
+    return
+  fi
+
   getelapsedtime
   TSR=$CUR_TIME_REAL
   TSC=$CUR_TIME_CPU
@@ -674,45 +729,39 @@ function measure_phase2 {
     log_error "No leakfile ${LEAKFILE} found! Run phase1 analysis first!"
     exit 1
   fi
-  if [[ "${NREPS_GEN}" == "" ]] || [[ "${NTRACE_GEN}" == "" ]]; then
-    log_error "Please specify NREPS_GEN and NTRACE_GEN!"
+  if [[ "${PHASE2_FIXEDKEYS}" == "" ]] || [[ "${PHASE2_TRACES}" == "" ]]; then
+    log_error "Please specify PHASE2_FIXEDKEYS and PHASE2_TRACES!"
     exit 1
   fi
   log_info "Phase2: Recording traces for random secret input."
-  mkdir -p ${FIXDIR}
-  mkdir -p ${RNDDIR}
-  mkdir -p ${KEYDIR}
-  for j in $(seq 1 "$NTRACE_GEN"); do
-    RND_FILE=${RNDDIR}/trace_rnd_$j.${TRACEEXT}
-    RND_KEY=${KEYDIR}/key_rnd_$j.key
+  mkdir -p ${PHASE2_FIXDIR}
+  mkdir -p ${PHASE2_RNDDIR}
+  mkdir -p ${PHASE2_KEYDIR}
+  for j in $(seq 1 "$PHASE2_TRACES"); do
+    RND_FILE=${PHASE2_RNDDIR}/trace_rnd_$j.${TRACEEXT}
+    RND_KEY=${PHASE2_KEYDIR}/key_rnd_$j.key
     if ! [[ -f ${RND_KEY} ]]; then
       genkey_wrapper "${RND_KEY}"
     fi
     if ! [[ -f ${RND_FILE} ]]; then
-      if [[ "${DO_PARALLEL}" -eq "1" ]]; then
-        execpar; run_pin ${PHASE2} "${RND_FILE}" "${RND_KEY}" & # random
-      else
-        run_pin ${PHASE2} "${RND_FILE}" "${RND_KEY}" # random
-      fi
+      execpar run_pin ${PHASE2} "${RND_FILE}" "${RND_KEY}" # random
     fi
   done
-  wait
+  wait_subprocesses
+  abortonerror
   log_info "Phase2: Recording completed."
   log_info "Phase2: Recording traces for fixed secret input."
-  for i in $(seq 1 "$NREPS_GEN"); do
+  for i in $(seq 1 "$PHASE2_FIXEDKEYS"); do
     FIX_KEY=key$i.key
-    for j in $(seq 1 "$NTRACE_GEN"); do
-      FIX_FILE=${FIXDIR}/trace_fix_${i}_${j}.${TRACEEXT}
+    for j in $(seq 1 "$PHASE2_TRACES"); do
+      FIX_FILE=${PHASE2_FIXDIR}/trace_fix_${i}_${j}.${TRACEEXT}
       if ! [[ -f ${FIX_FILE} ]]; then
-        if [[ "${DO_PARALLEL}" -eq "1" ]]; then
-          execpar; run_pin ${PHASE2} "${FIX_FILE}" "${FIX_KEY}" & # fixed
-        else
-          run_pin ${PHASE2} "${FIX_FILE}" "${FIX_KEY}" # fixed
-        fi
+        execpar run_pin ${PHASE2} "${FIX_FILE}" "${FIX_KEY}" # fixed
       fi
     done
   done
-  wait
+  wait_subprocesses
+  abortonerror
   log_info "Phase2: Recording completed."
   getelapsedtime
   TDR=$(printf "%.2f" "$(subfloat "${CUR_TIME_REAL}" "${TSR}")")
@@ -723,86 +772,74 @@ function measure_phase2 {
 
 # Analyze fix vs. random
 #
-# NREPS_GEN ... number of fixed inputs to consider
-# NTRACE_GEN ... number of generic measurements to analyze (fixed, random)
+# PHASE2_FIXEDKEYS ... number of fixed inputs to consider
+# PHASE2_TRACES ... number of generic measurements to analyze (fixed, random)
 function analyze_phase2 {
   enter_workdir
-  FIXDIR="gen_trc_fix"
-  RNDDIR="gen_trc_rnd"
-  KEYDIR="gen_key_rnd"
-  CMD_LOAD="loadleaks"
-  CMD_STAT="generic"
-  CMD_MERGE="merge"
-  CMD_SHOW="show"
-  RNDPIC="gen_rnd.pickle"
 
   log_info "Phase2: Starting generic leakage analysis."
+
+  if [[ -f ${RESPICFILE_PHASE2} ]]; then
+    log_info "Phase2: Already analyzed. Skipping."
+    return
+  fi
+
   getelapsedtime
   TSR=$CUR_TIME_REAL
   TSC=$CUR_TIME_CPU
-  if [[ "${NREPS_GEN}" == "" ]] || [[ "${NTRACE_GEN}" == "" ]]; then
-    log_error "Please specify NREPS_GEN and NTRACE_GEN!"
+  if [[ "${PHASE2_FIXEDKEYS}" == "" ]] || [[ "${PHASE2_TRACES}" == "" ]]; then
+    log_error "Please specify PHASE2_FIXEDKEYS and PHASE2_TRACES!"
     exit 1
   fi
   if ! [[ -f ${RESPICFILE_PHASE1} ]]; then
     log_error "Previous ${RESPICFILE_PHASE1} file not found!"
     exit 1
   fi
-  if ! [[ -f ${RNDPIC} ]]; then
+  if ! [[ -f ${PHASE2_RNDPIC} ]]; then
     log_info "Phase2: Preparing random-key traces."
-    cp ${RESPICFILE_PHASE1} ${RNDPIC}
-    if [[ "${DO_PARALLEL}" -eq "1" ]]; then
-      execpar; execute "${ANALYZE}" ${CMD_LOAD} ${RNDPIC} --filepattern="${RNDDIR}/trace_rnd_%.${TRACEEXT}" --keypattern="${KEYDIR}/key_rnd_%.key" --start=1 --end="$NTRACE_GEN" --source 0 --debug 0 &
-    else
-      execute "${ANALYZE}" ${CMD_LOAD} ${RNDPIC} --filepattern="${RNDDIR}/trace_rnd_%.${TRACEEXT}" --keypattern="${KEYDIR}/key_rnd_%.key" --start=1 --end="$NTRACE_GEN" --source 0 --debug 0
-    fi
+    cp ${RESPICFILE_PHASE1} ${PHASE2_RNDPIC}
+    execpar execute "${ANALYZE}" loadleaks "${PHASE2_RNDPIC}" --filepattern="${PHASE2_RNDDIR}/trace_rnd_%.${TRACEEXT}" --keypattern="${PHASE2_KEYDIR}/key_rnd_%.key" --start=1 --end="$PHASE2_TRACES" --source 0 --debug ${DEBUG}
   fi
   # load traces into pickle file
-  for i in $(seq 1 "$NREPS_GEN"); do
+  for i in $(seq 1 "$PHASE2_FIXEDKEYS"); do
     FIXPIC=gen_fix_${i}.pickle
     FIX_KEY=key$i.key
     if ! [[ -f ${FIXPIC} ]]; then
       log_info "Phase2: Preparing fixed-key traces."
       cp ${RESPICFILE_PHASE1} "${FIXPIC}"
-      if [[ "${DO_PARALLEL}" -eq "1" ]]; then
-        execpar; execute "${ANALYZE}" ${CMD_LOAD} "${FIXPIC}" --filepattern="${FIXDIR}/trace_fix_${i}_%.${TRACEEXT}" --keypattern="${FIX_KEY}" --start=1 --end="$NTRACE_GEN" --source 0 --debug 0 &
-      else
-        execute "${ANALYZE}" ${CMD_LOAD} "${FIXPIC}" --filepattern="${FIXDIR}/trace_fix_${i}_%.${TRACEEXT}" --keypattern="${FIX_KEY}" --start=1 --end="$NTRACE_GEN" --source 0 --debug 0
-      fi
+      execpar execute "${ANALYZE}" loadleaks "${FIXPIC}" --filepattern="${PHASE2_FIXDIR}/trace_fix_${i}_%.${TRACEEXT}" --keypattern="${FIX_KEY}" --start=1 --end="$PHASE2_TRACES" --source 0 --debug ${DEBUG}
     fi
   done
-  wait
+  wait_subprocesses
+  abortonerror
   log_info "Phase2: Preparation of traces completed."
   log_info "Phase2: Running statistical tests."
   # analyze above generated pickle files
-  for i in $(seq 1 "$NREPS_GEN"); do
+  for i in $(seq 1 "$PHASE2_FIXEDKEYS"); do
     FIXPIC=gen_fix_${i}.pickle
     RESPIC=result_gen_${i}.pickle
     FIX_KEY=key$i.key
     if ! [[ -f ${RESPIC} ]]; then
-      if [[ "${DO_PARALLEL}" -eq "1" ]]; then
-        execpar; execute "${ANALYZE}" ${CMD_STAT} "${FIXPIC}" ${RNDPIC} --pickle "${RESPIC}" --syms ${EXTSYMFILE} --debug 0 &
-      else
-        execute "${ANALYZE}" ${CMD_STAT} "${FIXPIC}" ${RNDPIC} --pickle "${RESPIC}" --syms ${EXTSYMFILE} --debug 0
-      fi
+      execpar execute "${ANALYZE}" generic "${FIXPIC}" ${PHASE2_RNDPIC} --pickle "${RESPIC}" --syms ${EXTSYMFILE} --debug ${DEBUG}
     fi
   done
-  wait
+  wait_subprocesses
+  abortonerror
   log_info "Phase2: Statistical tests completed."
   if ! [[ -e ${RESPICFILE_PHASE2} ]]; then
     log_info "Phase2: Merging results."
-    if [[ "$NREPS_GEN" -eq "1" ]]; then
+    if [[ "$PHASE2_FIXEDKEYS" -eq "1" ]]; then
       FIRSTPIC="result_gen_1.pickle"
       ln -s ${FIRSTPIC} ${RESPICFILE_PHASE2}
-      execute "${ANALYZE}" ${CMD_SHOW} "${FIRSTPIC}" --syms ${EXTSYMFILE} --xml ${RESXMLFILE_PHASE2} --debug 0
+      execute "${ANALYZE}" show "${FIRSTPIC}" --syms ${EXTSYMFILE} --xml ${RESXMLFILE_PHASE2} --debug ${DEBUG}
     else
-      for i in $(seq 2 "$NREPS_GEN"); do
+      for i in $(seq 2 "$PHASE2_FIXEDKEYS"); do
         PREVPIC=result_gen_$((i-1)).pickle
         CURPIC=result_gen_${i}.pickle
         if [[ "${i}" -eq "2" ]]; then
-          execute "${ANALYZE}" ${CMD_MERGE} ${PREVPIC} "${CURPIC}" --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --debug 0
+          execute "${ANALYZE}" merge ${PREVPIC} "${CURPIC}" --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --debug ${DEBUG}
         else
-          execute "${ANALYZE}" ${CMD_MERGE} "${CURPIC}" ${RESPICFILE_PHASE2} --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --debug 0
+          execute "${ANALYZE}" merge "${CURPIC}" ${RESPICFILE_PHASE2} --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --debug ${DEBUG}
         fi
       done
     fi
@@ -812,6 +849,7 @@ function analyze_phase2 {
   TDR=$(printf "%.2f" "$(subfloat "${CUR_TIME_REAL}" "${TSR}")")
   TDC=$(printf "%.2f" "$(subfloat "${CUR_TIME_CPU}" "${TSC}")")
   log_info "Phase2: Analysis completed in ${TDR} seconds (or ${TDC} CPU seconds)."
+  log_info "Phase2: Results generated: $(readlink -f $RESXMLFILE_PHASE2)"
   leave_workdir
 }
 
@@ -821,17 +859,23 @@ function analyze_phase2 {
 
 # Requires function cb_run_command
 # Requires function cb_genkey
-# NTRACE_SPE ... number of specific measurements to take
+# PHASE3_TRACES ... number of specific measurements to take
 # LEAKFILE ... previous leaks stored in binary file format
-# NTRACE_GEN ... optional: number of generic measurements previously taken
+# PHASE2_TRACES ... optional: number of generic measurements previously taken
 function measure_phase3 {
   enter_workdir
-  RNDDIR="spe_trc_rnd"
-  KEYDIR="spe_key_rnd"
-  RNDDIR_NS="gen_trc_rnd"
-  KEYDIR_NS="gen_key_rnd"
+  SPLEAKCB=$1
+  SPLEAKCB_SUFFIX=$(basename "${SPLEAKCB}")
+  SPLEAKCB_SUFFIX=${SPLEAKCB_SUFFIX%%.*}
+  RESPIC="${RESPICFILE_PHASE3}_${SPLEAKCB_SUFFIX}.pickle"
 
-  log_info "Phase3: Recording traces for specific leakage test."
+  log_info "Phase3: Recording traces for specific leakage test ${SPLEAKCB_SUFFIX}."
+
+  if [[ -f ${RESPIC} ]]; then
+    log_info "Phase3: Already analyzed. Skipping."
+    return
+  fi
+
   getelapsedtime
   TSR=$CUR_TIME_REAL
   TSC=$CUR_TIME_CPU
@@ -839,24 +883,37 @@ function measure_phase3 {
     log_error "No leakfile ${LEAKFILE} found! Run phase 1 first!"
     exit 1
   fi
-  if [[ "${NTRACE_SPE}" == "" ]]; then
-    log_error "Please specify NTRACE_SPE!"
+  if [[ "${PHASE3_TRACES}" == "" ]]; then
+    log_error "Please specify PHASE3_TRACES!"
     exit 1
   fi
-  mkdir -p ${RNDDIR}
-  mkdir -p ${KEYDIR}
-  if [[ "${DO_TRACE_REUSE}" -eq "1" ]]; then
-    if [[ "${NTRACE_GEN}" == "" ]]; then
-      log_error "Please specify NTRACE_GEN!"
+  mkdir -p ${PHASE3_RNDDIR}
+  mkdir -p ${PHASE3_KEYDIR}
+
+  if ! [[ -f ${RESPICFILE_PHASE2} ]]; then
+    log_warning "Previous ${RESPICFILE_PHASE2} file not found! Falling back to ${RESPICFILE_PHASE1}"
+    log_warning "Setting DO_TRACE_REUSE=0."
+    DO_TRACE_REUSE=0
+    if ! [[ -f ${RESPICFILE_PHASE1} ]]; then
+      log_error "Previous ${RESPICFILE_PHASE1} file not found!"
       exit 1
     fi
-    for j in $(seq 1 "$NTRACE_GEN"); do
-      RFILE_NS=${RNDDIR_NS}/trace_rnd_$j.${TRACEEXT}
-      RKEY_NS=${KEYDIR_NS}/key_rnd_$j.key
-      RFILE_SP=${RNDDIR}/trace_rnd_$j.${TRACEEXT}
-      RKEY_SP=${KEYDIR}/key_rnd_$j.key
+  fi
+
+  if [[ "${DO_TRACE_REUSE}" -eq "1" ]]; then
+    if [[ "${PHASE2_TRACES}" == "" ]]; then
+      log_error "Please specify PHASE2_TRACES!"
+      exit 1
+    fi
+    for j in $(seq 1 "$PHASE2_TRACES"); do
+      RFILE_NS=${PHASE2_RNDDIR}/trace_rnd_$j.${TRACEEXT}
+      RKEY_NS=${PHASE2_KEYDIR}/key_rnd_$j.key
+      RFILE_SP=${PHASE3_RNDDIR}/trace_rnd_$j.${TRACEEXT}
+      RKEY_SP=${PHASE3_KEYDIR}/key_rnd_$j.key
+      RARTIFACTS_NS="${PHASE2_RNDDIR}/trace_rnd_${j}.${TRACEEXT}.artifacts"
+      RARTIFACTS_SP="${PHASE3_RNDDIR}/trace_rnd_${j}.${TRACEEXT}.artifacts"
       if (! [[ -f ${RFILE_NS} ]]) || (! [[ -f ${RKEY_NS} ]]); then
-        log_error "Cannot re-use trace/key! File does not exist."
+        log_error "Cannot re-use trace/key! File does not exist: ${PWD}/${RFILE_NS}"
         exit 1
       fi
       if ! [[ -h ${RFILE_SP} ]]; then
@@ -865,23 +922,23 @@ function measure_phase3 {
       if ! [[ -h ${RKEY_SP} ]]; then
         ln -r -s "${RKEY_NS}" "${RKEY_SP}"
       fi
+      if ! [[ -h ${RARTIFACTS_SP} ]]; then
+        ln -r -s "${RARTIFACTS_NS}" "${RARTIFACTS_SP}"
+      fi
     done
   fi
-  for j in $(seq 1 "$NTRACE_SPE"); do
-    RND_FILE=${RNDDIR}/trace_rnd_$j.${TRACEEXT}
-    RND_KEY=${KEYDIR}/key_rnd_$j.key
+  for j in $(seq 1 "$PHASE3_TRACES"); do
+    RND_FILE=${PHASE3_RNDDIR}/trace_rnd_$j.${TRACEEXT}
+    RND_KEY=${PHASE3_KEYDIR}/key_rnd_$j.key
     if ! [[ -e ${RND_KEY} ]]; then
       genkey_wrapper "${RND_KEY}"
     fi
     if ! [[ -e ${RND_FILE} ]]; then
-      if [[ "${DO_PARALLEL}" -eq "1" ]]; then
-        execpar; run_pin ${PHASE3} "${RND_FILE}" "${RND_KEY}" & # random
-      else
-        run_pin ${PHASE3} "${RND_FILE}" "${RND_KEY}"   # random
-      fi
+      execpar run_pin ${PHASE3} "${RND_FILE}" "${RND_KEY}" # random
     fi
   done
-  wait
+  wait_subprocesses
+  abortonerror
   getelapsedtime
   TDR=$(printf "%.2f" "$(subfloat "${CUR_TIME_REAL}" "${TSR}")")
   TDC=$(printf "%.2f" "$(subfloat "${CUR_TIME_CPU}" "${TSC}")")
@@ -891,56 +948,99 @@ function measure_phase3 {
 
 # Analyze specific leakage
 #
-# NTRACE_SPE ... number of specific measurements to analyze
+# PHASE3_TRACES ... number of specific measurements to analyze
 # $1 ... .py file that defines the specific leakage as a callback function
 function analyze_phase3 {
   enter_workdir
   SPLEAKCB=$1
   SPLEAKCB_SUFFIX=$(basename "${SPLEAKCB}")
   SPLEAKCB_SUFFIX=${SPLEAKCB_SUFFIX%%.*}
-  RNDDIR="spe_trc_rnd"
-  KEYDIR="spe_key_rnd"
-  CMD_LOAD="loadleaks"
-  CMD_STAT="specific"
-  CMD_SHOW="show"
-  RNDPIC="spe_rnd.pickle"
-  RESXML="${RESXMLFILE_PHASE3}_${SPLEAKCB_SUFFIX}.xml"
-  RESPIC="${RESPICFILE_PHASE3}_${SPLEAKCB_SUFFIX}.pickle"
+  # Result files for current leakage model ${SPLEAKCB}
+  RESXMLFILE_PHASE3_LM="${RESXMLFILE_PHASE3}_${SPLEAKCB_SUFFIX}.xml"
+  RESPICFILE_PHASE3_LM="${RESPICFILE_PHASE3}_${SPLEAKCB_SUFFIX}.pickle"
+  PREVPIC=${RESPICFILE_PHASE2}
 
-  log_info "Phase3: Starting specific leakage analysis."
+  log_info "Phase3: Starting specific leakage analysis for ${SPLEAKCB_SUFFIX}."
+
+  if [[ -f ${RESPICFILE_PHASE3_LM} ]]; then
+    log_info "Phase3: Already analyzed. Skipping."
+    return
+  fi
+
   getelapsedtime
   TSR=$CUR_TIME_REAL
   TSC=$CUR_TIME_CPU
-  if [[ "${NTRACE_SPE}" == "" ]]; then
-    log_error "Please specify NTRACE_SPE!"
+  if [[ "${PHASE3_TRACES}" == "" ]]; then
+    log_error "Please specify PHASE3_TRACES!"
     exit 1
   fi
   if ! [[ -f ${SPLEAKCB} ]]; then
     log_error "Specific leakage callback function not specified!"
     exit 1
   fi
+
   if ! [[ -f ${RESPICFILE_PHASE2} ]]; then
-    log_error "Previous ${RESPICFILE_PHASE2} file not found!"
-    exit 1
+    log_warning "Previous ${RESPICFILE_PHASE2} file not found! Falling back to ${RESPICFILE_PHASE1}"
+    log_warning "Setting DO_TRACE_REUSE=0."
+    PREVPIC=${RESPICFILE_PHASE1}
+    DO_TRACE_REUSE=0
+    if ! [[ -f ${RESPICFILE_PHASE1} ]]; then
+      log_error "Previous ${RESPICFILE_PHASE1} file not found!"
+      exit 1
+    fi
   fi
-  if ! [[ -f ${RNDPIC} ]]; then
-    log_info "Phase3: Prepararing traces."
-    cp ${RESPICFILE_PHASE2} ${RNDPIC}
-    execute "${ANALYZE}" ${CMD_LOAD} ${RNDPIC} --filepattern="${RNDDIR}/trace_rnd_%.${TRACEEXT}" --keypattern="${KEYDIR}/key_rnd_%.key" --start=1 --end="$NTRACE_SPE" --source 1 --debug 0
+
+  for j in $(seq 1 "$PHASE3_TRACES"); do
+    type cb_pre_leakage_model &>/dev/null
+    if [[ "$?" -eq "0" && "${PERSIST_ARTIFACTS}" -eq "1" ]]; then
+      ARTIFACT_DIR=${PHASE3_RNDDIR}/trace_rnd_$j.${TRACEEXT}.artifacts
+      ARTIFACT_KEY=$(readlink -e "${PHASE3_KEYDIR}/key_rnd_$j.key")
+      if ! [[ -d ${ARTIFACT_DIR} ]]; then
+        log_error "Phase3: ARTIFACT_DIR does not exist: ${ARTIFACT_DIR} (PWD= ${PWD})"
+        exit
+      fi
+      pushd "${ARTIFACT_DIR}" &>/dev/null
+      PHASE3_INPUT=$(cb_pre_leakage_model "${ARTIFACT_KEY}")
+      if [[ "${PHASE3_INPUT}" == "" ]]; then
+        RES=1
+        abortonerror
+      fi
+      popd &>/dev/null
+      ln -f -r -s "${ARTIFACT_DIR}/${PHASE3_INPUT}" "${PHASE3_KEYDIR}/leakage_model_${j}.input"
+    else
+      ln -f -r -s "${PHASE3_KEYDIR}/key_rnd_${j}.key" "${PHASE3_KEYDIR}/leakage_model_${j}.input"
+    fi
+  done
+
+  if ! [[ -f ${PHASE3_RNDPIC} ]]; then
+    log_info "Phase3: Preparing traces."
+    cp ${PREVPIC} ${PHASE3_RNDPIC}
+    execute "${ANALYZE}" loadleaks ${PHASE3_RNDPIC} --filepattern="${PHASE3_RNDDIR}/trace_rnd_%.${TRACEEXT}" --keypattern="${PHASE3_KEYDIR}/leakage_model_%.input" --start=1 --end="$PHASE3_TRACES" --source 1 --debug ${DEBUG}
     log_info "Phase3: Preparation of traces completed."
   fi
-  if ! [[ -f ${RESPIC} ]]; then
+  if ! [[ -f ${RESPICFILE_PHASE3_LM} ]]; then
     log_info "Phase3: Running statistical tests."
-    execute "${ANALYZE}" ${CMD_STAT} ${RNDPIC} "${SPLEAKCB}" --pickle "${RESPIC}" --syms ${EXTSYMFILE} --debug 0
+    LEAKSONLY="True" # Phase 3 analyzes only phase2 leaks
+    if [[ "${PHASE3_SKIP_PHASE2}" -eq "1" ]]; then
+        # Phase 3 analyzes all phase1 differences
+        #(and not just those (phase2 differences) that are marked as leaks
+        LEAKSONLY="False"
+    fi
+    MP="False"
+    if [[ "${DO_PARALLEL}" -eq "1" ]]; then
+      MP="True"
+    fi
+    execute "${ANALYZE}" specific ${PHASE3_RNDPIC} "${SPLEAKCB}" --pickle "${RESPICFILE_PHASE3_LM}" --syms ${EXTSYMFILE} --debug ${DEBUG} --leaksonly ${LEAKSONLY} --multiprocessing ${MP}
     log_info "Phase3: Statistical tests completed."
   fi
-  if ! [[ -f ${RESXML} ]]; then
-    execute "${ANALYZE}" ${CMD_SHOW} "${RESPIC}" --syms ${EXTSYMFILE} --xml "${RESXML}" --debug 0
+  if ! [[ -f ${RESXMLFILE_PHASE3_LM} ]]; then
+    execute "${ANALYZE}" show "${RESPICFILE_PHASE3_LM}" --syms ${EXTSYMFILE} --xml "${RESXMLFILE_PHASE3_LM}" --debug ${DEBUG}
   fi
   getelapsedtime
   TDR=$(printf "%.2f" "$(subfloat "${CUR_TIME_REAL}" "${TSR}")")
   TDC=$(printf "%.2f" "$(subfloat "${CUR_TIME_CPU}" "${TSC}")")
   log_info "Phase3: Analysis completed in ${TDR} seconds (or ${TDC} CPU seconds)."
+  log_info "Phase3: Results generated: $(readlink -f $RESXMLFILE_PHASE3_LM)"
   leave_workdir
 }
 
@@ -950,12 +1050,13 @@ function analyze_phase3 {
 
 function export_framework_files {
   enter_workdir
-  CMD_EXPORT="export"
   log_info "Exporting framework files"
   if ! [[ -f ${EXPORTFILE} ]]; then
-    execute "${ANALYZE}" ${CMD_EXPORT} "${RESPICFILE_PHASE1}" "${EXPORTFILE}" --syms ${EXTSYMFILE} --debug 0
+    # It is enough to use phase1 results for export, since later phases
+    # do not find more potential leakage
+    execute "${ANALYZE}" export "${RESPICFILE_PHASE1}" "${EXPORTFILE}" --syms ${EXTSYMFILE} --debug ${DEBUG}
   fi
-  log_info "Exporting completed."
+  log_info "Exporting completed: $(readlink -f $EXPORTFILE)"
   leave_workdir
 }
 
@@ -967,8 +1068,6 @@ function generate_final_result_XMLs {
   DIFFPIC="${RESPICFILE_PHASE1}"
   ALLPIC="${RESPICFILE_FINAL}"
   ALLXML="${RESXMLFILE_FINAL}"
-  CMD_MERGE="merge"
-  CMD_SHOW="show"
 
   log_info "Generating final result and report files."
   if ! [[ -f ${ALLPIC} ]]; then
@@ -982,29 +1081,26 @@ function generate_final_result_XMLs {
     fi
     for f in ${SPPIC}; do
       if [[ -f ${f} ]]; then
-        execute "${ANALYZE}" ${CMD_MERGE} ${ALLPIC} "${f}" --syms ${EXTSYMFILE} --pickle ${ALLPIC} --debug 0
+        execute "${ANALYZE}" merge ${ALLPIC} "${f}" --syms ${EXTSYMFILE} --pickle ${ALLPIC} --strip True --debug ${DEBUG}
       fi
     done
   fi
   if ! [[ -f ${ALLXML} ]]; then
-    execute "${ANALYZE}" ${CMD_SHOW} ${ALLPIC} --syms ${EXTSYMFILE} --xml ${ALLXML} --debug 0
+    execute "${ANALYZE}" show ${ALLPIC} --syms ${EXTSYMFILE} --xml ${ALLXML} --debug ${DEBUG}
   fi
   log_info "Generating completed."
+  log_info "Results generated: $(readlink -f $ALLXML)"
   leave_workdir
 }
 
-#------------------------------------------------------------------------
-# Framework CLI
-#------------------------------------------------------------------------
-
-function DATA_run {
-  SUBALGO=
-  for SA in "$@"; do
-    SUBALGO=${SUBALGO}/${SA}
-  done
+function do_run {
+  local ALGOCMDLINE=$1
+  local CONFIG=$2
 
   enter_workdir
+  log_info "Testing '$ALGOCMDLINE' under configuration '$CONFIG'"
   log_verbose "#TIME $(date +"%Y_%d_%m-%H:%M:%S")"
+  setstarttime
   leave_workdir
 
   if [[ "${DO_DRY}" -eq "1" ]]; then
@@ -1018,9 +1114,6 @@ function DATA_run {
     fi
     if [[ "${DO_PHASE1_ANALYZE}" -eq "1" ]]; then
       analyze_phase1
-    fi
-    if [[ "${DO_EXPORT}" -eq "1" ]]; then
-      export_framework_files
     fi
 
     enter_workdir
@@ -1036,13 +1129,19 @@ function DATA_run {
         analyze_phase2
       fi
       if [[ "${DO_PHASE3_MEASURE}" -eq "1" ]]; then
-        measure_phase3
+        measure_phase3 "${SPECIFIC_LEAKAGE_CALLBACK}"
       fi
       if [[ "${DO_PHASE3_ANALYZE}" -eq "1" ]]; then
         analyze_phase3 "${SPECIFIC_LEAKAGE_CALLBACK}"
       fi
       if [[ "${DO_FINAL}" -eq "1" ]]; then
         generate_final_result_XMLs
+      fi
+      if [[ "${DO_EXPORT}" -eq "1" ]]; then
+        export_framework_files
+      fi
+      if [[ "${DO_GUI}" -eq "1" ]]; then
+        start_gui
       fi
     fi
     if [[ "${DO_CLEANUP}" -eq "1" ]]; then
@@ -1052,77 +1151,163 @@ function DATA_run {
 
   enter_workdir
   log_verbose "#TIME $(date +"%Y_%d_%m-%H:%M:%S")"
+  getelapsedtime
+  getpeakmemory
+  if [[ ${PEAK_MEMORY} == 0 ]]; then
+    log_info "$(printf "Testing '$ALGOCMDLINE' completed in %.2f seconds (or %.2f CPU seconds)" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
+  else
+    log_info "$(printf "Testing '$ALGOCMDLINE' completed in %.2f seconds (or %.2f CPU seconds) with a peak RAM usage of ${PEAK_MEMORY} MiB" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
+  fi
   leave_workdir
+}
+
+#------------------------------------------------------------------------
+# Framework CLI
+#------------------------------------------------------------------------
+
+# For legacy reasons only. Set WORKDIR directly inside cb_prepare_algo
+#
+# $* ... workdir path without $FRAMEWORK prefix
+function DATA_run {
+  print_warning "Warning! DATA_run is deprecated. Set WORKDIR directly inside cb_prepare_algo"
+  local WORKDIR_SUFFIX=
+  for P in "$@"; do
+    P=${P// /} # strip spaces
+    if [[ "${P}" != "" ]]; then
+      WORKDIR_SUFFIX=${WORKDIR_SUFFIX}/${P}
+    fi
+  done
+  WORKDIR="${FRAMEWORK}/${WORKDIR_SUFFIX}"
+}
+
+function PHASE_NUM_TRACES {
+  # Check if argument is a number
+  if [ "$1" -eq "$1" ] 2>/dev/null
+  then
+    SHIFT=$((SHIFT+1))
+    echo "$1"
+  fi
 }
 
 # $* ... command line arguments
 function DATA_parse {
-  
+
   if [[ $# -eq 0 ]]; then
     help
+    exit 1
   fi
-  
-  while [[ $# -gt 0 ]]
-  do
-    key="$1"
+
+  # Count number of arguments
+  SHIFT=0
+  SKIP_ARGS=0
+  for key in "$@"; do
+    # If a flag needs parameters:
+    # 1. read param1, param2
+    # 2. set SKIP_ARGS to the amount of parameters
+    param1=${@:$((SHIFT+2)):1}
+    param2=${@:$((SHIFT+3)):1}
+    if [[ "${SKIP_ARGS}" -gt "0" ]]; then
+      SHIFT=$((SHIFT+1))
+      SKIP_ARGS=$((SKIP_ARGS-1))
+      continue
+    fi
     case $key in
         -h|--help)
         help
+        exit
         ;;
         -l|--list)
+        init_for_run
         list_targets
+        exit
         ;;
-        -n|--newfolder)
-        DO_NEWFOLDER=1
-        shift
+        --gui)
+        DO_GUI=1
+        ;;
+        --phase1)
+        DO_GENKEYS=1
+        DO_PHASE1_MEASURE=1
+        DO_PHASE1_ANALYZE=1
+        TRACES=$(PHASE_NUM_TRACES "$param1")
+        if [[ ! -z "${TRACES}" ]]; then
+          SKIP_ARGS=1
+          PHASE1_TRACES=${TRACES}
+          log_info "Overwriting PHASE1_TRACES=${PHASE1_TRACES}"
+        fi
+        ;;
+        --phase2)
+        DO_PHASE2_MEASURE=1
+        DO_PHASE2_ANALYZE=1
+        TRACES=$(PHASE_NUM_TRACES "$param1")
+        if [[ ! -z "${TRACES}" ]]; then
+          SKIP_ARGS=1
+          PHASE2_TRACES=${TRACES}
+          log_info "Overwriting PHASE2_TRACES=${PHASE2_TRACES}"
+        fi
+        ;;
+        --phase3)
+        DO_PHASE3_MEASURE=1
+        DO_PHASE3_ANALYZE=1
+        TRACES=$(PHASE_NUM_TRACES "$param1")
+        if [[ ! -z "${TRACES}" ]]; then
+          SKIP_ARGS=1
+          PHASE3_TRACES=${TRACES}
+          log_info "Overwriting PHASE3_TRACES=${PHASE3_TRACES}"
+        fi
         ;;
         -g|--genkeys)
         DO_GENKEYS=1
-        shift
+        TRACES=$(PHASE_NUM_TRACES "$param1")
+        if [[ ! -z "${TRACES}" ]]; then
+          SKIP_ARGS=1
+          PHASE1_TRACES=${TRACES}
+          log_info "Overwriting PHASE1_TRACES=${PHASE1_TRACES}"
+        fi
         ;;
         -d|--diff)
         DO_PHASE1_MEASURE=1
-        shift
         ;;
         -ad|--alyzed)
         DO_PHASE1_ANALYZE=1
-        shift
         ;;
         -ns|--generic)
         DO_PHASE2_MEASURE=1
-        shift
+        TRACES=$(PHASE_NUM_TRACES "$param1")
+        if [[ ! -z "${TRACES}" ]]; then
+          SKIP_ARGS=1
+          PHASE2_TRACES=${TRACES}
+          log_info "Overwriting PHASE2_TRACES=${PHASE2_TRACES}"
+        fi
         ;;
         -an|--alyzens)
         DO_PHASE2_ANALYZE=1
-        shift
         ;;
         -sp|--specific)
         DO_PHASE3_MEASURE=1
-        shift
+        TRACES=$(PHASE_NUM_TRACES "$param1")
+        if [[ ! -z "${TRACES}" ]]; then
+          SKIP_ARGS=1
+          PHASE3_TRACES=${TRACES}
+          log_info "Overwriting PHASE3_TRACES=${PHASE3_TRACES}"
+        fi
         ;;
         -as|--alyzesp)
         DO_PHASE3_ANALYZE=1
-        shift
         ;;
         -u|--reusetraces)
         DO_TRACE_REUSE=1
-        shift
         ;;
         -p|--parallel)
         DO_PARALLEL=1
-        shift
         ;;
         -c|--cleanup)
         DO_CLEANUP=1
-        shift
         ;;
         -i|--final)
         DO_FINAL=1
-        shift
         ;;
         -e|--export)
         DO_EXPORT=1
-        shift
         ;;
         -f|--full)
         DO_GENKEYS=1
@@ -1133,111 +1318,122 @@ function DATA_parse {
         DO_PHASE3_MEASURE=1
         DO_PHASE3_ANALYZE=1
         DO_FINAL=1
-        shift
         ;;
         --dry)
         DO_DRY=1
-        shift
+        ;;
+        -*)
+        print_error "Invalid option $key!"
+        help
+        exit 1
         ;;
         *)
         break
         ;;
     esac
+    SHIFT=$((SHIFT+1))
   done
-  if [[ "${DO_NEWFOLDER}" -eq "1" ]]; then
-    new_folder
+
+  CONFIG=${@:1:${SHIFT}}
+  shift ${SHIFT}
+
+  if [[ $# -ge 1 ]]; then
+    init_for_run
   fi
-  
-  if [[ "$1" = "all" ]]; then
-    if ! [[ ${TARGETFILE} ]]; then
-      print_error "Missing TARGETFILE ${TARGETFILE}"
+  while [[ $# -ge 1 ]]
+  do
+    SHIFT=0
+    RES=0
+    WORKDIR=
+    # Call algorithm-specific function for parsing parameters and setting up stuff.
+    # It shall set $WORKDIR to the desired algorithm directory
+
+    type cb_prepare_algo &>/dev/null
+    if [[ "$?" -eq "0" ]]; then
+      cb_prepare_algo "$@"
+    fi
+
+    # Legacy only. Use cb_prepare_algo instead
+    type cb_run_single &>/dev/null
+    if [[ "$?" -eq "0" ]]; then
+      print_warning "Warning! cb_run_single is deprecated. Use cb_prepare_algo instead"
+      cb_run_single "$@"
+    fi
+
+    if [[ -z "${WORKDIR}" ]]; then
+      print_error "Configure WORKDIR in cb_prepare_algo!"
+      print_error "This is where all intermediate and final analysis files are placed"
+      print_error 'E.g. `WORKDIR=${FRAMEWORK}/${ALGO}/${PARAM}`'
       exit 1
     fi
-    init_for_run
-    while read LINE; do
-      if [[ "${LINE}" == "" ]] || [[ ${LINE} == "#*" ]]; then
-        # Skip comments and empty lines
-        continue
-      fi
-      enter_frameworkdir
-      print_info "Testing '$LINE'"
-      leave_frameworkdir
-      
-      setstarttime
-      cb_run_single "${LINE}"
-      getelapsedtime
-      getpeakmemory
-      
-      enter_frameworkdir
-      if [[ ${PEAK_MEMORY} == 0 ]]; then
-        print_info "$(printf "Testing '$LINE' completed in %.2f seconds (or %.2f CPU seconds)" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
-      else
-        print_info "$(printf "Testing '$LINE' completed in %.2f seconds (or %.2f CPU seconds) with a peak RAM usage of ${PEAK_MEMORY} MiB" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
-      fi
-      leave_frameworkdir
-      echo "============================================================"
-    done < "${TARGETFILE}"
-  else
-    if [[ $# -ge 1 ]]; then
-      init_for_run
+
+    # Extract args of current algorithm
+    SHIFT=$((SHIFT+1))
+    ALGOCMDLINE=${@:1:${SHIFT}}
+    shift ${SHIFT}
+    if [[ "$?" -ne "0" ]]; then
+      print_error "Invalid SHIFT value specified, or invalid algorithm parameters!"
+      print_error "Ensure that SHIFT equals the number of algorithm parameters"
+      print_error "ALGOCMDLINE=$ALGOCMDLINE"
+      exit 1
     fi
-    while [[ $# -ge 1 ]]
-    do
-      SHIFT=0
-      ALGOCMDLINE="$*"
-      grep -q -e "^${ALGOCMDLINE}$" "${TARGETFILE}"
-      if [[ "$?" -ne "0" ]]; then
+
+    # Match args against TARGETFILE
+    if [[ -f "${TARGETFILE}" ]]; then
+      FOUND=0
+      while read -r ALGOSUPPORT; do
+        echo "${ALGOCMDLINE}" | grep -q -x -E -e "${ALGOSUPPORT}" -
+        if [[ "$?" -eq "0" ]]; then
+          FOUND=1
+          break
+        fi
+      done < "${TARGETFILE}"
+      if [[ "${FOUND}" -ne "1" ]]; then
         print_error "Invalid algorithm ${ALGOCMDLINE}!"
-        print_error "Choose one of:"
+        print_error "Choose one matching these lines (regex matching is allowed):"
         cat "${TARGETFILE}"
         exit 1
       fi
-      enter_frameworkdir
-      print_info "Testing '$ALGOCMDLINE'"
-      leave_frameworkdir
-      
-      setstarttime
-      cb_run_single "$@"
-      getelapsedtime
-      getpeakmemory
-      
-      enter_frameworkdir
-      if [[ ${PEAK_MEMORY} == 0 ]]; then
-        print_info "$(printf "Testing '$ALGOCMDLINE' completed in %.2f seconds (or %.2f CPU seconds)" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
-      else
-        print_info "$(printf "Testing '$ALGOCMDLINE' completed in %.2f seconds (or %.2f CPU seconds) with a peak RAM usage of ${PEAK_MEMORY} MiB" "$DIFF_TIME_REAL" "$DIFF_TIME_CPU")"
-      fi
-      leave_frameworkdir
-      echo "============================================================"
-      shift
-      shift ${SHIFT}
-    done
-  fi
+    fi
+
+    # Run actual analysis
+    do_run "${ALGOCMDLINE}" "${CONFIG}"
+    abortonerror
+    echo "============================================================"
+
+  done
 }
 
 function help {
-  echo "./<script>.sh [options] [all | target1 bs1 ... targetN bsN]"
-  echo "all               Run all known targets"
-  echo "target1 ks1 ...   Run given target (e.g. des3) with given key bit size (e.g. 192)"
-  echo "                  Chaining of several targets is possible"
+  echo "./<script>.sh [options] target1 vargs1 ... targetN vargsN"
+  echo ""
+  echo "                   Analysis results are stored in a directory specified via the RESULTDIR environment variable"
+  echo ""
+  echo "target vargs       Run given target with a variable number of arguments vargs (e.g. key size, curve parameter)"
+  echo "                   Chaining of several targets is possible. cb_prepare_algo needs to extract one target at a time"
+  echo "                   If vargs are used, cb_prepare_algo needs to increase SHIFT accordingly by the number of additional arguments"
   echo "options:"
-  echo "-l|--list         List all available targets"
-  echo "-n|--newfolder    Create a new result folder with current time. Does not require target"
-  echo "-g|--genkeys      Phase1: Generate new keys"
-  echo "-d|--diff         Phase1: Generate traces with varying key for detecting differences"
-  echo "-ad|--alyzed      Phase1: Analyze traces for differences and create xml reports"
-  echo "-ns|--generic     Phase2: Generate traces with fixed vs. random keys to perform generic leakage tests"
-  echo "-an|--alyzens     Phase2: Analyze traces for generic leakage and create xml reports"
-  echo "-sp|--specific    Phase3: Generate traces with random keys to perform specific leakage tests"
-  echo "-u|--reusetraces  Phase3: Re-use existing traces from generic tests for specific tests"
-  echo "-as|--alyzesp     Phase3: Analyze traces for specific leakage and create xml reports"
-  echo "-p|--parallel     Run tasks in parallel"
-  echo "-i|--final        Generate final result XML files"
-  echo "-e|--export       Export framework files (ELF/asm/src) in a zip archive"
-  echo "-c|--cleanup      Delete phase1 trace files afterwards"
-  echo "--dry             Dry-run phase1 (-g and --diff) to test your script with extended debug output"
-  echo "-f|--full         Run -g -d -ad -ns -an -sp -as -i"
-  exit
+  echo "-h|--help          Print this help"
+  echo "-l|--list          List all available targets"
+  echo "               [n] Optional argument to overwrite PHASE[123]_TRACES"
+  echo "--phase1       [n] Run the whole phase1 with PHASE1_TRACES traces (-g -d -ad)"
+  echo "--phase2       [n] Run the whole phase2 with PHASE2_TRACES traces (-ns -an)"
+  echo "--phase3       [n] Run the whole phase3 with PHASE3_TRACES traces (-sp -as). Optionally provide -u"
+  echo ""
+  echo "The individual phase steps can be invoked separately:"
+  echo " -g|--genkeys  [n] Phase1: Generate PHASE1_TRACES new keys"
+  echo " -d|--diff         Phase1: Generate traces with varying key for detecting differences"
+  echo "-ad|--alyzed       Phase1: Analyze traces for differences and create xml reports"
+  echo "-ns|--generic  [n] Phase2: Generate PHASE2_TRACES traces with fixed vs. random keys to perform generic (non-specific) leakage tests"
+  echo "-an|--alyzens      Phase2: Analyze traces for generic leakage and create xml reports"
+  echo "-sp|--specific [n] Phase3: Generate PHASE3_TRACES traces with random keys to perform specific leakage tests"
+  echo " -u|--reusetraces  Phase3: Re-use existing traces from generic tests for specific tests to speed-up the process"
+  echo "-as|--alyzesp      Phase3: Analyze traces for specific leakage and create xml reports"
+  echo ""
+  echo "-p|--parallel      Run tasks in parallel on all CPU cores available, as reported by 'nproc'"
+  echo "-i|--final         Generate final result XML files"
+  echo "-e|--export        Export framework files (ELF/asm/src) in a framework.zip archive for the DATA GUI"
+  echo "-c|--cleanup       Delete trace files and intermediate pickle files"
+  echo "--gui              Run the DATA GUI with the latest result"
+  echo "--dry              Dry-run phase1 (-g and --diff) on a single trace to test your script with extended debug output"
 }
-
-init

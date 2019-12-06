@@ -16,13 +16,12 @@
 #########################################################################
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
 
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
-include ../config.mk
 
 # Project Name
 PROJ := DATA - Pintool
@@ -30,8 +29,16 @@ PROJ := DATA - Pintool
 # Pintool Name
 TEST_TOOL_ROOTS := addrtrace
 
+#------------------------------------------------------------------------
+# Targets
+#------------------------------------------------------------------------
+.PHONY: all clean clean2 i386 x86_64 32 64
+
+all: i386 x86_64 32 64
+
 # Pin Root
 ifneq ($(MAKECMDGOALS),help)
+ifneq ($(MAKECMDGOALS),clean)
   ifndef PIN_ROOT
     $(error PIN_ROOT is undefined!)
   endif
@@ -39,22 +46,28 @@ ifneq ($(MAKECMDGOALS),help)
   include $(CONFIG_ROOT)/makefile.config
   include $(TOOLS_ROOT)/Config/makefile.default.rules
 endif
+endif
 
-#------------------------------------------------------------------------
-# Targets
-#------------------------------------------------------------------------
-.PHONY: all clean clearfiles
+32:
+	make TARGET=ia32 obj-ia32/$(TEST_TOOL_ROOTS).so
 
-all: $(TEST_TOOL_ROOTS).so
+64: obj-intel64/$(TEST_TOOL_ROOTS).so
 
-$(TEST_TOOL_ROOTS).so: obj-intel64/$(TEST_TOOL_ROOTS).so
-	rm -f $@
-	ln -s $^ $(TEST_TOOL_ROOTS).so
+i386:
+	ln -sf obj-ia32 $@
 
-clean: clearfiles
+x86_64:
+	ln -sf obj-intel64 $@
 
-clearfiles:
-	rm -f $(TEST_TOOL_ROOTS).so
+# Submakefile already defines 'clean' target
+# To avoid re-defining clean, we make our own
+# clean2 target
+clean: clean2
+
+clean2: clean
+	rm -f  i386 x86_64
+	rm -rf obj-ia32
+	rm -rf obj-intel64
 
 help:
 	@echo
@@ -64,4 +77,3 @@ help:
 	@echo "  make help .............. Show this text."
 	@echo "  make clean ............. Clean up."
 	@echo
-

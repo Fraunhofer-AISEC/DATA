@@ -16,7 +16,7 @@
 #########################################################################
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
 
 #------------------------------------------------------------------------
@@ -29,16 +29,28 @@ PROJ := DATA - Cryptolib Common
 #------------------------------------------------------------------------
 # Targets
 #------------------------------------------------------------------------
-.PHONY: all clean
+.PHONY: all clean dsa_nonce preload
 
-all: cleanenv
+all: cleanenv openssl dsa_nonce preload
 
 cleanenv: cleanenv.c
 	$(CC) -Wall $^ -o $@
 
+openssl:
+	@./fetch_openssl.sh
+
+dsa_nonce: openssl
+	$(MAKE) -C dsa_nonce
+
+preload:
+	$(MAKE) -C preload
+
 clean:
 	rm -f cleanenv
 	rm -f cleanenv.txt
+	rm -rf openssl
+	$(MAKE) -C dsa_nonce clean
+	$(MAKE) -C preload clean
 
 help:
 	@echo

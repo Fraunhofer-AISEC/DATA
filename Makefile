@@ -16,94 +16,59 @@
 #########################################################################
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
-
-#------------------------------------------------------------------------
-# Settings
-#------------------------------------------------------------------------
--include config.mk
 
 # Project Name
 PROJ := DATA - Differential Address Trace Analysis
+VER := $(shell cat VERSION)
 
-# Target shell must be bash!
-SHELL := /bin/bash
+.PHONY: clean mrproper
 
-#------------------------------------------------------------------------
-# User-configurable settings
-#------------------------------------------------------------------------
-
-# Enable parallelism (on by default)
-PARALLEL ?= -p
-
-# Enable trace re-use (on by default)
-TREUSE ?= -u
-
-# Target framework
-FRAMEWORK ?= openssl
-
-# Target script
-SCRIPT ?= symmetric.sh
-
-# Target algorithm
-ALGO ?= des-ecb
-
-# Target keysize. Some targets do not need to specify keysizes.
-KS ?= 64
-
-#------------------------------------------------------------------------
-# End of user-configurable settings
-#------------------------------------------------------------------------
-
-#------------------------------------------------------------------------
-# Targets
-#------------------------------------------------------------------------
-.PHONY: all run setup phase1 phase2 phase3 clean mrproper
-
-setup: .setup
+setup: .gitsetup data.sh
 	@$(MAKE) -s -C pin
-	@$(MAKE) -s -C pintool
+	@# pintool requires $PIN_ROOT
+	@bash -c "source pin/source.sh && $(MAKE) -s -C pintool"
 	@$(MAKE) -s -C cryptolib/common
 	@$(MAKE) -s -C analysis
 
-.setup:
-	echo "DATA_ROOT=$(PWD)" > config.mk
-	echo "RESULTDIR=$(PWD)/results" >> config.mk
+.gitsetup:
 	git submodule init
-	git submodule update --recursive
-	touch .setup
+	git submodule update --remote
+	touch .gitsetup
 
-all: setup
-run: phase1 phase2 phase3
+########################################################################
+define DATASH_BODY
+# Source this script to enable DATA
+if [[ ! -z "$${DATA_ROOT}" ]]; then
+  echo "DATA already loaded! Reloading..."
+fi
 
-phase1: setup
-	@source analysis/.pyenv/bin/activate ;\
-	cd cryptolib/$(FRAMEWORK) ;\
-	./$(SCRIPT) -g -d -ad $(PARALLEL) $(ALGO) $(KS)
-	@echo "Results generated: cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/result_phase1.xml"
+# Installation path
+export DATA_ROOT=$(CURDIR)
+export DATA_COMMON=$${DATA_ROOT}/cryptolib/common/
+export DATA_LEAKAGE_MODELS=$${DATA_ROOT}/analysis/leakage_models/
 
-phase2: setup
-	@source analysis/.pyenv/bin/activate ;\
-	cd cryptolib/$(FRAMEWORK) ;\
-	./$(SCRIPT) -ns -an $(PARALLEL) $(ALGO) $(KS)
-	@echo "Results generated: cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/result_phase2.xml"
+# Load PIN and python environment
+export VIRTUAL_ENV_DISABLE_PROMPT=1
+source "$${DATA_ROOT}/pin/source.sh"
+source "$${DATA_ROOT}/analysis/.pyenv/bin/activate"
 
-phase3: setup
-	@source analysis/.pyenv/bin/activate ;\
-	cd cryptolib/$(FRAMEWORK) ;\
-	./$(SCRIPT) -sp -as -i $(PARALLEL) $(TREUSE) $(ALGO) $(KS)
-	@echo "Results generated: cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/result_final.xml"
+# Check for data + datagui
+which datagui && echo "datagui available"
 
-export: setup
-	@source analysis/.pyenv/bin/activate ;\
-	cd cryptolib/$(FRAMEWORK) ;\
-	./$(SCRIPT) -e $(ALGO) $(KS)
-	@echo "Export generated: cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/framework.zip"
+# Set (DATA) in BASH prompt
+export PS1="(DATA $(VER)) $$PS1"
+endef
+export DATASH_BODY
+########################################################################
 
-gui:	export
-	@source analysis/.pyenv/bin/activate ;\
-	datagui cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/result_phase1.pickle cryptolib/$(FRAMEWORK)/lastresults/$(FRAMEWORK)/$(ALGO)/framework.zip &
+data.sh:
+	@echo "$$DATASH_BODY" > $@
+
+install: setup data.sh
+	cp data.sh ~/
+	@echo "Installation complete. To run data, source ~/data.sh"
 
 clean:
 	$(MAKE) clean -C pintool
@@ -115,21 +80,16 @@ mrproper: clean
 	$(MAKE) clean -C pin
 	$(MAKE) clean -C analysis
 	rm -f config.mk
-	rm -f .setup
+	rm -f .gitsetup
+	rm -f data.sh
 
 help:
 	@echo
 	@echo "$(PROJ)"
 	@echo
 	@echo "  make [setup] ........... Prepare the framework."
-	@echo "  make run ............... Execute full example run."
-	@echo "  make all ............... Prepare framework and execute full run."
-	@echo "  make phase1 ............ Execute only phase 1 of the example run."
-	@echo "  make phase2 ............ Execute only phase 2 of the example run."
-	@echo "  make phase3 ............ Execute only phase 3 of the example run."
-	@echo "  make gui ............... Open analysis result in GUI."
+	@echo "  make install ........... Install data.sh in HOME."
 	@echo "  make help .............. Show this text."
 	@echo "  make clean ............. Clean up lightweight."
 	@echo "  make mrproper .......... Clean up everything."
 	@echo
-

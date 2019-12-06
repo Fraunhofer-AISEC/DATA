@@ -20,18 +20,26 @@
 # @brief Increases the version number in all license headers.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
 
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
-VER=0.2
+VER=$(cat VERSION)
 
 #------------------------------------------------------------------------
 # Update version number in all license headers
 #------------------------------------------------------------------------
 for f in $(git ls-files); do
+  if [[ ! -f "$f" ]]; then
+    echo "Skipping non-regular file $f"
+    continue
+  fi
+  if [[ -L "$f" ]]; then
+    echo "Skipping symbolic link $f"
+    continue
+  fi
   grep "@version" "$f" > /dev/null
   if [[ "$?" -eq "0" ]]; then
     echo "Setting version number in $f"

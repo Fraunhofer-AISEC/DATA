@@ -1,3 +1,5 @@
+#!/bin/bash
+
 #########################################################################
 # Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
 #
@@ -18,28 +20,27 @@
 # @brief Allows to preload libc.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
 
 #------------------------------------------------------------------------
 # Bind
 #------------------------------------------------------------------------
-if [[ "${PRELOAD}" == "" ]]; then
-  echo "This script is only to be sourced from common.sh"
-else
-  # (re)generate clean environment file
-  rm -rf "${CLEANENVFILE}"
-  echo "LD_BIND_NOW=1" >> "${CLEANENVFILE}"
-  # Link all shared libraries for pre-loading
-  PRELOAD_LIBS=""
-  for f in *.so; do
-    if [[ -e "$f" ]]; then
-      if [[ "${PRELOAD_LIBS}" == "" ]]; then
-        PRELOAD_LIBS="${PRELOAD}/$f"
-      else
-        PRELOAD_LIBS="${PRELOAD_LIBS}:${PRELOAD}/$f"
-      fi
-    fi
-  done
-  echo "LD_PRELOAD=${PRELOAD_LIBS}" >> "${CLEANENVFILE}"
+
+echo "LD_BIND_NOW=1"
+# Link all shared libraries for pre-loading
+PRELOAD_LIBS=""
+if [[ -z "${SETARCH}" ]]; then
+  SETARCH=$(arch)
 fi
+
+for f in ./${SETARCH}/*.so; do
+  if [[ -e "$f" ]]; then
+    if [[ "${PRELOAD_LIBS}" == "" ]]; then
+      PRELOAD_LIBS="${PWD}/$f"
+    else
+      PRELOAD_LIBS="${PRELOAD_LIBS}:${PWD}/$f"
+    fi
+  fi
+done
+echo "LD_PRELOAD=${PRELOAD_LIBS}"

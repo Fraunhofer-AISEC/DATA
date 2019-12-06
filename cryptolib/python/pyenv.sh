@@ -20,7 +20,7 @@
 # @brief Sets up a Python virtual environment.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
 
 #------------------------------------------------------------------------

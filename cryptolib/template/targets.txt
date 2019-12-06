@@ -1,2 +1,1 @@
-algo1 64
-algo2 128
+TEST 128

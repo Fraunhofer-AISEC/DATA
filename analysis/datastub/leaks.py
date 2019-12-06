@@ -21,7 +21,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @brief Everything related to control-flow and data leaks.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 
 """
 *************************************************************************
@@ -55,28 +55,29 @@ TYPE_B = 1
 TYPE_C = 2
 TYPE_D = 3
 
-MASK_NONE = 0
-MASK_BRANCH = 4
-MASK_HEAP = 8
-MASK_LEAK = 16
+class MaskType(Enum):
+    NONE = 0
+    BRANCH = 4
+    HEAP = 8
+    LEAK = 16
 
 class Type(Enum):
 
-    READ  = MASK_NONE | TYPE_A
-    WRITE = MASK_NONE | TYPE_B
+    READ  = MaskType.NONE.value | TYPE_A
+    WRITE = MaskType.NONE.value | TYPE_B
 
-    BRANCH     = MASK_BRANCH | TYPE_A
-    FUNC_ENTRY = MASK_BRANCH | TYPE_B
-    FUNC_EXIT  = MASK_BRANCH | TYPE_C
-    FUNC_BBL   = MASK_BRANCH | TYPE_D
+    BRANCH     = MaskType.BRANCH.value | TYPE_A
+    FUNC_ENTRY = MaskType.BRANCH.value | TYPE_B
+    FUNC_EXIT  = MaskType.BRANCH.value | TYPE_C
+    FUNC_BBL   = MaskType.BRANCH.value | TYPE_D
 
-    HREAD  = MASK_HEAP | TYPE_A
-    HWRITE = MASK_HEAP | TYPE_B
-    HALLOC = MASK_HEAP | TYPE_C
-    HFREE  = MASK_HEAP | TYPE_D
+    HREAD  = MaskType.HEAP.value | TYPE_A
+    HWRITE = MaskType.HEAP.value | TYPE_B
+    HALLOC = MaskType.HEAP.value | TYPE_C
+    HFREE  = MaskType.HEAP.value | TYPE_D
 
-    DLEAK  = MASK_LEAK | TYPE_A
-    CFLEAK = MASK_LEAK | TYPE_B
+    DLEAK  = MaskType.LEAK.value | TYPE_A
+    CFLEAK = MaskType.LEAK.value | TYPE_B
 
     @classmethod
     def isbranch(cls, e):
@@ -100,18 +101,18 @@ chunk_size = bs * blocks
 class Entry:
     def __init__(self, arr):
         (self.type, self.ip, self.data) = arr
-        
+
     def __eq__(self, other):
         if other == None:
             return False
         return (self.type, self.ip, self.data) == (other.type, other.ip, other.data)
-    
+
     def __ne__(self, other):
         return not self.__eq__(other)
-    
+
     def __hash__(self):
         return (self.type << 128) & (self.ip << 64) & (self.data)
-    
+
     def __str__(self):
         return str.format("%d(%s):%08x:%08x" % (self.type, str(Type(self.type)), self.ip, self.data))
 
@@ -122,18 +123,18 @@ class Entry:
 class MergePoint:
     def __init__(self, mtype, ip, depth):
         (self.type, self.ip, self.depth) = (mtype, ip, depth)
-        
+
     def __eq__(self, other):
         if other == None:
             return False
         return (self.type, self.ip, self.depth) == (other.type, other.ip, other.depth)
-    
+
     def __ne__(self, other):
         return not self.__eq__(other)
-    
+
     def __hash__(self):
         return (self.type << 128) & (self.ip << 64) & (self.depth)
-    
+
     def __str__(self):
         return str.format("%d:%08x:%08x" % (self.type, self.ip, self.depth))
 
@@ -145,21 +146,21 @@ class Context:
     def __init__(self, caller, callee):
         self.caller = caller
         self.callee = callee
-    
+
     @classmethod
     def fromFuncCall(cls, entry):
         assert(entry.type == Type.FUNC_ENTRY.value)
         return cls(entry.ip, entry.data)
-        
+
     def __eq__(self, other):
         return (self.caller, self.callee) == (other.caller, other.callee)
-    
+
     def __ne__(self, other):
         return not self.__eq__(other)
-    
+
     def __lt__(self, other):
         return self.caller < other.caller
-    
+
     """
     The context is uniquely identified by the function entry point (the callee)
     """
@@ -181,54 +182,54 @@ class CallStack:
     def __init__(self, cid = -1):
         self.stack = []
         self.id = cid
-    
+
     def __copy__(self):
         new = CallStack()
         new.stack = self.stack[:]
         return new
-    
+
     def __len__(self):
         return len(self.stack)
-    
+
     def __getitem__(self, index):
         return self.stack[index]
-    
+
     def __eq__(self, other):
         if other == None:
             return False
         return self.stack == other.stack
-    
+
     def __ne__(self, other):
         return not self.__eq__(other)
-    
+
     def depth(self):
         return len(self.stack)
-    
+
     def docall_context(self, c):
         assert(isinstance(c, Context))
         self.stack.append(c)
-    
+
     def doreturn_context(self):
         return self.stack.pop()
-    
+
     def docall(self, e):
         debug(3, "[%d]call from %08x to %08x", (self.id, e.ip, e.data))
         self.docall_context(Context.fromFuncCall(e))
         pass
-    
+
     def doreturn(self):
         size = len(self.stack)
         assert(size > 0)
         ctxt = self.doreturn_context()
         size -= 1
-        
+
         if size >= 1:
             debug(3, "[%d]Return from ctxt %08x to %08x", (self.id, ctxt.callee, self.stack[size-1].callee))
         else:
             debug(0, "[%d]Return from ctxt %08x to nowhere", (self.id, ctxt.callee))
             if size < 0:
                 size = 0
-   
+
     def update_context(self, e):
         if e.type == Type.FUNC_ENTRY.value:
             self.docall(e)
@@ -240,7 +241,7 @@ class CallStack:
         for i in reversed(range(0, len(self.stack))):
             debug(0, "callee %x", (self.stack[i].callee))
             debug(0, " caller %x", (self.stack[i].caller))
-            
+
     def top(self):
         size = len(self.stack)
         if size == 0:
@@ -256,19 +257,19 @@ class MergeMap:
     def __init__(self, mtype):
         self.mymap = {}
         self.mytype = mtype
-    
+
     def __len__(self):
         return len(self.mymap)
-    
+
     def __getitem__(self, key):
         return self.mymap[key]
-    
+
     def __iter__(self):
         return self.mymap.__iter__()
-    
+
     def clear(self):
         self.mymap = {}
-    
+
     def merge(self, newmap):
         if not isinstance(newmap, self.mytype):
             debug(0, newmap.__class__)
@@ -278,13 +279,13 @@ class MergeMap:
             self.mymap[newmap] = newmap
         else:
             self.mymap[newmap].merge(newmap)
-    
+
     def has_key(self, key):
         return key in self.mymap
-    
+
     def keys(self):
         return self.mymap.keys()
-    
+
     def doprint(self, printer):
         for e in sorted_keys(self.mymap):
             self.mymap[e].doprint(printer)
@@ -297,28 +298,28 @@ class DataLeakEntry:
     def __init__(self, addr):
         self.addr = addr
         self.count = 1
-    
+
     def __hash__(self):
         return self.addr
-    
+
     def __eq__(self, other):
         return self.addr == other.addr
 
     def __ne__(self, other):
         return not self.__eq__(other)
-    
+
     def __lt__(self, other):
         return self.addr < other.addr
-    
+
     def quantize(self, mask):
         self.addr &= mask
-    
+
     def merge(self, newentry):
         self.count += newentry.count
-        
+
     def __str__(self):
         return str.format('%08x: %d' % (self.addr, self.count))
-    
+
     def doprint(self, printer):
         printer.doprint_generic(self)
 
@@ -332,10 +333,10 @@ class CFLeakEntry:
         self.length = length
         self.mp = mp
         self.count = 1
-    
+
     def __hash__(self):
         return self.bp.ip + (self.mp << 64) + (self.length << 64)
-    
+
     def __eq__(self, other):
         return (self.bp.ip, self.length, self.mp) == (other.bp.ip, other.length, other.mp)
 
@@ -349,18 +350,18 @@ class CFLeakEntry:
             return self.length < other.length
         if self.mp != other.mp:
             return self.mp < other.mp
-    
+
     def quantize(self, mask):
         self.bp.ip &= mask
         self.mp &= mask
-        
+
     def collapse(self):
         self.length = 0
         self.mp = 0
 
     def merge(self, newentry):
         self.count += newentry.count
-    
+
     def __str__(self):
         string = str.format('%08x' % self.bp.ip)
         if self.mp > 0:
@@ -368,7 +369,7 @@ class CFLeakEntry:
         if self.length > 0:
             string += str.format(' (%d)' % self.length)
         return string + str.format(': %d' % self.count)
-    
+
     def doprint(self, printer):
         printer.doprint_generic(self)
 
@@ -423,6 +424,18 @@ class LeakStatus:
                 return True
         return False
 
+    def max_leak_normalized(self):
+        normalized = 0
+        if self.is_generic_leak():
+            normalized = max(normalized, max(self.nsleak, key=lambda l: l.normalized()).normalized())
+            # Remove M_pos, as it does not work properly
+            # normalized = max(normalized, max(self.nsleak, key=lambda l: 0 if l.nstype == NSPType.Type3 else l.normalized()).normalized())
+        if self.is_specific_leak():
+            normalized = max(normalized, max(self.spleak, key=lambda l: l.normalized()).normalized())
+            # Remove M_pos, as it does not work properly
+            # normalized = max(normalized, max(self.spleak, key=lambda l: 0 if l.sptype == NSPType.Type3 else l.normalized()).normalized())
+        return normalized
+
     def __str__(self):
         # check for generic leaks
         havensleak = self.is_generic_leak()
@@ -457,7 +470,7 @@ class LeakStatus:
         # unknown
         else:
             rstr = "status='unknown'"
-        
+
         # return
         return rstr
 
@@ -467,7 +480,7 @@ class LeakStatus:
 
 class NSPType(Enum):
     Type1a = 0  # number of addresses
-    Type1b = 1  # number of unique addresses 
+    Type1b = 1  # number of unique addresses
     Type2  = 2  # number of accesses per address
     Type3  = 3  # position of address during access
     Noleak = 4  # special: no leakage detected
@@ -489,7 +502,19 @@ class NSLeak(object):
         self.limit = limit
         self.confidence = conf
         self.isleak = isleak
-    
+
+    def normalized(self):
+        if not self.isleak or self.nstype == NSPType.Noleak:
+            return 0.0
+        assert self.teststat is not None
+        assert self.limit is not None
+        if self.teststat < self.limit:
+            return 0.0
+        return (self.teststat - self.limit) / (1.0 - self.limit)
+
+    def threshold(self):
+        return self.limit
+
     def __lt__(self, other):
         if ((self.nstype in [NSPType.Type1a, NSPType.Type1b]) and \
            (other.nstype in [NSPType.Type1a, NSPType.Type1b])) or \
@@ -570,6 +595,18 @@ class SPLeak(object):
         else:
             return False
 
+    def normalized(self):
+        if not self.isleak:
+            return 0.0
+        assert self.rdc is not None
+        assert self.rdc_limit is not None
+        if self.rdc < self.rdc_limit:
+            return 0.0
+        return (self.rdc - self.rdc_limit) / (1.0 - self.rdc_limit)
+
+    def threshold(self):
+        return self.rdc_limit
+
     def __ne__(self, other):
         return not self.__eq__(other)
 
@@ -586,7 +623,7 @@ class SPLeak(object):
                 source = "M_pos"
             else:
                 source = "unknown"
-            return str.format("result='leak' source='%s' leakagemodel='%s' property='%d' address='%s' rdc='%s' significance='%s' confidence='%f'" \
+            return str.format("result='leak' source='%s' leakagemodel='%s' property='%s' address='%s' rdc='%s' significance='%s' confidence='%f'" \
                               % (source, self.target, self.property, (("%x" % self.address) if self.address is not None else "-"), (("%.4f" % self.rdc) \
                                if self.rdc is not None else "-"), (("%.4f" % self.rdc_limit) if self.rdc_limit is not None else "-"), self.confidence))
 
@@ -603,7 +640,7 @@ class EvidenceEntry:
         self.entries = entries
         self.key = evkey
         self.source = evsource
-    
+
     def __str__(self):
         string = "Key: " + str(self.key) + "\n"
         string += "Source: " + str(self.source) + "\n"
@@ -619,7 +656,12 @@ class Leak:
     def __init__(self, ip):
         self.ip = ip
         self.status = LeakStatus()
-        self.evidence = [] # Evidence is not merged but chained in a list of EvidenceEntries
+        # self.entries is instantiated in derived classes and contains
+        # phase 1 results
+
+        # self.evidence contains phase2/3 evidences
+        # Evidence is not merged but chained in a list of EvidenceEntries
+        self.evidence = []
         self.meta = None
 
     def clone_collapsed(self, mask, collapse_cfleaks = False):
@@ -632,33 +674,33 @@ class Leak:
                 c.collapse()
             clone.append(c)
         return clone
-        
+
     def append(self, entry):
         self.entries.merge(entry)
-    
+
     def __hash__(self):
         return self.ip
-    
+
     def __eq__(self, other):
         return self.ip == other.ip
-    
+
     def __ne__(self, other):
         return not self.__eq__(other)
 
     def __lt__(self, other):
         return self.ip < other.ip
-    
+
     def merge(self, newleak):
         assert(self.ip == newleak.ip)
         for e in newleak.entries:
-            self.entries.merge(newleak.entries[e])    
+            self.entries.merge(newleak.entries[e])
         self.status.merge(newleak.status)
         self.evidence += newleak.evidence
-    
+
     def add_evidence(self, ev):
         assert(isinstance(ev, EvidenceEntry))
         self.evidence.append(ev)
-    
+
     def __str__(self):
         string = ""
         for e in sorted_keys(self.entries):
@@ -689,7 +731,7 @@ class FunctionLeak:
         else:
             debug(0, "Unknown type: " + str(leak.__class__))
             assert(False)
-    
+
     # Merge a FunctionLeak
     def merge(self, fleak):
         assert(self.fentry == fleak.fentry)
@@ -697,22 +739,22 @@ class FunctionLeak:
             self.dataleaks.merge(fleak.dataleaks[e])
         for e in fleak.cfleaks:
             self.cfleaks.merge(fleak.cfleaks[e])
-    
+
     def __hash__(self):
         return self.fentry
-    
+
     def __eq__(self, other):
         return self.fentry == other.fentry
 
     def __ne__(self, other):
         return not self.__eq__(other)
-    
+
     def __lt__(self, other):
         return self.fentry < other.fentry
-    
+
     def doprint(self, printer, printleaks = False):
         printer.doprint_generic(self, printleaks)
-    
+
     def __str__(self):
         return str(self.sym)
 
@@ -725,30 +767,30 @@ class Library:
         self.entries = MergeMap(FunctionLeak)
         self.libentry = fleak.sym.img
         self.append(fleak)
-    
+
     # Append a FunctionLeak
     def append(self, fleak):
         assert(isinstance(fleak, FunctionLeak))
         self.entries.merge(fleak)
-    
+
     # Merge a Library
     def merge(self, libleak):
         assert(self.libentry == libleak.libentry)
         for e in libleak.entries:
             self.append(e)
-    
+
     def __hash__(self):
         return self.libentry.__hash__()
-    
+
     def __eq__(self, other):
         return self.libentry.__eq__(other.libentry)
 
     def __ne__(self, other):
         return not self.__eq__(other)
-    
+
     def __lt__(self, other):
         return self.libentry.__lt__(other.libentry)
-    
+
     def doprint(self, printer, printleaks = False):
         printer.doprint_generic(self, printleaks)
 
@@ -762,15 +804,15 @@ class Library:
 class LibHierarchy:
     def __init__(self):
         self.entries = MergeMap(Library)
-    
+
     def merge(self, leak):
         self.report_leak(leak)
-    
+
     def report_leak(self, leak):
         fleak = FunctionLeak(leak)
         lib = Library(fleak)
         self.entries.merge(lib)
-        
+
     def doprint(self, printer, printleaks = False):
         printer.doprint_generic(self, printleaks)
 
@@ -783,8 +825,8 @@ class DataLeak(Leak):
         Leak.__init__(self, ip)
         self.entries = MergeMap(DataLeakEntry)
         if entry is not None:
-            self.append(entry) 
-    
+            self.append(entry)
+
     def doprint(self, printer, printleaks = True):
         printer.doprint_generic(self, printleaks)
 
@@ -794,13 +836,13 @@ class CFLeak(Leak):
         self.entries = MergeMap(CFLeakEntry)
         if entry is not None:
             self.append(entry)
-    
+
     def get_mergepoint(self):
         mp = set([])
         for e in self.entries:
             mp.add(e.mp)
         return mp
-    
+
     def doprint(self, printer, printleaks = True):
         printer.doprint_generic(self, printleaks)
 
@@ -820,14 +862,14 @@ class CallHistory:
         self.ctxt = ctxt
         assert(parent is None or isinstance(parent, CallHistory))
         self.parent = parent
-    
+
     def __lt__(self, other):
         if self.ctxt is None:
             return True
         if other.ctxt is None:
             return False
         return self.ctxt.callee < other.ctxt.callee
-        
+
     def report_leak(self, callstack, leak, nocreate = False):
         if callstack is None or len(callstack) == 0:
             self.consume_leak(leak)
@@ -841,13 +883,13 @@ class CallHistory:
                 for ci in callstack:
                     debug(5, "%08x--%08x", (ci.caller, ci.callee))
                 debug(5, "Handling ctxt %08x--%08x", (ctxt.caller, ctxt.callee))
-                 
+
             if nocreate:
                 assert(ctxt in self.children)
             elif not ctxt in self.children:
                 self.children[ctxt] = CallHistory(ctxt, self)
-            self.children[ctxt].report_leak(callstack[1:], leak)
-      
+            self.children[ctxt].report_leak(callstack[1:], leak, nocreate)
+
     def consume_leak(self, leak):
         debug(2, "consuming leak@ctxt %08x", (self.ctxt.callee))
         if isinstance(leak, DataLeak):
@@ -857,32 +899,32 @@ class CallHistory:
         else:
             debug(0, "Unknown type: " + str(leak.__class__))
             assert(False)
-    
+
     def doprint(self, printer, printleaks = False):
         printer.doprint_generic(self, printleaks)
-    
+
     def flatten(self, flat = None):
         main = False
         if flat is None:
             flat = LibHierarchy()
             main = True
-        
+
         for leak in sorted_keys(self.dataleaks):
             c = copy.deepcopy(leak)
             flat.merge(c)
         for leak in sorted_keys(self.cfleaks):
             c = copy.deepcopy(leak)
             flat.merge(c)
-            
+
         for k in sorted_keys(self.children):
             self.children[k].flatten(flat)
-        
+
         if main:
             return flat
-    
+
     def __str__(self):
         return str(self.ctxt)
-    
+
     def has_leak(self, callstack, leak):
         if callstack is None or len(callstack) == 0:
             if isinstance(leak, DataLeak):
@@ -900,7 +942,7 @@ class CallHistory:
                 debug(3, "Processing callstack:")
                 for ci in callstack:
                     debug(3, "%08x--%08x", (ci.caller, ci.callee))
-            
+
             if ctxt in self.children:
                 return self.children[ctxt].has_leak(callstack[1:], leak)
 
@@ -922,7 +964,7 @@ class LeakCounter:
         self.data_leaks_generic = 0
         self.data_leaks_specific = {}
         self.data_leaks_total = 0
-    
+
     def increment(self, other):
         self.cflow_diff_total += other.cflow_diff_total
         self.cflow_diff_total_dropped += other.cflow_diff_total_dropped
@@ -967,7 +1009,7 @@ class LeakCounter:
                 else:
                     if l.status.is_specific_tested() and not l.status.is_specific_leak():
                         counter.data_diff_total_dropped += 1
-                
+
                 counted_targets = []
                 counted_leak = False
                 for sp in l.status.spleak:
@@ -1031,7 +1073,7 @@ class LeakCounter:
             debug(0, str(obj))
             assert(False)
         return counter
-    
+
     def doprint(self, printer):
         printer.doprint_generic(self)
 
@@ -1039,43 +1081,52 @@ class LeakCounter:
 *************************************************************************
 """
 
-class Lookahead:
+class QueueDebugger:
+    def __init__(self, myid):
+        self.id = myid
+
+    def debug(self, level, fstr, values = ()):
+        if debuglevel(level):
+            instr = str(fstr % values)
+            debug(level, "[%d]%s", (self.id, instr))
+
+class Lookahead(QueueDebugger):
     def __init__(self, tracequeue):
-        self.id = tracequeue.id
+        QueueDebugger.__init__(self, tracequeue.id)
         self.tq = tracequeue
         self.callstack = copy.copy(tracequeue.callstack)
         self.callstack.id = tracequeue.id
         self.myset = set()
         self.shift = 0
         self.branch = None
-    
+
     def consume_entry(self, e):
-        debug(3, "[%d]Adding bp candidate %08x", (self.id, e.ip))
-        # Add to current set, ignore data such that intersection
+        self.debug(3, "Adding bp candidate %08x", (e.ip))
+        # Add to current set, ignore data such that set intersection
         # only considers type and ip
         self.myset.add(MergePoint(e.type, e.ip, self.callstack.depth()))
-    
+
     def advance_next_bp_candidate(self, bdepth = -1):
         while True:
             assert(bdepth < 0 or self.callstack.depth() + 1 >= bdepth)
-            
+
             e = self.tq.lookahead(self.shift)
             self.shift += 1
-            
+
             if e is None:
                 return False
-            
+
             if bdepth >= 0 and self.callstack.depth() + 1 == bdepth:
                 # Last entry was a FUNC_RET
                 # reached end of function context
-                debug(3, "[%d]Reached end of context, waiting at %08x", (self.id, e.ip))
+                self.debug(3, "Reached end of context, waiting at %08x", (e.ip))
                 self.consume_entry(e)
                 return False
-            
+
             # We only merge at branch points (also call/ret) and branch targets, skip other entries
             if not Type.isbranch(e):
                 continue
-            
+
             assert(self.callstack.depth() >= bdepth)
             if bdepth < 0 or self.callstack.depth() == bdepth:
                 # We are in the right context
@@ -1084,12 +1135,12 @@ class Lookahead:
                 self.callstack.update_context(e)
                 return True
             else:
-                debug(3, "[%d]Ignoring %08x", (self.id, e.ip))
+                self.debug(3, "Ignoring %08x", (e.ip))
                 self.callstack.update_context(e)
-    
+
     def depth(self):
         return self.callstack.depth()
-    
+
     @classmethod
     def intersect(cls, lhA, lhB):
         intersect = set.intersection(lhA.myset, lhB.myset)
@@ -1101,22 +1152,22 @@ class Lookahead:
 *************************************************************************
 """
 
-class TraceQueue:
+class TraceQueue(QueueDebugger):
     def __init__(self, tfile, tid, showprogress = False):
-        self.id = tid
+        QueueDebugger.__init__(self, tid)
         self.file = tfile
         self.q = Queue()
         self.chunk = None
         self.callstack = CallStack(tid)
         self.fsize = os.path.getsize(self.file.name)
-        debug(2, "[%d]file size is %d", (self.id, self.fsize))
+        self.debug(2, "file size is %d", (self.fsize))
         self.stepsize = self.fsize / 1000
         self.fpos = 0
         self.showprogress = showprogress
         # create a virtual call to the entry
         einit = self.lookahead(0)
         assert(einit.type == Type.FUNC_ENTRY.value)
-    
+
     def refill(self, elem = blocks):
         if not self.load_chunk(elem):
             return False
@@ -1133,7 +1184,7 @@ class TraceQueue:
             e = Entry(unpacked[i*3:(i+1)*3])
             self.q.put_nowait(e)
             if debuglevel(4):
-                debug(4, "parsing %s" % str(e))
+                self.debug(4, "parsing %s", (e))
             if Type.isbranch(e):
                 if e.data != 0:
                     # Report conditional branches/call/ret twice:
@@ -1142,7 +1193,7 @@ class TraceQueue:
                     e2 = Entry([Type.FUNC_BBL.value, e.data, 0])
                     self.q.put_nowait(e2)
                     if debuglevel(4):
-                        debug(4, "Is branch, creating %s" % str(e2))
+                        self.debug(4, "Is branch, creating %s", (e2))
         self.chunk = None
 
     def load_chunk(self, elem = blocks):
@@ -1157,12 +1208,12 @@ class TraceQueue:
             self.chunk = None
             return False
         return True
-    
+
     def peak_last_branch_from_chunk(self):
         assert(self.chunk is not None)
         assert(len(self.chunk) % bs == 0)
         idx = len(self.chunk)
-        
+
         while idx >= 17:
             idx -= 17
             unpacked = struct.unpack("<" + "BQQ", self.chunk[idx:idx+17])
@@ -1170,7 +1221,7 @@ class TraceQueue:
             if Type.isbranch(e):
                 return e
         return None
-    
+
     def get(self):
         while True:
             if self.q.empty():
@@ -1181,7 +1232,7 @@ class TraceQueue:
             if Type(e.type) in (Type.HALLOC, Type.HFREE):
                 continue
             if debuglevel(4):
-                debug(4, str(e))
+                self.debug(4, str(e))
             return e
 
     def get_nofill(self):
@@ -1193,15 +1244,15 @@ class TraceQueue:
                 return None
         e = self.q.queue[i]
         if debuglevel(4):
-            debug(4, str(e))
+            self.debug(4, str(e))
         return e
-    
+
     def size(self):
         return self.q.qsize()
 
     # Advance queue to mergepoint such that next self.get yields the mergepoint
     def advance(self, mp):
-        debug(3, "[%d]advancing to %08x", (self.id, mp.ip))
+        self.debug(3, "advancing to %08x", (mp.ip))
         count = 0
         while True:
             # Make sure queue has enough items
@@ -1210,12 +1261,11 @@ class TraceQueue:
                     assert(False)
                     return -1
             e = self.q.queue[0]
-            
+
             if self.callstack.depth() == mp.depth and e.ip == mp.ip and e.type == mp.type:
-                debug(3, "[%d]advanced in %d steps", (self.id, count))
+                self.debug(3, "advanced in %d steps", (count))
                 return count
             # skip item and advance
             e = self.q.get_nowait()
             self.callstack.update_context(e)
             count += 1
-

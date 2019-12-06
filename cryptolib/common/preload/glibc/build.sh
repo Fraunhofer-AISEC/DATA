@@ -19,6 +19,8 @@ fi
 LIBCSO=$(realpath ${DIR}/build-tree/amd64-libc/libc.so)
 if ! [[ -e "${LIBCSO}" ]]; then
 	pushd $DIR
+	#DEB_BUILD_OPTIONS=parallel=8 dpkg-buildpackage
+	#dpkg-buildpackage -jauto
 	dpkg-buildpackage
 	popd
 fi
@@ -31,5 +33,5 @@ if ! [[ -e "${LIBCSO}" ]]; then
 fi
 
 # Create symlink
-rm -f ../libc.so
-ln -s "${LIBCSO}" ../
+rm -f ../$(arch)/libc.so
+ln -s "${LIBCSO}" ../$(arch)/

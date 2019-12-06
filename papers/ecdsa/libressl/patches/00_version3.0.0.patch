@@ -1,0 +1,28 @@
+diff --git a/OPENBSD_BRANCH b/OPENBSD_BRANCH
+index 1f7391f..df85c86 100644
+--- a/OPENBSD_BRANCH
++++ b/OPENBSD_BRANCH
+@@ -1 +1 @@
+-master
++libressl-v3.0.0
+diff --git a/update.sh b/update.sh
+index 216f2c2..4ff865b 100755
+--- a/update.sh
++++ b/update.sh
+@@ -1,5 +1,6 @@
+ #!/bin/sh
+ set -e
++set -x
+ 
+ openbsd_branch=`cat OPENBSD_BRANCH`
+ 
+@@ -14,8 +15,7 @@ if [ ! -d openbsd ]; then
+ fi
+ (cd openbsd
+  git fetch
+- git checkout $openbsd_branch
+- git pull --rebase)
++ git checkout $openbsd_branch)
+ 
+ # setup source paths
+ CWD=`pwd`

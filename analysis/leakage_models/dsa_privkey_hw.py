@@ -21,7 +21,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @brief Specific leakage test callback (DSA private key HW)
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 
 """
 *************************************************************************
@@ -40,16 +40,14 @@ def specific_leakage_callback(inputs):
     for i in range(0, len(inputs)):
         # load key and prep
         keyobj = serialization.load_pem_private_key(inputs[i], password=None, backend=default_backend())
-        if keyobj.key_size == 1024:
+        if keyobj.private_numbers().x <= 2**20:
             bytelen = 20
-        elif keyobj.key_size == 2048:
+        elif keyobj.private_numbers().x <= 2**28:
             bytelen = 28
         else:
             bytelen = 32
         fstr = "%0" + ("%d" % (2*bytelen)) + "x"
         xhex = fstr % keyobj.private_numbers().x
-        
-        # convert to bits and count HW
+        # convert to bits and count H
         hw[i][0] = numpy.count_nonzero(numpy.unpackbits(numpy.asarray(bytearray.fromhex(xhex), dtype=numpy.uint8)))
     return (hw)
-

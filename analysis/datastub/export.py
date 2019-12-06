@@ -21,7 +21,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @brief Everything related to storing and loading leaks and more.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 
 """
 *************************************************************************
@@ -30,17 +30,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import os
 import gzip
 import subprocess
-import _pickle as pickle
+import pickle
 from datastub.DataFS import DataFS
 from datastub.IpInfoShort import IpInfoShort,IP_INFO_FILE
 from datastub.SymbolInfo import SymbolInfo
 from datastub.utils import debug
+from datastub.leaks import CallHistory
 
 """
 *************************************************************************
 """
 
 def storepickle(pfile, leaks):
+    debug(1, "Storing pickle file")
     with gzip.GzipFile(pfile, 'wb') as f:
         pickle.dump(leaks, f)
 
@@ -48,10 +50,44 @@ def storepickle(pfile, leaks):
 *************************************************************************
 """
 
+class MyUnpickler(pickle.Unpickler):
+
+    def find_class(self, module, name):
+        result = None
+        # These files have been moved into 'datastub' package
+        mapper = ["leaks", "IpInfoShort", "DataFS", "export", "printer", "SortedCollection", "SymbolInfo"]
+        if module in mapper:
+            module = "datastub." + module
+        try:
+            result = super().find_class(module, name)
+        except Exception as e:
+            debug(0, "Error unpickling module %s, object %s" % (module, name))
+            debug(1, "Exception: " + str(e))
+            raise e
+        return result
+
+    def load_global(self):
+        module = self.readline()[:-1].decode("utf-8")
+        print("Module: " + module)
+        name = self.readline()[:-1].decode("utf-8")
+        print("Name: " + module)
+        klass = self.find_class(module, name)
+        print("Class: " + klass)
+        self.append(klass)
+
+"""
+*************************************************************************
+"""
+
 def loadpickle(pfile):
-    with gzip.GzipFile(pfile, 'rb') as f:
-        new = pickle.load(f, encoding='latin1')
-    return new
+    debug(1, "Loading pickle file")
+    try:
+        with gzip.GzipFile(pfile, 'rb') as f:
+            unp = MyUnpickler(f, encoding='latin1')
+            new = unp.load()
+            return new
+    except Exception as e:
+        raise IOError("Error loading pickle file: %s" % str(e))
 
 """
 *************************************************************************
@@ -72,10 +108,12 @@ def getSourceFileInfo(addr, binary_path):
     except:
         debug(2, "[SRC] unavailable for %s in %s", (addr, binary_path))
         return None, 0
-    # Sometimes, source line number is followed by additional text, e.g. "/path/to/file.c:350 (discriminator 2)"
-    # Strip this away
-    source_line_number = source_line_number.split()[0]
-    return source_file_path, int(source_line_number)
+    if "discriminator" in source_line_number:
+        source_line_number = source_line_number.split()[0]
+    try:
+        return source_file_path, int(source_line_number)
+    except:
+        return source_file_path, 0
 
 """
 *************************************************************************
@@ -108,13 +146,17 @@ def export_ip(ip, datafs, imgmap, info_map):
         asm_file_path = bin_file_path + ".asm"
         # Add binary (ELF) + ASM objdump to datafs
         if not bin_file_path in imgmap:
-            datafs.add_file(bin_file_path)
+            try:
+                datafs.add_file(bin_file_path)
+            except:
+                debug(0, "Error: Binary file missing: %s", (bin_file_path))
+                return
             asm_dump = ""
             try:
                 debug(1, "[ASM] objdump %s", (str(bin_file_path)))
                 # asm_dump = subprocess.check_output(["objdump", "-Dj", ".text", bin_file_path], universal_newlines=True)
                 with datafs.create_file(asm_file_path) as f:
-                    subprocess.call(["objdump", "-d", bin_file_path], universal_newlines=True, stdout=f)
+                    subprocess.call(["objdump", "-dS", bin_file_path], universal_newlines=True, stdout=f)
                     f.seek(0)
                     asm_dump = f.read().decode('utf-8')
             except subprocess.CalledProcessError as err:
@@ -168,4 +210,3 @@ def export_leaks(callHistory, zipfile, syms):
         pickle.dump(info_map, f)
     datafs.add_file(syms.name)
     datafs.close()
-

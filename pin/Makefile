@@ -16,7 +16,7 @@
 #########################################################################
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
 
 #------------------------------------------------------------------------
@@ -27,40 +27,35 @@
 PROJ := DATA - Pin
 
 # Pin Version and Source
-VER=pin-3.7-97619-g0d0c92f4f-gcc-linux
-TAR=$(VER).tar.gz
-URL=https://software.intel.com/sites/landingpage/pintool/downloads/$(TAR)
 
-# config.mk Handling
-REPL=$(shell echo $(CURDIR) | sed 's/\//\\\//g')
+#VER_STRING=pin-3.7-97619-g0d0c92f4f-gcc-linux
+VER_STRING=pin-3.11-97998-g7ecce2dac-gcc-linux
+
+TAR=$(VER_STRING).tar.gz
+URL=https://software.intel.com/sites/landingpage/pintool/downloads/$(TAR)
 
 #------------------------------------------------------------------------
 # Targets
 #------------------------------------------------------------------------
 .PHONY: all clean
 
-all: $(TAR) pin config.mk
+all: $(TAR) source.sh
 
 $(TAR):
 	wget $(URL)
 
-$(VER)/pin:
+$(VER_STRING)/pin:
 	tar -xvf $(TAR)
 
-pin: $(VER)/pin
-	ln -sf $^ $@
-
-config.mk:
-	@if [ -f ../config.mk ] && grep -q PIN_ROOT ../config.mk; then \
-		sed -i 's/PIN_ROOT=.*/PIN_ROOT=$(REPL)\/$(VER)/g' ../config.mk; \
-	else \
-		echo "PIN_ROOT=$(CURDIR)/$(VER)" >> ../config.mk; \
-	fi;
+source.sh: $(VER_STRING)/pin
+	echo "export PIN_ROOT=$(CURDIR)/$(VER_STRING)" > $@
+	echo "export PIN_VER_STRING=$(VER_STRING)" >> $@
 
 clean:
 	rm -f pin
 	rm -f $(TAR)
-	rm -rf $(VER)
+	rm -f source.sh
+	rm -rf $(VER_STRING)*
 
 help:
 	@echo
@@ -70,4 +65,3 @@ help:
 	@echo "  make help .............. Show this text."
 	@echo "  make clean ............. Clean up."
 	@echo
-

@@ -20,25 +20,36 @@
 # @brief Retrieves and compiles OpenSSL.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
+
+source config.sh
 
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
-OPENSSLDIR=openssl
+OPENSSLDIR=$BUILDDIR/openssl
 set -e
 
 #------------------------------------------------------------------------
 # Fetch and Build
 #------------------------------------------------------------------------
-if [[ ! -d ${OPENSSLDIR} ]]; then
-  git clone --depth 1 --branch OpenSSL_1_1_1 git://git.openssl.org/openssl.git
+if [[ ! -d "${BUILDDIR}" ]]; then
+  mkdir -p "${BUILDDIR}"
 fi
-cd ${OPENSSLDIR}
-if [[ ! -f libcrypto.so ]]; then
+cd "${BUILDDIR}"
+
+if [[ ! -d "${OPENSSLDIR}" ]]; then
+  git clone https://github.com/openssl/openssl.git
+fi
+cd "${OPENSSLDIR}"
+
+if [[ ! -f apps/openssl ]]; then
+  MOREFLAGS=
+  if [[ "${SETARCH}" == "i386" ]]; then
+    MOREFLAGS="-m32"
+  fi
   # Build openssl with debug symbols
-  ./config -g
+  setarch ${SETARCH} ./config -g ${FLAGS} ${MOREFLAGS}
   make -j"$(nproc)"
 fi
-

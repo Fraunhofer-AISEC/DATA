@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Copyright (C) 2017-2018 IAIK TU Graz and Fraunhofer AISEC
@@ -23,7 +23,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @brief Creates a random key of the byte length provided as commandline argument.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 
 """
 *************************************************************************

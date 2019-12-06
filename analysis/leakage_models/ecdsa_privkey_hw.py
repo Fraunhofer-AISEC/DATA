@@ -21,7 +21,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @brief Specific leakage test callback (ECDSA private key HW)
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 
 """
 *************************************************************************
@@ -40,11 +40,24 @@ def specific_leakage_callback(inputs):
     for i in range(0, len(inputs)):
         # load key and prep
         keyobj = serialization.load_pem_private_key(inputs[i], password=None, backend=default_backend())
-        bytelen = int(keyobj.key_size / 8)
-        fstr = "%0" + ("%d" % (2*bytelen)) + "x"
-        xhex = fstr % keyobj.private_numbers().private_value
+
+        if hasattr(keyobj, 'key_size'):
+            bytelen = int(keyobj.key_size / 8)
+            fstr = "%0" + ("%d" % (2*bytelen)) + "x"
+        else:
+            fstr = "%x"
         
+        if hasattr(keyobj, 'private_numbers'):
+            xhex = fstr % keyobj.private_numbers().private_value
+            keybytes = bytearray.fromhex(xhex)
+        elif hasattr(keyobj, 'private_bytes'):
+            # Ed25519 curve
+            keybytes = keyobj.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption())
+            keybytes = bytearray(keybytes)
+        else:
+            raise ValueError("Unsupported key type")
+
         # convert to bits and count HW
-        hw[i][0] = numpy.count_nonzero(numpy.unpackbits(numpy.asarray(bytearray.fromhex(xhex), dtype=numpy.uint8)))
+        hw[i][0] = numpy.count_nonzero(numpy.unpackbits(numpy.asarray(keybytes, dtype=numpy.uint8)))
     return (hw)
 

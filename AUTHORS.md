@@ -10,3 +10,4 @@ DATA was initially written and is currently maintained by:
 The following authors contributed code to DATA. Names are given in chronological order:
 
 - Lukas Bodner
+- David Schrammel

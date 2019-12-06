@@ -8,17 +8,13 @@ PROJ := DATA - <Library under test>
 #------------------------------------------------------------------------
 # Targets
 #------------------------------------------------------------------------
-.PHONY: all compile clean
+.PHONY: all clean
 
-all: compile
-
-compile:
-	# TODO: add compilation code here
-	gcc prog.c -o prog
+all: 
+	$(CC) -g -O0 main.c -o main
 
 clean:
-	# TODO: add cleanup target here
-	rm -rf prog
+	rm -f main
 
 help:
 	@echo

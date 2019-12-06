@@ -20,28 +20,28 @@
 # @brief Sets up a Python virtual environment.
 # @license This project is released under the GNU GPLv3+ License.
 # @author See AUTHORS file.
-# @version 0.2
+# @version 0.3
 #########################################################################
 
 #------------------------------------------------------------------------
 # Settings
 #------------------------------------------------------------------------
 ENV=.pyenv
-set -e
 DATAGUI=../data-gui/
+export VIRTUAL_ENV_DISABLE_PROMPT=1
 
 #------------------------------------------------------------------------
 # Create Environment
 #------------------------------------------------------------------------
 if ! [[ -f ${ENV}/.done ]]; then
-  LOAD_PYENV_INTERPRETER=/usr/bin/python3.5
-  virtualenv -p ${LOAD_PYENV_INTERPRETER} ${ENV} || exit 1
+  LOAD_PYENV_INTERPRETER=/usr/bin/python3
+  virtualenv -p ${LOAD_PYENV_INTERPRETER} ${ENV} || return 1
   source ${ENV}/bin/activate
   pip install -U pip
   pip install -U setuptools
-  pip install click cffi ipaddress enum34 numpy scipy scikit-learn cryptography fs || exit 1
+  pip install click cffi ipaddress enum34 numpy scipy scikit-learn cryptography fs || return 1
   pushd kuipertest
-  python setup.py build install || exit 1
+  python setup.py build install || return 1
   popd
   if [[ -f "${DATAGUI}/setup.py" ]]; then
     pip install -e "${DATAGUI}"
@@ -49,4 +49,3 @@ if ! [[ -f ${ENV}/.done ]]; then
   touch ${ENV}/.done
 fi
 source ${ENV}/bin/activate
-
