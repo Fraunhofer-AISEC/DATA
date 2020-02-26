@@ -211,7 +211,7 @@ CLI, or by running `datagui` directly on the command line.
 The GUI asks for the `result_*.pickle` as well as the exported
 `framework.zip`, which are both in the result directory. For more
 information about the GUI check out the
-[README](https://github.com/IAIK/data-gui/README.md).
+[README](https://github.com/IAIK/data-gui/blob/master/README.md).
 
 ## Usage Tips
 
