@@ -959,10 +959,11 @@ memobj_t* lookup_heap(uint64_t addr) {
 VOID test_mem_heap(entry_t* pentry) {
   memobj_t* obj = lookup_heap(pentry->data);
   if (obj) {
-    uint64_t* paddr = &pentry->data;
-    *paddr -= obj->base;
-    ASSERT((*paddr & 0xFFFFFFFF00000000ULL) == 0, "[pintool] Error: Heap object too big");
-    *paddr |= (uint64_t)obj->id << 32ULL;
+    uint64_t pdata = pentry->data;
+    pdata -= obj->base;
+    ASSERT((pdata & 0xFFFFFFFF00000000ULL) == 0, "[pintool] Error: Heap object too big");
+    pdata |= (uint64_t)obj->id << 32ULL;
+    pentry->data = pdata;
     pentry->type |= MASK_HEAP;
   }
 }
