@@ -30,21 +30,32 @@ ENV=.pyenv
 DATAGUI=../data-gui/
 export VIRTUAL_ENV_DISABLE_PROMPT=1
 
+PYTHON=python3
+PIP=pip3
+command -v $PYTHON > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    PYTHON=python
+fi
+command -v $PIP > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    PIP=pip
+fi
+
 #------------------------------------------------------------------------
 # Create Environment
 #------------------------------------------------------------------------
 if ! [[ -f ${ENV}/.done ]]; then
   LOAD_PYENV_INTERPRETER=/usr/bin/python3
-  virtualenv -p ${LOAD_PYENV_INTERPRETER} ${ENV} || return 1
+  virtualenv -p ${LOAD_PYENV_INTERPRETER} ${ENV} || exit 1
   source ${ENV}/bin/activate
-  pip install -U pip
-  pip install -U setuptools
-  pip install click cffi ipaddress enum34 numpy scipy scikit-learn cryptography fs || return 1
+  $PIP install -U pip
+  $PIP install -U setuptools
+  $PIP install click cffi ipaddress enum34 numpy scipy scikit-learn cryptography fs || exit 1
   pushd kuipertest
-  python setup.py build install || return 1
+  $PYTHON setup.py build install || exit 1
   popd
   if [[ -f "${DATAGUI}/setup.py" ]]; then
-    pip install -e "${DATAGUI}"
+    $PIP install -e "${DATAGUI}"
   fi
   touch ${ENV}/.done
 fi
