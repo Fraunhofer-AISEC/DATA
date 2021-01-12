@@ -37,8 +37,7 @@ with `setarch`, DATA cannot be run inside Docker.
 On Debian/Ubuntu, the following packages are required to run DATA:
 
 ```
-sudo apt-get install coreutils util-linux bash sed grep wget tar
-mawk time build-essential git python3.5 python3.5-dev python-virtualenv
+sudo apt-get install coreutils util-linux bash sed grep wget tar mawk time build-essential git python3.5 python3.5-dev python-virtualenv
 ```
 
 Build and install DATA by executing
