@@ -37,7 +37,7 @@ with `setarch`, DATA cannot be run inside Docker.
 On Debian/Ubuntu, the following packages are required to run DATA:
 
 ```
-sudo apt-get install coreutils util-linux bash sed grep wget tar mawk time build-essential git python3.5 python3.5-dev python-virtualenv
+sudo apt-get install coreutils util-linux bash sed grep wget tar mawk time build-essential git python3 python3-setuptools python3-dev python3-virtualenv gcc-multilib
 ```
 
 Build and install DATA by executing
@@ -49,6 +49,12 @@ make install
 
 This creates a file `data.sh` in your HOME directory which needs to
 be sourced in order to activate DATA.
+
+### Setuptools Error
+If you encounter a compile-time error related to setuptools, setting the following environment variable can help:
+```bash
+export SETUPTOOLS_USE_DISTUTILS=stdlib
+```
 
 ## Uninstall
 
