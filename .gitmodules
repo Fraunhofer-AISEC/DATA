@@ -1,4 +1,4 @@
 [submodule "data-gui"]
 	path = data-gui
-	url = https://github.com/IAIK/data-gui.git
+	url = https://github.com/d-we/data-gui.git
 	branch = master
