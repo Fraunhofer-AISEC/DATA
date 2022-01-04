@@ -899,11 +899,14 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
     //PIN_MutexLock(&lock);
     if (thread_state.size() <= threadid) {
       thread_state_t newstate;
+      newstate.RetIP = 0;
+      newstate.newbbl = 0;
       thread_state.push_back(newstate);
+    } else {
+      thread_state[threadid].RetIP = 0;
+      thread_state[threadid].newbbl = 0;
     }
     ASSERT(thread_state.size() > threadid, "[pintool] Error: thread_state corrupted");
-    thread_state[threadid].RetIP = 0;
-    thread_state[threadid].newbbl = 0;
     //PIN_MutexUnlock(&lock);
 }
 
