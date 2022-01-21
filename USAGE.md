@@ -15,7 +15,9 @@
 
 ## Prerequisites
 
-DATA should run at least on the following 64-bit x86 Linux systems:
+DATA is actively tested on Ubuntu 20.04 LTS.
+
+However, it should run at least on the following 64-bit x86 Linux systems too:
 
 * Ubuntu 19.04
 * Ubuntu 18.10
