@@ -32,19 +32,22 @@ import sys
 debug_level = 0
 do_assert = False
 
+
 def debuglevel(level):
     return debug_level >= level
+
 
 def set_debuglevel(level):
     global debug_level
     if level >= 0:
         debug_level = level
 
-def debug(level, fstr, values = ()):
+
+def debug(level, fstr, values=()):
     if debug_level >= level:
         print(fstr % values)
         sys.stdout.flush()
 
+
 def sorted_keys(mymap):
     return sorted(mymap.keys())
-

@@ -34,8 +34,11 @@ import struct
 Input: Symmetric keys -- 2D list/array, one key per row
 Output: Values of key bytes -- 2D numpy array, one key per row
 """
-def specific_leakage_callback(inputs):
-    blist = [struct.unpack("B" * len(inputs[i]), inputs[i]) for i in range(0, len(inputs))]
-    iconv = numpy.asarray(blist, dtype=numpy.uint8)
-    return (iconv)
 
+
+def specific_leakage_callback(inputs):
+    blist = [
+        struct.unpack("B" * len(inputs[i]), inputs[i]) for i in range(0, len(inputs))
+    ]
+    iconv = numpy.asarray(blist, dtype=numpy.uint8)
+    return iconv

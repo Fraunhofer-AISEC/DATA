@@ -34,6 +34,5 @@ import sys
 import codecs
 
 kbytes = int(sys.argv[-1])
-fmt = '%0' + str(kbytes*2) + 'x'
-sys.stdout.write(str.format(fmt % int(os.urandom(kbytes).hex(),16)))
-
+fmt = "%0" + str(kbytes * 2) + "x"
+sys.stdout.write(str.format(fmt % int(os.urandom(kbytes).hex(), 16)))

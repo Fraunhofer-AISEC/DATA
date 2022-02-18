@@ -38,24 +38,25 @@ from datastub.utils import debug
 *************************************************************************
 """
 
+
 def readelfsyms(fname, image):
     try:
         command = "objdump -f %s" % (fname)
-        output = subprocess.check_output(command.split(' ')).decode('utf-8')
+        output = subprocess.check_output(command.split(" ")).decode("utf-8")
         image.dynamic = output.find("DYNAMIC") >= 0
         command = "nm -nS --defined-only %s" % (fname)
-        output = subprocess.check_output(command.split(' ')).decode('utf-8')
+        output = subprocess.check_output(command.split(" ")).decode("utf-8")
         lines = output.splitlines()
     except:
         debug(0, "Exception reading ELF symbols: %s", (sys.exc_info()))
         return None
-    
+
     if lines is None or len(lines) == 0:
         return None
-    
+
     syms = []
     for line in lines:
-        values = line.split(' ')
+        values = line.split(" ")
         nval = len(values)
         idx = 1
         if nval < 3 or nval > 4:
@@ -67,35 +68,37 @@ def readelfsyms(fname, image):
         else:
             ssize = 0
         stype = values[idx]
-        sname = values[idx+1]
+        sname = values[idx + 1]
         if image.dynamic:
             saddr += image.lower
         syms.append([saddr, ssize, sname, stype])
     return syms
 
+
 """
 *************************************************************************
 """
 
+
 class SymbolInfo:
     instance = None
-    
+
     def __init__(self, fname):
         self.images = []
         self.symbols = SortedCollection(key=itemgetter(0))
         self.read_img(fname)
-        
+
     @classmethod
     def open(cls, fname):
         if cls.instance:
             cls.close()
         if fname is not None:
             cls.instance = SymbolInfo(fname)
-            
+
     @classmethod
     def close(cls):
         cls.instance = None
-    
+
     @classmethod
     def isopen(cls):
         return cls.instance is not None
@@ -107,12 +110,12 @@ class SymbolInfo:
                 csym.size = symbol.size
             csym.type = symbol.type
             csym.mergename(symbol.name)
-            assert(csym.img == symbol.img)
+            assert csym.img == symbol.img
             if symbol.islibstart:
                 csym.islibstart = True
         else:
             self.symbols.insert((symbol.addr, symbol))
-                    
+
     def read_img(self, f):
         line = f.readline().strip()
         img = None
@@ -130,10 +133,12 @@ class SymbolInfo:
                     # No information about dynamic/static. This is the case for pinsyms.txt
                     # We assume first image is static and others are dynamic
                     dynamic = len(self.images) > 0
-                [lower, upper] = [ int(hx, 16) for hx in nextline.split(":") ]
+                [lower, upper] = [int(hx, 16) for hx in nextline.split(":")]
                 img = Image(imgname, lower, upper, dynamic)
                 self.images.append(img)
-                self.symbols.insert((lower, Symbol(lower, upper-lower, "", img, '', True)))
+                self.symbols.insert(
+                    (lower, Symbol(lower, upper - lower, "", img, "", True))
+                )
             else:
                 data = line.split(":")
                 if len(data) == 2:
@@ -141,17 +146,17 @@ class SymbolInfo:
                     size = "0"
                     stype = "t"
                 else:
-                    assert(len(data) == 4)
+                    assert len(data) == 4
                     [addr, size, symbol, stype] = data
                 addr = int(addr, 16)
                 size = int(size, 16)
                 self.insert_update_symbol(Symbol(addr, size, symbol, img, stype))
             line = f.readline().strip()
-    
+
     @classmethod
     def reload_syms_from_elf(cls):
-        assert(cls.instance is not None)
-        assert(len(cls.instance.images) > 0)
+        assert cls.instance is not None
+        assert len(cls.instance.images) > 0
         for image in cls.instance.images:
             fname = image.name
             if not os.path.isfile(fname):
@@ -164,10 +169,10 @@ class SymbolInfo:
             for s in syms:
                 (addr, size, sym, stype) = s
                 cls.instance.insert_update_symbol(Symbol(addr, size, sym, image, stype))
-    
+
     @classmethod
     def lookup(cls, address):
-        assert(cls.instance is not None)
+        assert cls.instance is not None
         try:
             (_, sym) = cls.instance.symbols.find_le(address)
             return sym
@@ -176,21 +181,23 @@ class SymbolInfo:
 
     @classmethod
     def doprint(cls):
-        assert(cls.instance is not None)
+        assert cls.instance is not None
         for s in cls.instance.symbols:
             (_, sym) = s
             debug(0, sym)
-    
+
     @classmethod
     def write(cls, f):
-        assert(cls.instance is not None)
+        assert cls.instance is not None
         for s in cls.instance.symbols:
             (_, sym) = s
             sym.write(f)
 
+
 """
 *************************************************************************
 """
+
 
 class Symbol:
     def __init__(self, addr, size, name, img, stype, islibstart=False):
@@ -198,15 +205,15 @@ class Symbol:
         self.addr = addr
         self.size = size
         self.setname(name)
-        assert(img is None or isinstance(img, Image))
+        assert img is None or isinstance(img, Image)
         self.img = img
         self.type = stype
         self.islibstart = islibstart
-    
+
     def mergename(self, names):
         for n in names:
             self.setname(n)
-    
+
     def setname(self, name):
         if name is None:
             return
@@ -214,15 +221,15 @@ class Symbol:
             return
         if not name in self.name:
             self.name.append(name)
-    
+
     def getname(self):
         fullname = ""
         for name in self.name:
             fullname += name + ","
         return fullname[:-1]
-    
+
     def strat(self, ip):
-        string = "%08x" %  (ip)
+        string = "%08x" % (ip)
         if self.img is not None and self.img.dynamic:
             string += "(+%x)" % (ip - self.img.lower)
         if self.size > 0:
@@ -236,13 +243,13 @@ class Symbol:
         if self.img is not None:
             string += "@" + self.img.name
         return string
-        
+
     def __str__(self):
         return self.strat(self.addr)
-    
+
     def write(self, f):
         if self.islibstart:
-            assert(self.img is not None)
+            assert self.img is not None
             f.write("Image:\n")
             f.write(self.img.name + "\n")
             if self.img.dynamic:
@@ -253,9 +260,11 @@ class Symbol:
         for n in self.name:
             f.write("%x:%x:%s:%s\n" % (self.addr, self.size, n, self.type))
 
+
 """
 *************************************************************************
 """
+
 
 class Image:
     def __init__(self, name, lower, upper, dynamic):
@@ -263,19 +272,25 @@ class Image:
         self.lower = lower
         self.upper = upper
         self.dynamic = dynamic
-    
+
     def __eq__(self, other):
-        return (self.name, self.lower, self.upper) == (other.name, other.lower, other.upper)
-    
+        return (self.name, self.lower, self.upper) == (
+            other.name,
+            other.lower,
+            other.upper,
+        )
+
     def __ne__(self, other):
         return not self.__eq__(other)
 
     def __hash__(self):
         return self.lower
-    
+
     def __lt__(self, other):
         return self.lower < other.lower
-    
-    def __str__(self):
-        return str.format("%s %x-%x%s" % (self.name, self.lower, self.upper, " (dynamic)" if self.dynamic else ""))
 
+    def __str__(self):
+        return str.format(
+            "%s %x-%x%s"
+            % (self.name, self.lower, self.upper, " (dynamic)" if self.dynamic else "")
+        )

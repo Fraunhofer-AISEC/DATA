@@ -33,7 +33,11 @@ import numpy
 Input: Symmetric keys -- 2D list/array, one key per row
 Output: Values of key bytes -- 2D numpy array, one key per row
 """
+
+
 def specific_leakage_callback(inputs):
-    blist = [bytearray.fromhex(inputs[i].decode('utf-8')) for i in range(0, len(inputs))]
+    blist = [
+        bytearray.fromhex(inputs[i].decode("utf-8")) for i in range(0, len(inputs))
+    ]
     iconv = numpy.asarray(blist, dtype=numpy.uint8)
-    return (iconv)
+    return iconv

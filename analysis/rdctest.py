@@ -32,7 +32,7 @@ import numpy
 import warnings
 import pickle
 from datastub.utils import debug
-from scipy.stats import rankdata,pearsonr,norm
+from scipy.stats import rankdata, pearsonr, norm
 from sklearn.cross_decomposition import CCA
 
 """
@@ -75,15 +75,15 @@ class RDC(object):
         L -- Significance level RDC
         I -- Independence (True=independent, False=dependent, None=inconclusive)
         """
-        
+
         # sanity check
         if len(Inputs) != len(Observations):
             raise Exception("Input and observation arrays must have same length!")
-        
+
         # get sample variance
         ivar = numpy.var(Inputs)
         ovar = numpy.var(Observations)
-        
+
         # constant input/observations
         if ivar == 0.0 or ovar == 0.0:
             debug(1, "Constant input/observations")
@@ -96,9 +96,10 @@ class RDC(object):
 
         # varying input/observations
         else:
-            (R, L, I) = RDC.rdc(Inputs, Observations, Confidence, SkipThres=False, max_iter=max_iter)
+            (R, L, I) = RDC.rdc(
+                Inputs, Observations, Confidence, SkipThres=False, max_iter=max_iter
+            )
             return (R, L, I)
-
 
     ###
     # Approximate Significance Threshold
@@ -116,6 +117,7 @@ class RDC(object):
         # They overlap to some degree
         cutoff = 500
 
+        # fmt: off
         lookup0_500 = {
             30:  1.000000,  40:  0.923018,  50:  0.835880,  60:  0.767314,
             70:  0.713653,  80:  0.672781,  90:  0.634225, 100:  0.577012,
@@ -157,58 +159,71 @@ class RDC(object):
           8200:  0.065299,8400:  0.064779,8600:  0.063913,8800:  0.063217,
           9000:  0.062176,9200:  0.061583,9400:  0.060947,9600:  0.060281,
           9800:  0.059802,10000: 0.0588479}
+        # fmt: on
 
         Xl = [k for k in lookup0_500.keys()]
         Xl.sort()
         Yl = [float(lookup0_500[x]) for x in Xl]
-        
+
         Xh = [k for k in lookup500_10k.keys()]
         Xh.sort()
         Yh = [float(lookup500_10k[x]) for x in Xh]
 
         def asymsigmoid(x, a, b, c, d, e):
             # Asymmetric sigmoid
-            return d + (a - d) / (1 + (x/c) ** b) ** e
+            return d + (a - d) / (1 + (x / c) ** b) ** e
 
         fit = False
 
         if fit:
             # Fit two asymmetric sigmoidal functions to the measurements
-            poptl, pcovl = curve_fit(asymsigmoid, Xl, Yl, bounds=(0, [2,200,100,1,1]))
-            popth, pcovh = curve_fit(asymsigmoid, Xh, Yh, bounds=(0, [200,5,1,1,1]))
+            poptl, pcovl = curve_fit(
+                asymsigmoid, Xl, Yl, bounds=(0, [2, 200, 100, 1, 1])
+            )
+            popth, pcovh = curve_fit(asymsigmoid, Xh, Yh, bounds=(0, [200, 5, 1, 1, 1]))
         else:
             # Cached for efficiency
-            poptl = [1.0405813870371978, 5.906516651519792, 32.67925715067476,
-                     7.420936678471437e-19, 0.08354565093830184]
-            popth = [80.45137912486614, 2.1786178713255144, 0.006666093739093521,
-                     1.2161893230883887e-16, 0.23285829194616056]
+            poptl = [
+                1.0405813870371978,
+                5.906516651519792,
+                32.67925715067476,
+                7.420936678471437e-19,
+                0.08354565093830184,
+            ]
+            popth = [
+                80.45137912486614,
+                2.1786178713255144,
+                0.006666093739093521,
+                1.2161893230883887e-16,
+                0.23285829194616056,
+            ]
 
-        if False: # Plot
+        if False:  # Plot
             # Single curve fitting
             lookup = lookup0_500.copy()
             lookup.update(lookup500_10k)
             X = [k for k in lookup.keys()]
             X.sort()
             Y = [float(lookup[x]) for x in X]
-            popt, pcov = curve_fit(asymsigmoid, X, Y, bounds=(0, [2,5,100,1,1]))
+            popt, pcov = curve_fit(asymsigmoid, X, Y, bounds=(0, [2, 5, 100, 1, 1]))
 
             import numpy as np
             import matplotlib.pyplot as plt
 
             # Plot original data points
-            plt.plot(X, Y, 'o')
+            plt.plot(X, Y, "o")
 
             # Plot single curve fitting
             new = np.linspace(min(X), max(X), num=10000, endpoint=True)
-            plt.plot(new, asymsigmoid(new, *popt), 'r-')
+            plt.plot(new, asymsigmoid(new, *popt), "r-")
 
             # Plot double curve fitting
             newl = np.linspace(min(Xl), cutoff, num=10000, endpoint=True)
             newh = np.linspace(cutoff, max(Xh), num=10000, endpoint=True)
-            #~ newl = np.linspace(min(Xl), max(Xl), num=10000, endpoint=True)
-            #~ newh = np.linspace(min(Xh), max(Xh), num=10000, endpoint=True)
-            plt.plot(newl, asymsigmoid(newl, *poptl), 'b-')
-            plt.plot(newh, asymsigmoid(newh, *popth), 'g-')
+            # ~ newl = np.linspace(min(Xl), max(Xl), num=10000, endpoint=True)
+            # ~ newh = np.linspace(min(Xh), max(Xh), num=10000, endpoint=True)
+            plt.plot(newl, asymsigmoid(newl, *poptl), "b-")
+            plt.plot(newh, asymsigmoid(newh, *popth), "g-")
             plt.show()
 
         if N <= 30:
@@ -229,7 +244,7 @@ class RDC(object):
         Keyword arguments:
         N     -- Number of measurement samples
         Alpha -- The required confidence level (0 < Alpha < 1)
-    
+
         Returns:
         L -- Significance level
         """
@@ -242,16 +257,20 @@ class RDC(object):
             b = numpy.random.normal(size=N)
             R = None
             while R is None:
-                debug(2, "rdc_limit computation for N=%d, alpha=%f, iteration %d/%d", (N, Alpha, i, l))
+                debug(
+                    2,
+                    "rdc_limit computation for N=%d, alpha=%f, iteration %d/%d",
+                    (N, Alpha, i, l),
+                )
                 (R, _, _) = RDC.rdc(a, b, Alpha, SkipThres=True, max_iter=-1)
                 # With max_iter=-1, R is always != None
             v[i] = R
-        (mu,std) = norm.fit(v)
-        L = norm.isf(1.0-Alpha, loc=mu, scale=std)
+        (mu, std) = norm.fit(v)
+        L = norm.isf(1.0 - Alpha, loc=mu, scale=std)
         L = numpy.min([L, 1.0])
 
         debug(1, "New rdc_limit: Alpha=%.6f, N=%d, L=%.6f", (Alpha, N, L))
-        return (L)
+        return L
 
     ###
     # Retrieve RDC Significance Threshold
@@ -260,11 +279,11 @@ class RDC(object):
     def rdc_sigthres(N, Alpha):
         """
         Computes the significance threshold for the RDC.
-        
+
         Keyword arguments:
         N     -- Number of measurement samples
         Alpha -- The required confidence level (0 < Alpha < 1)
-    
+
         Returns:
         L -- Significance level
         """
@@ -285,13 +304,13 @@ class RDC(object):
 
         # fill from file
 
-        # Maybe, another parallel process filled it in already, 
+        # Maybe, another parallel process filled it in already,
         # so we always reload the pickle file
-        #if not RDC.RDC_SIGTHRES_FLOAD:
+        # if not RDC.RDC_SIGTHRES_FLOAD:
         if True:
             try:
                 d = None
-                with open('rdcst.pickle', 'rb') as f:
+                with open("rdcst.pickle", "rb") as f:
                     d = pickle.load(f)
                 for c in d.keys():
                     for n in d[c].keys():
@@ -318,14 +337,14 @@ class RDC(object):
 
         # store dictionary
         try:
-            with open('rdcst.pickle', 'wb') as f:
+            with open("rdcst.pickle", "wb") as f:
                 fcntl.flock(f, fcntl.LOCK_EX)
                 pickle.dump(RDC.RDC_SIGTHRES, f)
                 fcntl.flock(f, fcntl.LOCK_UN)
         except:
             debug(0, "Failed to store RDC significance threshold dictionary")
 
-        return (L)
+        return L
 
     ###
     # Randomized Dependence Coefficient - RDC
@@ -336,13 +355,13 @@ class RDC(object):
         Computes the Randomized Dependence Coefficient (RDC)
         between the two given 1-D arrays. Note: both input
         arrays must have non-zero variance!
-        
+
         Keyword arguments:
         X         -- 1D-array of measurement samples (Numpy Array!)
         Y         -- 1D-array of measurement samples (Numpy Array!)
         Alpha     -- The required confidence level (0 < Alpha < 1)
         SkipThres -- Skip the significance threshold check
-    
+
         Returns:
         R -- Randomized dependence coefficient
         L -- Significance level
@@ -351,8 +370,8 @@ class RDC(object):
 
         # RDC params
         k = 20
-        s1 = 1./6.
-        s2 = 1./6.
+        s1 = 1.0 / 6.0
+        s2 = 1.0 / 6.0
 
         # sanity check
         if X.size != Y.size:
@@ -360,18 +379,18 @@ class RDC(object):
 
         # init
         (n1, n2) = (X.size, Y.size)
-        t1 = numpy.ones((n1,2), dtype=numpy.float)
-        t2 = numpy.ones((n2,2), dtype=numpy.float)
-        t3 = numpy.ones((n1,k+1), dtype=numpy.float)
-        t4 = numpy.ones((n2,k+1), dtype=numpy.float)
+        t1 = numpy.ones((n1, 2), dtype=numpy.float)
+        t2 = numpy.ones((n2, 2), dtype=numpy.float)
+        t3 = numpy.ones((n1, k + 1), dtype=numpy.float)
+        t4 = numpy.ones((n2, k + 1), dtype=numpy.float)
 
         # normalized rank
-        t1[:,0] = rankdata(X) / float(n1)
-        t2[:,0] = rankdata(Y) / float(n2)
+        t1[:, 0] = rankdata(X) / float(n1)
+        t2[:, 0] = rankdata(Y) / float(n2)
 
         # scale
-        t1 *= (s1/2.)
-        t2 *= (s2/2.)
+        t1 *= s1 / 2.0
+        t2 *= s2 / 2.0
 
         it = 1
         while True:
@@ -381,30 +400,30 @@ class RDC(object):
             it += 1
 
             # random sampling
-            r1 = numpy.random.normal(size=(2,k))
-            r2 = numpy.random.normal(size=(2,k))
+            r1 = numpy.random.normal(size=(2, k))
+            r2 = numpy.random.normal(size=(2, k))
 
             # multiply and sinus
-            t3[:,:k] = numpy.sin(numpy.dot(t1, r1))
-            t4[:,:k] = numpy.sin(numpy.dot(t2, r2))
-            
+            t3[:, :k] = numpy.sin(numpy.dot(t1, r1))
+            t4[:, :k] = numpy.sin(numpy.dot(t2, r2))
+
             # canonical correlation
-            cca = CCA(n_components = 1)
+            cca = CCA(n_components=1)
             scx = None
             scy = None
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                scx,scy = cca.fit_transform(t3, t4)
-            
+                scx, scy = cca.fit_transform(t3, t4)
+
             # sanity check
-            if numpy.var(scx[:,0]) == 0 or numpy.var(scy[:,0]) == 0:
+            if numpy.var(scx[:, 0]) == 0 or numpy.var(scy[:, 0]) == 0:
                 continue
             else:
                 break
 
         # calc Pearson
         try:
-            R = pearsonr(scx[:,0], scy[:,0])[0]
+            R = pearsonr(scx[:, 0], scy[:, 0])[0]
         except:
             return (None, None, None)
 
@@ -413,6 +432,5 @@ class RDC(object):
             return (R, None, None)
         else:
             L = RDC.rdc_sigthres(n1, Alpha)
-            I = (R <= L)
+            I = R <= L
             return (R, L, I)
-

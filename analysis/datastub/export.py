@@ -32,7 +32,7 @@ import gzip
 import subprocess
 import pickle
 from datastub.DataFS import DataFS
-from datastub.IpInfoShort import IpInfoShort,IP_INFO_FILE
+from datastub.IpInfoShort import IpInfoShort, IP_INFO_FILE
 from datastub.SymbolInfo import SymbolInfo
 from datastub.utils import debug
 from datastub.leaks import CallHistory
@@ -41,21 +41,31 @@ from datastub.leaks import CallHistory
 *************************************************************************
 """
 
+
 def storepickle(pfile, leaks):
     debug(1, "Storing pickle file")
-    with gzip.GzipFile(pfile, 'wb') as f:
+    with gzip.GzipFile(pfile, "wb") as f:
         pickle.dump(leaks, f)
+
 
 """
 *************************************************************************
 """
 
-class MyUnpickler(pickle.Unpickler):
 
+class MyUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
         result = None
         # These files have been moved into 'datastub' package
-        mapper = ["leaks", "IpInfoShort", "DataFS", "export", "printer", "SortedCollection", "SymbolInfo"]
+        mapper = [
+            "leaks",
+            "IpInfoShort",
+            "DataFS",
+            "export",
+            "printer",
+            "SortedCollection",
+            "SymbolInfo",
+        ]
         if module in mapper:
             module = "datastub." + module
         try:
@@ -75,23 +85,27 @@ class MyUnpickler(pickle.Unpickler):
         print("Class: " + klass)
         self.append(klass)
 
+
 """
 *************************************************************************
 """
 
+
 def loadpickle(pfile):
     debug(1, "Loading pickle file")
     try:
-        with gzip.GzipFile(pfile, 'rb') as f:
-            unp = MyUnpickler(f, encoding='latin1')
+        with gzip.GzipFile(pfile, "rb") as f:
+            unp = MyUnpickler(f, encoding="latin1")
             new = unp.load()
             return new
     except Exception as e:
         raise IOError("Error loading pickle file: %s" % str(e))
 
+
 """
 *************************************************************************
 """
+
 
 def getSourceFileInfo(addr, binary_path):
     # e.g., addr2line 0x42d4b9 -e openssl
@@ -100,7 +114,9 @@ def getSourceFileInfo(addr, binary_path):
     # if the filename cannot be determined -> print two question marks
     # if the line nr cannot be determined  -> print 0
     try:
-        output = subprocess.check_output(["addr2line", addr, "-e", binary_path], universal_newlines=True)
+        output = subprocess.check_output(
+            ["addr2line", addr, "-e", binary_path], universal_newlines=True
+        )
         infos = output.split(":")
         source_file_path, source_line_number = infos[0], infos[1]
         if "??" == source_file_path:
@@ -115,29 +131,33 @@ def getSourceFileInfo(addr, binary_path):
     except:
         return source_file_path, 0
 
+
 """
 *************************************************************************
 """
 
+
 def getAsmFileInfo(addr, asm_dump):
     line_count = 0
-    search_str = format(addr, 'x') + ":"
+    search_str = format(addr, "x") + ":"
     for asm_line in asm_dump.splitlines():
         if search_str in asm_line:
             return line_count
         line_count += 1
     return -1
 
+
 """
 *************************************************************************
 """
+
 
 def export_ip(ip, datafs, imgmap, info_map):
     if ip is None or ip == 0:
         return
     if not ip in info_map:
         sym = SymbolInfo.lookup(ip)
-        assert(sym is not None)
+        assert sym is not None
         if sym.img.dynamic:
             addr = ip - sym.img.lower
         else:
@@ -156,11 +176,19 @@ def export_ip(ip, datafs, imgmap, info_map):
                 debug(1, "[ASM] objdump %s", (str(bin_file_path)))
                 # asm_dump = subprocess.check_output(["objdump", "-Dj", ".text", bin_file_path], universal_newlines=True)
                 with datafs.create_file(asm_file_path) as f:
-                    subprocess.call(["objdump", "-dS", bin_file_path], universal_newlines=True, stdout=f)
+                    subprocess.call(
+                        ["objdump", "-dS", bin_file_path],
+                        universal_newlines=True,
+                        stdout=f,
+                    )
                     f.seek(0)
-                    asm_dump = f.read().decode('utf-8')
+                    asm_dump = f.read().decode("utf-8")
             except subprocess.CalledProcessError as err:
-                debug(0, "[ASM] objdump %s failed with error_code: %s", (str(bin_file_path), str(err.returncode)))
+                debug(
+                    0,
+                    "[ASM] objdump %s failed with error_code: %s",
+                    (str(bin_file_path), str(err.returncode)),
+                )
                 asm_dump = None
             imgmap[bin_file_path] = asm_dump
         if not ip in info_map:
@@ -175,15 +203,21 @@ def export_ip(ip, datafs, imgmap, info_map):
                 datafs.add_file(src_file_path)
             else:
                 if src_file_path is None:
-                    debug(1, "[SRC] unavailable for %s in %s", (hex(addr), bin_file_path))
+                    debug(
+                        1, "[SRC] unavailable for %s in %s", (hex(addr), bin_file_path)
+                    )
                 else:
                     debug(1, "[SRC] source file %s missing", (src_file_path))
-            ip_info = IpInfoShort(asm_file_path, asm_line_nr, src_file_path, src_line_nr)
+            ip_info = IpInfoShort(
+                asm_file_path, asm_line_nr, src_file_path, src_line_nr
+            )
             info_map[ip] = ip_info
+
 
 """
 *************************************************************************
 """
+
 
 def export_ip_recursive(leaks, datafs, imgmap, info_map):
     if leaks.ctxt is not None:
@@ -197,9 +231,11 @@ def export_ip_recursive(leaks, datafs, imgmap, info_map):
         child = leaks.children[k]
         export_ip_recursive(child, datafs, imgmap, info_map)
 
+
 """
 *************************************************************************
 """
+
 
 def export_leaks(callHistory, zipfile, syms):
     datafs = DataFS(zipfile, write=True)

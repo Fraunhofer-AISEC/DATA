@@ -35,19 +35,25 @@ from cryptography.hazmat.backends import default_backend
 Input: DSA keys -- 2D list/array. one key per row
 Output: Hamming weight of all private key members -- 2D numpy array, row = HW(entire key)
 """
+
+
 def specific_leakage_callback(inputs):
-    hw = numpy.ndarray((len(inputs),1), dtype=numpy.int)
+    hw = numpy.ndarray((len(inputs), 1), dtype=numpy.int)
     for i in range(0, len(inputs)):
         # load key and prep
-        keyobj = serialization.load_pem_private_key(inputs[i], password=None, backend=default_backend())
+        keyobj = serialization.load_pem_private_key(
+            inputs[i], password=None, backend=default_backend()
+        )
         if keyobj.private_numbers().x <= 2**20:
             bytelen = 20
         elif keyobj.private_numbers().x <= 2**28:
             bytelen = 28
         else:
             bytelen = 32
-        fstr = "%0" + ("%d" % (2*bytelen)) + "x"
+        fstr = "%0" + ("%d" % (2 * bytelen)) + "x"
         xhex = fstr % keyobj.private_numbers().x
         # convert to bits and count H
-        hw[i][0] = numpy.count_nonzero(numpy.unpackbits(numpy.asarray(bytearray.fromhex(xhex), dtype=numpy.uint8)))
-    return (hw)
+        hw[i][0] = numpy.count_nonzero(
+            numpy.unpackbits(numpy.asarray(bytearray.fromhex(xhex), dtype=numpy.uint8))
+        )
+    return hw

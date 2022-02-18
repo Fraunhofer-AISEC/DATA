@@ -39,57 +39,62 @@ import Crypto
 *************************************************************************
 """
 
+
 @click.group()
 def cli():
     pass
+
 
 # Returns the maximum number of supported key bytes
 def getkeybytes(algo):
     A = eval(algo)
     keysize = A.key_size
     if type(keysize) is tuple:
-      keybytes = keysize[-1]
+        keybytes = keysize[-1]
     elif type(keysize) is xrange:
-      keybytes = keysize[-1]
+        keybytes = keysize[-1]
     else:
-      keybytes = keysize
+        keybytes = keysize
     return keybytes
 
-@cli.command('genkey')
-@click.argument('algo', type=str)
-@click.argument('keyfile', type=click.File('wb'))
+
+@cli.command("genkey")
+@click.argument("algo", type=str)
+@click.argument("keyfile", type=click.File("wb"))
 def genkey(algo, keyfile):
     keyfile.write(os.urandom(getkeybytes(algo)))
 
-@cli.command('run')
-@click.argument('algo', type=str)
-@click.argument('keyfile', type=click.File('rb'), required=False)
-@click.argument('textfile', type=click.File('rb'), required=False)
+
+@cli.command("run")
+@click.argument("algo", type=str)
+@click.argument("keyfile", type=click.File("rb"), required=False)
+@click.argument("textfile", type=click.File("rb"), required=False)
 def run(algo, keyfile=None, textfile=None):
     A = eval(algo)
     keybytes = getkeybytes(algo)
     if keyfile is not None:
-      key = keyfile.read()
+        key = keyfile.read()
     else:
-      key = os.urandom(keybytes)
+        key = os.urandom(keybytes)
 
     if textfile is not None:
-      text = textfile.read()
+        text = textfile.read()
     else:
-      text = 64 * "0"
+        text = 64 * "0"
 
-    IV = A.block_size * '\x00'
+    IV = A.block_size * "\x00"
     if algo == "ARC4":
-      cipher = A.new(key)
+        cipher = A.new(key)
     else:
-      cipher = A.new(key, A.MODE_CBC, IV=IV)
+        cipher = A.new(key, A.MODE_CBC, IV=IV)
     cipher.encrypt(text)
 
-@cli.command('version')
+
+@cli.command("version")
 def version():
     print("Python: " + sys.version)
     print("Crypto: " + Crypto.__version__)
 
+
 if __name__ == "__main__":
     cli()
-

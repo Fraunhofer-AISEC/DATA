@@ -35,23 +35,35 @@ from cryptography.hazmat.backends import default_backend
 Input: RSA keys -- 2D list/array. one key per row
 Output: Hamming weight of all private key members -- 2D numpy array, row = HW(entire key)
 """
+
+
 def specific_leakage_callback(inputs):
-    hw = numpy.ndarray((len(inputs),6), dtype=numpy.int)
+    hw = numpy.ndarray((len(inputs), 6), dtype=numpy.int)
     for i in range(0, len(inputs)):
         # load key and prep
-        keyobj = serialization.load_pem_private_key(inputs[i], password=None, backend=default_backend())
+        keyobj = serialization.load_pem_private_key(
+            inputs[i], password=None, backend=default_backend()
+        )
         nbytes = int(numpy.ceil(keyobj.key_size / 4.0))
         nbytesh = int(numpy.ceil(keyobj.key_size / 8.0))
         fstr = "%0" + ("%d" % nbytes) + "x"
         fstrh = "%0" + ("%d" % nbytesh) + "x"
-        
-        # convert to bits and count HW
-        privkey = [fstrh % keyobj.private_numbers().p,
-                   fstrh % keyobj.private_numbers().q,
-                   fstr % keyobj.private_numbers().d,
-                   fstrh % keyobj.private_numbers().dmp1,
-                   fstrh % keyobj.private_numbers().dmq1,
-                   fstrh % keyobj.private_numbers().iqmp]
-        hw[i][:] = [numpy.count_nonzero(numpy.unpackbits(numpy.asarray(bytearray.fromhex(privkey[j]), dtype=numpy.uint8))) for j in range(0, len(privkey))]
-    return (hw)
 
+        # convert to bits and count HW
+        privkey = [
+            fstrh % keyobj.private_numbers().p,
+            fstrh % keyobj.private_numbers().q,
+            fstr % keyobj.private_numbers().d,
+            fstrh % keyobj.private_numbers().dmp1,
+            fstrh % keyobj.private_numbers().dmq1,
+            fstrh % keyobj.private_numbers().iqmp,
+        ]
+        hw[i][:] = [
+            numpy.count_nonzero(
+                numpy.unpackbits(
+                    numpy.asarray(bytearray.fromhex(privkey[j]), dtype=numpy.uint8)
+                )
+            )
+            for j in range(0, len(privkey))
+        ]
+    return hw

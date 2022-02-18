@@ -33,8 +33,8 @@ import struct
 import copy
 from enum import Enum
 from queue import Queue
-from datastub.SymbolInfo import Image,Symbol,SymbolInfo
-from datastub.utils import debug,sorted_keys,debuglevel
+from datastub.SymbolInfo import Image, Symbol, SymbolInfo
+from datastub.utils import debug, sorted_keys, debuglevel
 
 """
 *************************************************************************
@@ -55,14 +55,16 @@ TYPE_B = 1
 TYPE_C = 2
 TYPE_D = 3
 
+
 class MaskType(Enum):
     NONE = 0
     BRANCH = 4
     HEAP = 8
     LEAK = 16
 
-class Type(Enum):
 
+# fmt: off
+class Type(Enum):
     READ  = MaskType.NONE.value | TYPE_A
     WRITE = MaskType.NONE.value | TYPE_B
 
@@ -78,25 +80,30 @@ class Type(Enum):
 
     DLEAK  = MaskType.LEAK.value | TYPE_A
     CFLEAK = MaskType.LEAK.value | TYPE_B
+# fmt: on
 
     @classmethod
     def isbranch(cls, e):
         return (e.type & cls.BRANCH.value) == cls.BRANCH.value
 
+
 """
 *************************************************************************
 """
 
-FUNC_ENTRY_BIN = struct.pack('B', Type.FUNC_ENTRY.value)
-FUNC_EXIT_BIN = struct.pack('B', Type.FUNC_EXIT.value)
+FUNC_ENTRY_BIN = struct.pack("B", Type.FUNC_ENTRY.value)
+FUNC_EXIT_BIN = struct.pack("B", Type.FUNC_EXIT.value)
 
-bs = 1+8+8      # has to match the binary format: type (1 byte), ip (8 bytes), data (8 bytes)
-blocks = 256    # number of blocks processed concurrently
+bs = (
+    1 + 8 + 8
+)  # has to match the binary format: type (1 byte), ip (8 bytes), data (8 bytes)
+blocks = 256  # number of blocks processed concurrently
 chunk_size = bs * blocks
 
 """
 *************************************************************************
 """
+
 
 class Entry:
     def __init__(self, arr):
@@ -114,11 +121,15 @@ class Entry:
         return (self.type << 128) & (self.ip << 64) & (self.data)
 
     def __str__(self):
-        return str.format("%d(%s):%08x:%08x" % (self.type, str(Type(self.type)), self.ip, self.data))
+        return str.format(
+            "%d(%s):%08x:%08x" % (self.type, str(Type(self.type)), self.ip, self.data)
+        )
+
 
 """
 *************************************************************************
 """
+
 
 class MergePoint:
     def __init__(self, mtype, ip, depth):
@@ -138,9 +149,11 @@ class MergePoint:
     def __str__(self):
         return str.format("%d:%08x:%08x" % (self.type, self.ip, self.depth))
 
+
 """
 *************************************************************************
 """
+
 
 class Context:
     def __init__(self, caller, callee):
@@ -149,7 +162,7 @@ class Context:
 
     @classmethod
     def fromFuncCall(cls, entry):
-        assert(entry.type == Type.FUNC_ENTRY.value)
+        assert entry.type == Type.FUNC_ENTRY.value
         return cls(entry.ip, entry.data)
 
     def __eq__(self, other):
@@ -164,12 +177,14 @@ class Context:
     """
     The context is uniquely identified by the function entry point (the callee)
     """
+
     def __hash__(self):
         myid = self.caller
         lower = self.callee & 0x00000000FFFFFFFF
         upper = self.callee >> 32
         myid ^= upper | (lower << 32)
         return myid
+
 
 """
 *************************************************************************
@@ -178,8 +193,10 @@ class Context:
 """
 Single call stack instance containing current snapshot only
 """
+
+
 class CallStack:
-    def __init__(self, cid = -1):
+    def __init__(self, cid=-1):
         self.stack = []
         self.id = cid
 
@@ -206,7 +223,7 @@ class CallStack:
         return len(self.stack)
 
     def docall_context(self, c):
-        assert(isinstance(c, Context))
+        assert isinstance(c, Context)
         self.stack.append(c)
 
     def doreturn_context(self):
@@ -219,12 +236,16 @@ class CallStack:
 
     def doreturn(self):
         size = len(self.stack)
-        assert(size > 0)
+        assert size > 0
         ctxt = self.doreturn_context()
         size -= 1
 
         if size >= 1:
-            debug(3, "[%d]Return from ctxt %08x to %08x", (self.id, ctxt.callee, self.stack[size-1].callee))
+            debug(
+                3,
+                "[%d]Return from ctxt %08x to %08x",
+                (self.id, ctxt.callee, self.stack[size - 1].callee),
+            )
         else:
             debug(0, "[%d]Return from ctxt %08x to nowhere", (self.id, ctxt.callee))
             if size < 0:
@@ -247,11 +268,13 @@ class CallStack:
         if size == 0:
             return None
         else:
-            return self.stack[size-1]
+            return self.stack[size - 1]
+
 
 """
 *************************************************************************
 """
+
 
 class MergeMap:
     def __init__(self, mtype):
@@ -273,8 +296,12 @@ class MergeMap:
     def merge(self, newmap):
         if not isinstance(newmap, self.mytype):
             debug(0, newmap.__class__)
-            debug(0, "Wrong class instance: %s vs %s", (str(newmap.__class__), str(self.mytype)))
-        assert(isinstance(newmap, self.mytype))
+            debug(
+                0,
+                "Wrong class instance: %s vs %s",
+                (str(newmap.__class__), str(self.mytype)),
+            )
+        assert isinstance(newmap, self.mytype)
         if not newmap in self.mymap:
             self.mymap[newmap] = newmap
         else:
@@ -290,9 +317,11 @@ class MergeMap:
         for e in sorted_keys(self.mymap):
             self.mymap[e].doprint(printer)
 
+
 """
 *************************************************************************
 """
+
 
 class DataLeakEntry:
     def __init__(self, addr):
@@ -318,14 +347,16 @@ class DataLeakEntry:
         self.count += newentry.count
 
     def __str__(self):
-        return str.format('%08x: %d' % (self.addr, self.count))
+        return str.format("%08x: %d" % (self.addr, self.count))
 
     def doprint(self, printer):
         printer.doprint_generic(self)
 
+
 """
 *************************************************************************
 """
+
 
 class CFLeakEntry:
     def __init__(self, bp, length, mp):
@@ -338,7 +369,11 @@ class CFLeakEntry:
         return self.bp.ip + (self.mp << 64) + (self.length << 64)
 
     def __eq__(self, other):
-        return (self.bp.ip, self.length, self.mp) == (other.bp.ip, other.length, other.mp)
+        return (self.bp.ip, self.length, self.mp) == (
+            other.bp.ip,
+            other.length,
+            other.mp,
+        )
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -363,27 +398,31 @@ class CFLeakEntry:
         self.count += newentry.count
 
     def __str__(self):
-        string = str.format('%08x' % self.bp.ip)
+        string = str.format("%08x" % self.bp.ip)
         if self.mp > 0:
-            string += str.format(' - %08x' % self.mp)
+            string += str.format(" - %08x" % self.mp)
         if self.length > 0:
-            string += str.format(' (%d)' % self.length)
-        return string + str.format(': %d' % self.count)
+            string += str.format(" (%d)" % self.length)
+        return string + str.format(": %d" % self.count)
 
     def doprint(self, printer):
         printer.doprint_generic(self)
+
 
 """
 *************************************************************************
 """
 
+
 class LeakStatus:
     def __init__(self):
         self.properties = set()
         self.nsperformed = False  # true if generic leakage tests were performed
-        self.spperformed = set()  # contains targets, if specific leakage tests were performed
-        self.nsleak = set()       # results of generic leakage-tests, if any
-        self.spleak = set()       # results of specific leakage-tests, if any
+        self.spperformed = (
+            set()
+        )  # contains targets, if specific leakage tests were performed
+        self.nsleak = set()  # results of generic leakage-tests, if any
+        self.spleak = set()  # results of specific leakage-tests, if any
 
     def merge(self, other):
         self.nsperformed |= other.nsperformed
@@ -427,11 +466,15 @@ class LeakStatus:
     def max_leak_normalized(self):
         normalized = 0
         if self.is_generic_leak():
-            normalized = max(normalized, max(self.nsleak, key=lambda l: l.normalized()).normalized())
+            normalized = max(
+                normalized, max(self.nsleak, key=lambda l: l.normalized()).normalized()
+            )
             # Remove M_pos, as it does not work properly
             # normalized = max(normalized, max(self.nsleak, key=lambda l: 0 if l.nstype == NSPType.Type3 else l.normalized()).normalized())
         if self.is_specific_leak():
-            normalized = max(normalized, max(self.spleak, key=lambda l: l.normalized()).normalized())
+            normalized = max(
+                normalized, max(self.spleak, key=lambda l: l.normalized()).normalized()
+            )
             # Remove M_pos, as it does not work properly
             # normalized = max(normalized, max(self.spleak, key=lambda l: 0 if l.sptype == NSPType.Type3 else l.normalized()).normalized())
         return normalized
@@ -450,9 +493,9 @@ class LeakStatus:
             rstr = "status='difference'"
 
         # approved/refuted leakage
-        elif (havensresults or havespresults):
+        elif havensresults or havespresults:
             lsrc = []
-            rstr = ''
+            rstr = ""
             if havensleak or havespleak:
                 rstr = "status='leak'"
                 if havensleak:
@@ -474,28 +517,36 @@ class LeakStatus:
         # return
         return rstr
 
+
 """
 *************************************************************************
 """
 
+
+# fmt: off
 class NSPType(Enum):
     Type1a = 0  # number of addresses
     Type1b = 1  # number of unique addresses
     Type2  = 2  # number of accesses per address
     Type3  = 3  # position of address during access
     Noleak = 4  # special: no leakage detected
+# fmt: on
 
     def __lt__(self, other):
         if self.__class__ is other.__class__:
             return self.value < other.value
         return NotImplemented
 
+
 """
 *************************************************************************
 """
 
+
 class NSLeak(object):
-    def __init__(self, nstype, addr=0, statistic=0.0, limit=0.0, conf=0.0, isleak=False):
+    def __init__(
+        self, nstype, addr=0, statistic=0.0, limit=0.0, conf=0.0, isleak=False
+    ):
         self.nstype = nstype
         self.address = addr
         self.teststat = statistic
@@ -516,21 +567,23 @@ class NSLeak(object):
         return self.limit
 
     def __lt__(self, other):
-        if ((self.nstype in [NSPType.Type1a, NSPType.Type1b]) and \
-           (other.nstype in [NSPType.Type1a, NSPType.Type1b])) or \
-           ((self.nstype in [NSPType.Type2]) and \
-           (other.nstype in [NSPType.Type2])):
+        if (
+            (self.nstype in [NSPType.Type1a, NSPType.Type1b])
+            and (other.nstype in [NSPType.Type1a, NSPType.Type1b])
+        ) or ((self.nstype in [NSPType.Type2]) and (other.nstype in [NSPType.Type2])):
             return self.teststat < other.teststat
         else:
             return self.nstype < other.nstype
 
     def __eq__(self, other):
-        if (self.nstype == other.nstype) and \
-           (self.address == other.address) and \
-           (self.teststat == other.teststat) and \
-           (self.limit == other.limit) and \
-           (self.confidence == other.confidence) and \
-           (self.isleak == other.isleak):
+        if (
+            (self.nstype == other.nstype)
+            and (self.address == other.address)
+            and (self.teststat == other.teststat)
+            and (self.limit == other.limit)
+            and (self.confidence == other.confidence)
+            and (self.isleak == other.isleak)
+        ):
             return True
         else:
             return False
@@ -551,15 +604,30 @@ class NSLeak(object):
                 source = "H_addr"
             else:
                 source = "unknown"
-            return str.format("result='leak' source='%s' kuiper='%f' significance='%f' confidence='%f'" \
-                              % (source, self.teststat, self.limit, self.confidence))
+            return str.format(
+                "result='leak' source='%s' kuiper='%f' significance='%f' confidence='%f'"
+                % (source, self.teststat, self.limit, self.confidence)
+            )
+
 
 """
 *************************************************************************
 """
 
+
 class SPLeak(object):
-    def __init__(self, sptype, prop=0, addr=0, pos=0, rdc=0.0, rdc_limit=0.0, ind=True, target="", conf=0.0):
+    def __init__(
+        self,
+        sptype,
+        prop=0,
+        addr=0,
+        pos=0,
+        rdc=0.0,
+        rdc_limit=0.0,
+        ind=True,
+        target="",
+        conf=0.0,
+    ):
         self.sptype = sptype
         self.property = prop
         self.address = addr
@@ -582,15 +650,17 @@ class SPLeak(object):
             return self.sptype < other.sptype
 
     def __eq__(self, other):
-        if (self.sptype == other.sptype) and \
-           (self.property == other.property) and \
-           (self.address == other.address) and \
-           (self.position == other.position) and \
-           (self.rdc == other.rdc) and \
-           (self.rdc_limit == other.rdc_limit) and \
-           (self.confidence == other.confidence) and \
-           (self.isleak == other.isleak) and \
-           (self.target == other.target):
+        if (
+            (self.sptype == other.sptype)
+            and (self.property == other.property)
+            and (self.address == other.address)
+            and (self.position == other.position)
+            and (self.rdc == other.rdc)
+            and (self.rdc_limit == other.rdc_limit)
+            and (self.confidence == other.confidence)
+            and (self.isleak == other.isleak)
+            and (self.target == other.target)
+        ):
             return True
         else:
             return False
@@ -623,17 +693,29 @@ class SPLeak(object):
                 source = "M_pos"
             else:
                 source = "unknown"
-            return str.format("result='leak' source='%s' leakagemodel='%s' property='%s' address='%s' rdc='%s' significance='%s' confidence='%f'" \
-                              % (source, self.target, self.property, (("%x" % self.address) if self.address is not None else "-"), (("%.4f" % self.rdc) \
-                               if self.rdc is not None else "-"), (("%.4f" % self.rdc_limit) if self.rdc_limit is not None else "-"), self.confidence))
+            return str.format(
+                "result='leak' source='%s' leakagemodel='%s' property='%s' address='%s' rdc='%s' significance='%s' confidence='%f'"
+                % (
+                    source,
+                    self.target,
+                    self.property,
+                    (("%x" % self.address) if self.address is not None else "-"),
+                    (("%.4f" % self.rdc) if self.rdc is not None else "-"),
+                    (("%.4f" % self.rdc_limit) if self.rdc_limit is not None else "-"),
+                    self.confidence,
+                )
+            )
+
 
 """
 *************************************************************************
 """
 
+
 class EvidenceSource(Enum):
     Generic = 0  # evidence of generic leakage test
-    Specific = 1 # evidence of specific leakage test
+    Specific = 1  # evidence of specific leakage test
+
 
 class EvidenceEntry:
     def __init__(self, entries, evkey, evsource):
@@ -648,9 +730,11 @@ class EvidenceEntry:
             string += str.format("%x " % e)
         return string
 
+
 """
 *************************************************************************
 """
+
 
 class Leak:
     def __init__(self, ip):
@@ -664,7 +748,7 @@ class Leak:
         self.evidence = []
         self.meta = None
 
-    def clone_collapsed(self, mask, collapse_cfleaks = False):
+    def clone_collapsed(self, mask, collapse_cfleaks=False):
         clone = self.__class__(self.ip & mask)
         clone.status = copy.deepcopy(self.status)
         for e in self.entries:
@@ -691,14 +775,14 @@ class Leak:
         return self.ip < other.ip
 
     def merge(self, newleak):
-        assert(self.ip == newleak.ip)
+        assert self.ip == newleak.ip
         for e in newleak.entries:
             self.entries.merge(newleak.entries[e])
         self.status.merge(newleak.status)
         self.evidence += newleak.evidence
 
     def add_evidence(self, ev):
-        assert(isinstance(ev, EvidenceEntry))
+        assert isinstance(ev, EvidenceEntry)
         self.evidence.append(ev)
 
     def __str__(self):
@@ -707,9 +791,11 @@ class Leak:
             string += str(e) + "\n"
         return string
 
+
 """
 *************************************************************************
 """
+
 
 class FunctionLeak:
     def __init__(self, leak):
@@ -718,7 +804,7 @@ class FunctionLeak:
         self.sym = SymbolInfo.lookup(leak.ip)
         if self.sym is None:
             img = Image("Unknown", 0, 0, False)
-            self.sym = Symbol(0, 0, "UnknownSym", img, '')
+            self.sym = Symbol(0, 0, "UnknownSym", img, "")
         self.fentry = self.sym.addr
         self.append(leak)
 
@@ -730,11 +816,11 @@ class FunctionLeak:
             self.cfleaks.merge(leak)
         else:
             debug(0, "Unknown type: " + str(leak.__class__))
-            assert(False)
+            assert False
 
     # Merge a FunctionLeak
     def merge(self, fleak):
-        assert(self.fentry == fleak.fentry)
+        assert self.fentry == fleak.fentry
         for e in fleak.dataleaks:
             self.dataleaks.merge(fleak.dataleaks[e])
         for e in fleak.cfleaks:
@@ -752,15 +838,17 @@ class FunctionLeak:
     def __lt__(self, other):
         return self.fentry < other.fentry
 
-    def doprint(self, printer, printleaks = False):
+    def doprint(self, printer, printleaks=False):
         printer.doprint_generic(self, printleaks)
 
     def __str__(self):
         return str(self.sym)
 
+
 """
 *************************************************************************
 """
+
 
 class Library:
     def __init__(self, fleak):
@@ -770,12 +858,12 @@ class Library:
 
     # Append a FunctionLeak
     def append(self, fleak):
-        assert(isinstance(fleak, FunctionLeak))
+        assert isinstance(fleak, FunctionLeak)
         self.entries.merge(fleak)
 
     # Merge a Library
     def merge(self, libleak):
-        assert(self.libentry == libleak.libentry)
+        assert self.libentry == libleak.libentry
         for e in libleak.entries:
             self.append(e)
 
@@ -791,15 +879,17 @@ class Library:
     def __lt__(self, other):
         return self.libentry.__lt__(other.libentry)
 
-    def doprint(self, printer, printleaks = False):
+    def doprint(self, printer, printleaks=False):
         printer.doprint_generic(self, printleaks)
 
     def __str__(self):
         return str(self.libentry)
 
+
 """
 *************************************************************************
 """
+
 
 class LibHierarchy:
     def __init__(self):
@@ -813,25 +903,28 @@ class LibHierarchy:
         lib = Library(fleak)
         self.entries.merge(lib)
 
-    def doprint(self, printer, printleaks = False):
+    def doprint(self, printer, printleaks=False):
         printer.doprint_generic(self, printleaks)
+
 
 """
 *************************************************************************
 """
 
+
 class DataLeak(Leak):
-    def __init__(self, ip, entry = None):
+    def __init__(self, ip, entry=None):
         Leak.__init__(self, ip)
         self.entries = MergeMap(DataLeakEntry)
         if entry is not None:
             self.append(entry)
 
-    def doprint(self, printer, printleaks = True):
+    def doprint(self, printer, printleaks=True):
         printer.doprint_generic(self, printleaks)
 
+
 class CFLeak(Leak):
-    def __init__(self, ip, entry = None):
+    def __init__(self, ip, entry=None):
         Leak.__init__(self, ip)
         self.entries = MergeMap(CFLeakEntry)
         if entry is not None:
@@ -843,8 +936,9 @@ class CFLeak(Leak):
             mp.add(e.mp)
         return mp
 
-    def doprint(self, printer, printleaks = True):
+    def doprint(self, printer, printleaks=True):
         printer.doprint_generic(self, printleaks)
+
 
 """
 *************************************************************************
@@ -853,14 +947,16 @@ class CFLeak(Leak):
 """
 History of call stack containing leaks
 """
+
+
 class CallHistory:
-    def __init__(self, ctxt = None, parent = None):
-        self.children = {} # maps Context to CallHistory
+    def __init__(self, ctxt=None, parent=None):
+        self.children = {}  # maps Context to CallHistory
         self.dataleaks = MergeMap(DataLeak)
         self.cfleaks = MergeMap(CFLeak)
-        assert(ctxt is None or isinstance(ctxt, Context))
+        assert ctxt is None or isinstance(ctxt, Context)
         self.ctxt = ctxt
-        assert(parent is None or isinstance(parent, CallHistory))
+        assert parent is None or isinstance(parent, CallHistory)
         self.parent = parent
 
     def __lt__(self, other):
@@ -870,14 +966,14 @@ class CallHistory:
             return False
         return self.ctxt.callee < other.ctxt.callee
 
-    def report_leak(self, callstack, leak, nocreate = False):
+    def report_leak(self, callstack, leak, nocreate=False):
         if callstack is None or len(callstack) == 0:
             self.consume_leak(leak)
         else:
             # advance to correct calling context recursively
             # by consuming first callstack entry
             ctxt = callstack[0]
-            assert(isinstance(ctxt, Context))
+            assert isinstance(ctxt, Context)
             if debuglevel(5):
                 debug(5, "Processing callstack")
                 for ci in callstack:
@@ -885,7 +981,7 @@ class CallHistory:
                 debug(5, "Handling ctxt %08x--%08x", (ctxt.caller, ctxt.callee))
 
             if nocreate:
-                assert(ctxt in self.children)
+                assert ctxt in self.children
             elif not ctxt in self.children:
                 self.children[ctxt] = CallHistory(ctxt, self)
             self.children[ctxt].report_leak(callstack[1:], leak, nocreate)
@@ -898,12 +994,12 @@ class CallHistory:
             self.cfleaks.merge(leak)
         else:
             debug(0, "Unknown type: " + str(leak.__class__))
-            assert(False)
+            assert False
 
-    def doprint(self, printer, printleaks = False):
+    def doprint(self, printer, printleaks=False):
         printer.doprint_generic(self, printleaks)
 
-    def flatten(self, flat = None):
+    def flatten(self, flat=None):
         main = False
         if flat is None:
             flat = LibHierarchy()
@@ -932,12 +1028,12 @@ class CallHistory:
             elif isinstance(leak, CFLeak):
                 return self.cfleaks.has_key(leak)
             else:
-                assert(False)
+                assert False
         else:
             # advance to correct calling context recursively
             # by consuming first callstack entry
             ctxt = callstack[0]
-            assert(isinstance(ctxt, Context))
+            assert isinstance(ctxt, Context)
             if debuglevel(3):
                 debug(3, "Processing callstack:")
                 for ci in callstack:
@@ -946,9 +1042,11 @@ class CallHistory:
             if ctxt in self.children:
                 return self.children[ctxt].has_leak(callstack[1:], leak)
 
+
 """
 *************************************************************************
 """
+
 
 class LeakCounter:
     def __init__(self):
@@ -1007,7 +1105,10 @@ class LeakCounter:
                         else:
                             counter.data_diff_total_untested += 1
                 else:
-                    if l.status.is_specific_tested() and not l.status.is_specific_leak():
+                    if (
+                        l.status.is_specific_tested()
+                        and not l.status.is_specific_leak()
+                    ):
                         counter.data_diff_total_dropped += 1
 
                 counted_targets = []
@@ -1042,7 +1143,10 @@ class LeakCounter:
                         else:
                             counter.cflow_diff_total_untested += 1
                 else:
-                    if l.status.is_specific_tested() and not l.status.is_specific_leak():
+                    if (
+                        l.status.is_specific_tested()
+                        and not l.status.is_specific_leak()
+                    ):
                         counter.cflow_diff_total_dropped += 1
 
                 counted_targets = []
@@ -1071,24 +1175,27 @@ class LeakCounter:
             pass
         else:
             debug(0, str(obj))
-            assert(False)
+            assert False
         return counter
 
     def doprint(self, printer):
         printer.doprint_generic(self)
 
+
 """
 *************************************************************************
 """
+
 
 class QueueDebugger:
     def __init__(self, myid):
         self.id = myid
 
-    def debug(self, level, fstr, values = ()):
+    def debug(self, level, fstr, values=()):
         if debuglevel(level):
             instr = str(fstr % values)
             debug(level, "[%d]%s", (self.id, instr))
+
 
 class Lookahead(QueueDebugger):
     def __init__(self, tracequeue):
@@ -1106,9 +1213,9 @@ class Lookahead(QueueDebugger):
         # only considers type and ip
         self.myset.add(MergePoint(e.type, e.ip, self.callstack.depth()))
 
-    def advance_next_bp_candidate(self, bdepth = -1):
+    def advance_next_bp_candidate(self, bdepth=-1):
         while True:
-            assert(bdepth < 0 or self.callstack.depth() + 1 >= bdepth)
+            assert bdepth < 0 or self.callstack.depth() + 1 >= bdepth
 
             e = self.tq.lookahead(self.shift)
             self.shift += 1
@@ -1127,7 +1234,7 @@ class Lookahead(QueueDebugger):
             if not Type.isbranch(e):
                 continue
 
-            assert(self.callstack.depth() >= bdepth)
+            assert self.callstack.depth() >= bdepth
             if bdepth < 0 or self.callstack.depth() == bdepth:
                 # We are in the right context
                 self.consume_entry(e)
@@ -1148,12 +1255,14 @@ class Lookahead(QueueDebugger):
             return None
         return intersect.pop()
 
+
 """
 *************************************************************************
 """
 
+
 class TraceQueue(QueueDebugger):
-    def __init__(self, tfile, tid, showprogress = False):
+    def __init__(self, tfile, tid, showprogress=False):
         QueueDebugger.__init__(self, tid)
         self.file = tfile
         self.q = Queue()
@@ -1166,9 +1275,9 @@ class TraceQueue(QueueDebugger):
         self.showprogress = showprogress
         # create a virtual call to the entry
         einit = self.lookahead(0)
-        assert(einit.type == Type.FUNC_ENTRY.value)
+        assert einit.type == Type.FUNC_ENTRY.value
 
-    def refill(self, elem = blocks):
+    def refill(self, elem=blocks):
         if not self.load_chunk(elem):
             return False
         self.refill_chunk()
@@ -1176,12 +1285,12 @@ class TraceQueue(QueueDebugger):
 
     # Call load_chunk before this method
     def refill_chunk(self):
-        assert(self.chunk is not None)
-        assert(len(self.chunk) % bs == 0)
-        cblocks = int(len(self.chunk)/bs)
+        assert self.chunk is not None
+        assert len(self.chunk) % bs == 0
+        cblocks = int(len(self.chunk) / bs)
         unpacked = struct.unpack("<" + "BQQ" * cblocks, self.chunk)
         for i in range(0, cblocks):
-            e = Entry(unpacked[i*3:(i+1)*3])
+            e = Entry(unpacked[i * 3 : (i + 1) * 3])
             self.q.put_nowait(e)
             if debuglevel(4):
                 self.debug(4, "parsing %s", (e))
@@ -1196,13 +1305,15 @@ class TraceQueue(QueueDebugger):
                         self.debug(4, "Is branch, creating %s", (e2))
         self.chunk = None
 
-    def load_chunk(self, elem = blocks):
-        assert(self.chunk is None)
+    def load_chunk(self, elem=blocks):
+        assert self.chunk is None
         self.chunk = self.file.read(elem * bs)
         if self.showprogress:
-            self.fpos += elem*bs
+            self.fpos += elem * bs
             if self.fpos > self.stepsize:
-                sys.stderr.write("%c[2K\r[%02.1f]" % (27, self.file.tell() / float(self.fsize)*100))
+                sys.stderr.write(
+                    "%c[2K\r[%02.1f]" % (27, self.file.tell() / float(self.fsize) * 100)
+                )
                 self.fpos = 0
         if len(self.chunk) == 0:
             self.chunk = None
@@ -1210,13 +1321,13 @@ class TraceQueue(QueueDebugger):
         return True
 
     def peak_last_branch_from_chunk(self):
-        assert(self.chunk is not None)
-        assert(len(self.chunk) % bs == 0)
+        assert self.chunk is not None
+        assert len(self.chunk) % bs == 0
         idx = len(self.chunk)
 
         while idx >= 17:
             idx -= 17
-            unpacked = struct.unpack("<" + "BQQ", self.chunk[idx:idx+17])
+            unpacked = struct.unpack("<" + "BQQ", self.chunk[idx : idx + 17])
             e = Entry(unpacked)
             if Type.isbranch(e):
                 return e
@@ -1258,11 +1369,15 @@ class TraceQueue(QueueDebugger):
             # Make sure queue has enough items
             if self.q.empty():
                 if not self.refill():
-                    assert(False)
+                    assert False
                     return -1
             e = self.q.queue[0]
 
-            if self.callstack.depth() == mp.depth and e.ip == mp.ip and e.type == mp.type:
+            if (
+                self.callstack.depth() == mp.depth
+                and e.ip == mp.ip
+                and e.type == mp.type
+            ):
                 self.debug(3, "advanced in %d steps", (count))
                 return count
             # skip item and advance

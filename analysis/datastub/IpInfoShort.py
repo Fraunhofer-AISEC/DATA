@@ -27,7 +27,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 *************************************************************************
 """
 
-IP_INFO_FILE = u'ip_info.pickle'
+IP_INFO_FILE = "ip_info.pickle"
+
 
 class IpInfoShort:
     def __init__(self, asm_file, asm_line_nr, src_file, src_line_nr):
@@ -35,4 +36,3 @@ class IpInfoShort:
         self.asm_line_nr = asm_line_nr
         self.src_file = src_file
         self.src_line_nr = src_line_nr
-
