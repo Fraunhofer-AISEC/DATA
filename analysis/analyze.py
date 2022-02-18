@@ -36,18 +36,38 @@ import struct
 import copy
 import numpy
 import types
-from collections import Counter,defaultdict
+from collections import Counter, defaultdict
 import kuipertest
 import rdctest
 import datastub
 from datastub.SymbolInfo import SymbolInfo
-from datastub.utils import debug,debuglevel,set_debuglevel,sorted_keys
-from datastub.printer import XmlLeakPrinter,BinLeakPrinter
-from datastub.export import storepickle,loadpickle,export_leaks
-from datastub.leaks import FUNC_ENTRY_BIN,FUNC_EXIT_BIN,bs,CallHistory,\
-CallStack,CFLeak,CFLeakEntry,Context,DataLeak,DataLeakEntry,Entry,\
-EvidenceEntry,EvidenceSource, Lookahead,MergePoint,NSLeak,NSPType,\
-SPLeak,TraceQueue,Type,MaskType,Leak
+from datastub.utils import debug, debuglevel, set_debuglevel, sorted_keys
+from datastub.printer import XmlLeakPrinter, BinLeakPrinter
+from datastub.export import storepickle, loadpickle, export_leaks
+from datastub.leaks import (
+    FUNC_ENTRY_BIN,
+    FUNC_EXIT_BIN,
+    bs,
+    CallHistory,
+    CallStack,
+    CFLeak,
+    CFLeakEntry,
+    Context,
+    DataLeak,
+    DataLeakEntry,
+    Entry,
+    EvidenceEntry,
+    EvidenceSource,
+    Lookahead,
+    MergePoint,
+    NSLeak,
+    NSPType,
+    SPLeak,
+    TraceQueue,
+    Type,
+    MaskType,
+    Leak,
+)
 import multiprocessing
 
 nospleak = None
@@ -65,6 +85,7 @@ leaks = CallHistory()
 *************************************************************************
 """
 
+
 def report_dataleak(callstack, e1, e2):
     debug(1, "Data leak@ %08x: %08x vs %08x", (e1.ip, e1.data, e2.data))
     if debuglevel(3):
@@ -74,15 +95,30 @@ def report_dataleak(callstack, e1, e2):
     leak.append(DataLeakEntry(e2.data))
     leaks.report_leak(callstack, leak)
 
+
 def report_cfleak(callstack, bp, mp, e1, len1, e2, len2):
-    debug(1, "Control flow leak@BB %08x, merging@%08x(%s): %08x(%s)(+%d) vs %08x(%s)(+%d)", \
-    (bp, mp.ip, Type(mp.type).name, e1.ip, Type(e1.type), len1, e2.ip, Type(e2.type), len2))
+    debug(
+        1,
+        "Control flow leak@BB %08x, merging@%08x(%s): %08x(%s)(+%d) vs %08x(%s)(+%d)",
+        (
+            bp,
+            mp.ip,
+            Type(mp.type).name,
+            e1.ip,
+            Type(e1.type),
+            len1,
+            e2.ip,
+            Type(e2.type),
+            len2,
+        ),
+    )
     if debuglevel(3):
         callstack.doprint_reverse()
     leak = CFLeak(bp)
     leak.append(CFLeakEntry(e1, len1, mp.ip))
     leak.append(CFLeakEntry(e2, len2, mp.ip))
     leaks.report_leak(callstack, leak)
+
 
 """
 *************************************************************************
@@ -92,42 +128,47 @@ def report_cfleak(callstack, bp, mp, e1, len1, e2, len2):
 # equal. We search for calls and rets in one chunk and apply it to both
 # queue's call stacks.
 def consume_call_ret(queues):
-    assert(queues[0].chunk is not None)
-    assert(len(queues[0].chunk) % bs == 0)
-    cblocks = int(len(queues[0].chunk)/bs)
+    assert queues[0].chunk is not None
+    assert len(queues[0].chunk) % bs == 0
+    cblocks = int(len(queues[0].chunk) / bs)
     for i in range(0, cblocks):
-        idx = 17*i
-        typ = queues[0].chunk[idx:idx+1]
+        idx = 17 * i
+        typ = queues[0].chunk[idx : idx + 1]
         if typ == FUNC_ENTRY_BIN or typ == FUNC_EXIT_BIN:
-            e = Entry(struct.unpack("<BQQ", queues[0].chunk[idx:idx+17]))
+            e = Entry(struct.unpack("<BQQ", queues[0].chunk[idx : idx + 17]))
             queues[0].callstack.update_context(e)
             queues[1].callstack.update_context(e)
     queues[0].chunk = None
     queues[1].chunk = None
 
+
 def fast_forward(queues, bp, bdepth):
     # Try at most 5 times to equalize queue size
     # First try might not work since conditional branches are stored
     # as one element in the file but reported as two elements in the queue.
-    for _ in range(1,5):
+    for _ in range(1, 5):
         s0 = queues[0].size()
         s1 = queues[1].size()
         if s0 > s1:
-            queues[1].refill(s0-s1)
+            queues[1].refill(s0 - s1)
         elif s1 > s0:
-            queues[0].refill(s1-s0)
+            queues[0].refill(s1 - s0)
         else:
             break
 
     if queues[0].size() != queues[1].size():
-        debug(2, "[fast-forward] queue alignment error %d vs %d", (queues[0].size(), queues[1].size()))
+        debug(
+            2,
+            "[fast-forward] queue alignment error %d vs %d",
+            (queues[0].size(), queues[1].size()),
+        )
         return [queues[0].get(), queues[1].get(), bp, bdepth]
 
     while queues[0].size() > 0:
         e1 = queues[0].get()
         e2 = queues[1].get()
         if e1 is None:
-            assert(e2 is None)
+            assert e2 is None
             break
         if e1 == e2:
             if Type.isbranch(e1):
@@ -136,7 +177,7 @@ def fast_forward(queues, bp, bdepth):
             continue
         else:
             return [e1, e2, bp, bdepth]
-    assert(queues[1].size() == 0)
+    assert queues[1].size() == 0
 
     # Queues are empty, start fast forward
     debug(2, "[fast-forward] starting fast search")
@@ -163,11 +204,13 @@ def fast_forward(queues, bp, bdepth):
     e2 = queues[1].get()
     return [e1, e2, bp, bdepth]
 
+
 """
 *************************************************************************
 """
 
-def iterate_queue(files, fast = True):
+
+def iterate_queue(files, fast=True):
     global unpacked
     global trace
     global traces
@@ -191,13 +234,13 @@ def iterate_queue(files, fast = True):
 
         if e1 == e2:
             # no diff
-            assert(queues[0].callstack == queues[1].callstack)
+            assert queues[0].callstack == queues[1].callstack
             if Type.isbranch(e1):
                 bp = e1
                 bdepth = queues[0].callstack.depth()
             continue
 
-        assert(bp == None or Type.isbranch(bp))
+        assert bp == None or Type.isbranch(bp)
         if e1.type == e2.type and e1.ip == e2.ip:
             if Type.isbranch(e1):
                 bp = e1
@@ -210,8 +253,8 @@ def iterate_queue(files, fast = True):
                 lhA = Lookahead(queues[0])
                 lhB = Lookahead(queues[1])
                 # Get 2 branches
-                e1b = queues[0].lookahead(0);
-                e2b = queues[1].lookahead(0);
+                e1b = queues[0].lookahead(0)
+                e2b = queues[1].lookahead(0)
                 foundA = True
                 foundB = True
                 while True:
@@ -224,10 +267,18 @@ def iterate_queue(files, fast = True):
                         break
                     if not foundA and not foundB:
                         debug(0, "No mergepoint found!")
-                        report_cfleak(queues[0].callstack, bp.ip, MergePoint(Type.FUNC_EXIT, 0, 0), e1b, -1, e2b, -1)
+                        report_cfleak(
+                            queues[0].callstack,
+                            bp.ip,
+                            MergePoint(Type.FUNC_EXIT, 0, 0),
+                            e1b,
+                            -1,
+                            e2b,
+                            -1,
+                        )
                         return
 
-                assert(isinstance(mergepoint, MergePoint))
+                assert isinstance(mergepoint, MergePoint)
                 debug(2, "found mp: %08x, depth %d", (mergepoint.ip, mergepoint.depth))
 
                 # Advance to mergepoint
@@ -236,25 +287,29 @@ def iterate_queue(files, fast = True):
                     queues[0].callstack.doprint_reverse()
                 len1 = queues[0].advance(mergepoint)
                 len2 = queues[1].advance(mergepoint)
-                debug(2, "advanced to mp: %08x,%08x", (queues[0].lookahead(0).ip, queues[1].lookahead(0).ip))
+                debug(
+                    2,
+                    "advanced to mp: %08x,%08x",
+                    (queues[0].lookahead(0).ip, queues[1].lookahead(0).ip),
+                )
                 if debuglevel(3):
                     queues[0].callstack.doprint_reverse()
 
-                assert(queues[0].lookahead(0).ip == queues[1].lookahead(0).ip)
-                #assert(queues[0].callstack == queues[1].callstack)
+                assert queues[0].lookahead(0).ip == queues[1].lookahead(0).ip
+                # assert(queues[0].callstack == queues[1].callstack)
                 if not queues[0].callstack == queues[1].callstack:
                     queues[0].callstack.doprint_reverse()
                     print("====")
                     queues[1].callstack.doprint_reverse()
                     assert False
-                assert(Type.isbranch(bp))
+                assert Type.isbranch(bp)
                 report_cfleak(bcallstack, bp.ip, mergepoint, e1b, len1, e2b, len2)
 
             elif Type(e1.type) in (Type.READ, Type.WRITE, Type.HREAD, Type.HWRITE):
                 # We have a dataleak
-                assert(e1.data != 0)
-                assert(e2.data != 0)
-                assert(queues[0].callstack == queues[1].callstack)
+                assert e1.data != 0
+                assert e2.data != 0
+                assert queues[0].callstack == queues[1].callstack
                 if Type(e1.type) in (Type.HREAD, Type.HWRITE):
                     e1.data &= 0x00000000FFFFFFFF
                     e2.data &= 0x00000000FFFFFFFF
@@ -262,13 +317,13 @@ def iterate_queue(files, fast = True):
                     report_dataleak(queues[0].callstack, e1, e2)
             else:
                 debug(0, "Unknown type")
-                assert(False)
+                assert False
         elif Type(e1.type) in (Type.READ, Type.WRITE, Type.HREAD, Type.HWRITE):
             if Type(e2.type) in (Type.READ, Type.WRITE, Type.HREAD, Type.HWRITE):
                 # Mixture of heap and non-heap read/write. Maybe, heap tracking is imprecise
                 # We require that both elements are either (h)read or (h)write
                 debug(0, "Imprecise heap tracking @ %08x", (e1.ip))
-                #assert((e1.type | MaskType.HEAP.value) == (e2.type | MaskType.HEAP.value))
+                # assert((e1.type | MaskType.HEAP.value) == (e2.type | MaskType.HEAP.value))
                 if (e1.type | MaskType.HEAP.value) > 0:
                     e1.data &= 0x00000000FFFFFFFF
                 if (e2.type | MaskType.HEAP.value) > 0:
@@ -277,23 +332,25 @@ def iterate_queue(files, fast = True):
             else:
                 # This should never happen. We miss some conditional branches in the code
                 debug(0, "Missed some branch (inner miss)")
-                assert(False)
+                assert False
         else:
             # This should never happen. We miss some conditional branches in the code
             debug(0, "Missed some branch (outer miss) @ %08x vs %08x", (e1.ip, e2.ip))
-            assert(False)
+            assert False
+
 
 """
 *************************************************************************
 """
 
+
 def load_leaks(files, keys, source):
     for i in range(0, len(files)):
-        with open(files[i], 'rb') as f:
+        with open(files[i], "rb") as f:
             chunk = f.read()
 
         if keys is not None:
-            with open(keys[i], 'rb') as fk:
+            with open(keys[i], "rb") as fk:
                 k = fk.read()
         else:
             k = None
@@ -301,10 +358,10 @@ def load_leaks(files, keys, source):
         idx = 0
         cs = CallStack()
         while idx < len(chunk):
-            typ = struct.unpack('B', chunk[idx:idx+1])[0]
+            typ = struct.unpack("B", chunk[idx : idx + 1])[0]
             idx += 1
             if typ == Type.FUNC_ENTRY.value:
-                (caller, callee) = struct.unpack('<QQ', chunk[idx:idx+16])
+                (caller, callee) = struct.unpack("<QQ", chunk[idx : idx + 16])
                 idx += 16
                 debug(2, "FUNC_ENTRY %x->%x", (caller, callee))
                 cs.docall_context(Context(caller, callee))
@@ -312,10 +369,10 @@ def load_leaks(files, keys, source):
                 debug(2, "FUNC_EXIT")
                 cs.doreturn_context()
             elif typ == Type.CFLEAK.value:
-                (ip, no) = struct.unpack('<QQ', chunk[idx:idx+16])
+                (ip, no) = struct.unpack("<QQ", chunk[idx : idx + 16])
                 idx += 16
                 debug(2, "CFLEAK %x (%d)", (ip, no))
-                evidence = struct.unpack('<' + 'Q'*no, chunk[idx:idx+8*no])
+                evidence = struct.unpack("<" + "Q" * no, chunk[idx : idx + 8 * no])
                 debug(2, str(evidence))
                 idx += no * 8
                 leak = CFLeak(ip)
@@ -325,10 +382,10 @@ def load_leaks(files, keys, source):
                     cs.doprint_reverse()
                 leaks.report_leak(cs, leak, False)
             elif typ == Type.DLEAK.value:
-                (ip, no) = struct.unpack('<QQ', chunk[idx:idx+16])
+                (ip, no) = struct.unpack("<QQ", chunk[idx : idx + 16])
                 idx += 16
                 debug(2, "DLEAK %x (%d)", (ip, no))
-                evidence = struct.unpack('<' + 'Q'*no, chunk[idx:idx+8*no])
+                evidence = struct.unpack("<" + "Q" * no, chunk[idx : idx + 8 * no])
                 debug(2, str(evidence))
                 idx += no * 8
                 leak = DataLeak(ip)
@@ -339,11 +396,13 @@ def load_leaks(files, keys, source):
                 leaks.report_leak(cs, leak, False)
             else:
                 debug(0, "Unknown type")
-                assert(False)
+                assert False
+
 
 """
 *************************************************************************
 """
+
 
 def extract_leakdiff_to_array(A, LeaksOnly=False):
     array = []
@@ -364,14 +423,16 @@ def extract_leakdiff_to_array(A, LeaksOnly=False):
         array += extract_leakdiff_to_array(child, LeaksOnly)
     return array
 
+
 """
 *************************************************************************
 """
 
+
 def generic_leakage_test(fixed, random):
     fixedleaks = extract_leakdiff_to_array(fixed)
     randomleaks = extract_leakdiff_to_array(random)
-    assert(len(fixedleaks) == len(randomleaks))
+    assert len(fixedleaks) == len(randomleaks)
 
     # print test types
     debug(1, "Test Types:")
@@ -386,7 +447,7 @@ def generic_leakage_test(fixed, random):
     for i in range(0, len(fixedleaks)):
         fl = fixedleaks[i]
         rl = randomleaks[i]
-        assert(fl.ip == rl.ip)
+        assert fl.ip == rl.ip
         noleakdetected = True
         msgwarning = ""
         msgleak = ""
@@ -484,7 +545,12 @@ def generic_leakage_test(fixed, random):
                     rdic[c] = counts[c]
 
         # sanity check
-        if len(fnum) == 0 or len(rnum) == 0 or len(fnum_uniq) == 0 or len(rnum_uniq) == 0:
+        if (
+            len(fnum) == 0
+            or len(rnum) == 0
+            or len(fnum_uniq) == 0
+            or len(rnum_uniq) == 0
+        ):
             continue
 
         ######
@@ -493,7 +559,7 @@ def generic_leakage_test(fixed, random):
 
         # sanity check
         cont = False
-        if len(fnum) == 0 :
+        if len(fnum) == 0:
             cont = True
         if len(rnum) == 0:
             cont = True
@@ -510,8 +576,12 @@ def generic_leakage_test(fixed, random):
                     fnum[s] = 0
 
             # compile histograms
-            fhist = numpy.array([fnum[j] for j in sorted(fnum.keys())], dtype=numpy.float32)
-            rhist = numpy.array([rnum[j] for j in sorted(rnum.keys())], dtype=numpy.float32)
+            fhist = numpy.array(
+                [fnum[j] for j in sorted(fnum.keys())], dtype=numpy.float32
+            )
+            rhist = numpy.array(
+                [rnum[j] for j in sorted(rnum.keys())], dtype=numpy.float32
+            )
             fhist_len = numpy.int32(numpy.sum(fhist))
             rhist_len = numpy.int32(numpy.sum(rhist))
 
@@ -524,8 +594,10 @@ def generic_leakage_test(fixed, random):
 
             # stat test
             if not cont:
-                (D, L) = kuipertest.kp_histogram(fhist, rhist, fhist_len, rhist_len, 0.9999)
-                R = (D > L)
+                (D, L) = kuipertest.kp_histogram(
+                    fhist, rhist, fhist_len, rhist_len, 0.9999
+                )
+                R = D > L
                 if R:
                     noleakdetected = False
                     cfl = NSLeak(NSPType.Type1a, None, D, L, 0.9999, R)
@@ -557,8 +629,12 @@ def generic_leakage_test(fixed, random):
                     fnum_uniq[s] = 0
 
             # compile histograms
-            fhist = numpy.array([fnum_uniq[j] for j in sorted(fnum_uniq.keys())], dtype=numpy.float32)
-            rhist = numpy.array([rnum_uniq[j] for j in sorted(rnum_uniq.keys())], dtype=numpy.float32)
+            fhist = numpy.array(
+                [fnum_uniq[j] for j in sorted(fnum_uniq.keys())], dtype=numpy.float32
+            )
+            rhist = numpy.array(
+                [rnum_uniq[j] for j in sorted(rnum_uniq.keys())], dtype=numpy.float32
+            )
             fhist_len = numpy.int32(numpy.sum(fhist))
             rhist_len = numpy.int32(numpy.sum(rhist))
 
@@ -571,8 +647,10 @@ def generic_leakage_test(fixed, random):
 
             # stat test
             if not cont:
-                (D, L) = kuipertest.kp_histogram(fhist, rhist, fhist_len, rhist_len, 0.9999)
-                R = (D > L)
+                (D, L) = kuipertest.kp_histogram(
+                    fhist, rhist, fhist_len, rhist_len, 0.9999
+                )
+                R = D > L
                 if R:
                     noleakdetected = False
                     cfl = NSLeak(NSPType.Type1b, None, D, L, 0.9999, R)
@@ -604,8 +682,12 @@ def generic_leakage_test(fixed, random):
                     fdic[s] = 0
 
             # compile histograms
-            fhist = numpy.array([fdic[j] for j in sorted(fdic.keys())], dtype=numpy.float32)
-            rhist = numpy.array([rdic[j] for j in sorted(rdic.keys())], dtype=numpy.float32)
+            fhist = numpy.array(
+                [fdic[j] for j in sorted(fdic.keys())], dtype=numpy.float32
+            )
+            rhist = numpy.array(
+                [rdic[j] for j in sorted(rdic.keys())], dtype=numpy.float32
+            )
             fhist_len = numpy.int32(numpy.sum(fhist))
             rhist_len = numpy.int32(numpy.sum(rhist))
 
@@ -618,8 +700,10 @@ def generic_leakage_test(fixed, random):
 
             # stat test
             if not cont:
-                (D, L) = kuipertest.kp_histogram(fhist, rhist, fhist_len, rhist_len, 0.9999)
-                R = (D > L)
+                (D, L) = kuipertest.kp_histogram(
+                    fhist, rhist, fhist_len, rhist_len, 0.9999
+                )
+                R = D > L
                 if R:
                     noleakdetected = False
                     cfl = NSLeak(NSPType.Type2, None, D, L, 0.9999, R)
@@ -639,38 +723,63 @@ def generic_leakage_test(fixed, random):
 
         # progress
         if len(fixedleaks) > 100:
-            if (i % int(len(fixedleaks)/10)) == 0:
+            if (i % int(len(fixedleaks) / 10)) == 0:
                 debug(0, "[Progress] %6.2f%%", ((i * 100.0) / len(fixedleaks)))
         else:
-            debug(0, "[Progress] Finished %d", (i+1))
+            debug(0, "[Progress] Finished %d", (i + 1))
         sys.stdout.flush()
     debug(0, "[Progress] 100.00%%")
     sys.stdout.flush()
 
+
 """
 *************************************************************************
 """
+
 
 def spe_testfunction_initialize(_X_labels, _xtarget):
     global X_labels, xtarget
     X_labels = _X_labels
     xtarget = _xtarget
 
+
 """
 *************************************************************************
 """
 
+
 def spe_testfunction(input):
-    #global X_labels
+    # global X_labels
     rli, xarr, property_idx, dict_value, dict_key, nsptype = input
-    debug(3, "spe_testfunction: {}, {}, {}, {} START".format(property_idx,X_labels[property_idx],nsptype,dict_key))
+    debug(
+        3,
+        "spe_testfunction: {}, {}, {}, {} START".format(
+            property_idx, X_labels[property_idx], nsptype, dict_key
+        ),
+    )
     (R, L, I) = rdctest.RDC.test(xarr, dict_value, 0.9999)
-    debug(3, "spe_testfunction: {}, {}, {}, {} END".format(property_idx,X_labels[property_idx],nsptype,dict_key))
+    debug(
+        3,
+        "spe_testfunction: {}, {}, {}, {} END".format(
+            property_idx, X_labels[property_idx], nsptype, dict_key
+        ),
+    )
     if I == False:
-        leak = SPLeak(nsptype, X_labels[property_idx], property_idx, None, R, L, I, xtarget, 0.9999)
+        leak = SPLeak(
+            nsptype,
+            X_labels[property_idx],
+            property_idx,
+            None,
+            R,
+            L,
+            I,
+            xtarget,
+            0.9999,
+        )
         debug(1, "Found leak [Test2+3]: %s", (str(leak)))
         return (rli, leak)
     return (rli, None)
+
 
 # Specific leakage test requires a callback function that gets a list
 # of inputs (e.g. keys) and returns a 2-dimensional numpy array. The
@@ -701,8 +810,8 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
     except Exception as e:
         debug(0, "Unable to load specific leakage test callback function!")
         debug(0, str(e))
-        assert (False)
-    assert(splcb.specific_leakage_callback)
+        assert False
+    assert splcb.specific_leakage_callback
     xtarget = str(os.path.splitext(os.path.basename(callback))[0])
     nospleak = SPLeak(NSPType.Noleak, target=xtarget)
 
@@ -757,15 +866,15 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
     X_labels = []
     # unpack specific leakage result tuple to extract labels
     if type(X) == tuple:
-        X,X_labels = X
+        X, X_labels = X
     else:
         X_labels = range(0, X.shape[1])
-    assert(type(X) == numpy.ndarray)
-    assert(len(X_labels) == X.shape[1])
+    assert type(X) == numpy.ndarray
+    assert len(X_labels) == X.shape[1]
 
     Xglob = dict(zip(keys, X))
 
-    # Todo: make use of above X/X_labels in below code. 
+    # Todo: make use of above X/X_labels in below code.
     # Beware of extracting only needed entries
 
     # Multiprocessing-queue
@@ -848,8 +957,8 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
 
         # Extract X in correct order
         X = numpy.asarray([Xglob[k] for k in keys])
-        assert(type(X) == numpy.ndarray)
-        assert(len(X_labels) == X.shape[1])
+        assert type(X) == numpy.ndarray
+        assert len(X_labels) == X.shape[1]
 
         if X.shape[0] != len(keys):
             debug(0, "Warning: callback returned wrong matrix!")
@@ -874,18 +983,38 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
         if mp:
             # Multiproccesing: prepare queue for later analysis
             # Test 2
-            queue.extend([(rli, X[:,prop], prop, rdic[k], k, NSPType.Type2) for prop in range(0, X.shape[1]) for k in rdic.keys()])
+            queue.extend(
+                [
+                    (rli, X[:, prop], prop, rdic[k], k, NSPType.Type2)
+                    for prop in range(0, X.shape[1])
+                    for k in rdic.keys()
+                ]
+            )
             # Test 3
-            queue.extend([(rli, X[:,prop], prop, rdic_pos[k], k, NSPType.Type3) for prop in range(0, X.shape[1]) for k in rdic_pos.keys()])
+            queue.extend(
+                [
+                    (rli, X[:, prop], prop, rdic_pos[k], k, NSPType.Type3)
+                    for prop in range(0, X.shape[1])
+                    for k in rdic_pos.keys()
+                ]
+            )
         else:
             # Single-threaded: do analysis immediately
             cleaks = list()
             spe_testfunction_initialize(X_labels, xtarget)
             for prop in range(0, X.shape[1]):
                 for k in rdic.keys():
-                    cleaks.append(spe_testfunction((rli, X[:,prop], prop, rdic[k], k, NSPType.Type2))[1])
+                    cleaks.append(
+                        spe_testfunction(
+                            (rli, X[:, prop], prop, rdic[k], k, NSPType.Type2)
+                        )[1]
+                    )
                 for k in rdic_pos.keys():
-                    cleaks.append(spe_testfunction((rli, X[:,prop], prop, rdic_pos[k], k, NSPType.Type3))[1])
+                    cleaks.append(
+                        spe_testfunction(
+                            (rli, X[:, prop], prop, rdic_pos[k], k, NSPType.Type3)
+                        )[1]
+                    )
 
             # Collect results
             for cleak in cleaks:
@@ -899,16 +1028,23 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
 
             # Print progress
             if len(randomleaks) > 100:
-                if (rli % int(len(randomleaks)/10)) == 0:
+                if (rli % int(len(randomleaks) / 10)) == 0:
                     debug(0, "[Progress] %6.2f%%", ((rli * 100.0) / len(randomleaks)))
             else:
-                debug(0, "[Progress] %d/%d", (rli+1, len(randomleaks)))
+                debug(0, "[Progress] %d/%d", (rli + 1, len(randomleaks)))
             sys.stdout.flush()
     if mp:
         pool_size = multiprocessing.cpu_count()
-        #os.system('taskset -cp 0-%d %s' % (pool_size, os.getpid()))
+        # os.system('taskset -cp 0-%d %s' % (pool_size, os.getpid()))
         debug(1, "Processing all leaks in parallel")
-        with multiprocessing.Pool(pool_size, spe_testfunction_initialize, initargs=(X_labels, xtarget,)) as pool:
+        with multiprocessing.Pool(
+            pool_size,
+            spe_testfunction_initialize,
+            initargs=(
+                X_labels,
+                xtarget,
+            ),
+        ) as pool:
             debug(1, "Collecting results")
             results = pool.map(spe_testfunction, queue)
             rlset = set()
@@ -926,9 +1062,11 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
     debug(0, "Finished specific analysis")
     sys.stdout.flush()
 
+
 """
 *************************************************************************
 """
+
 
 def precompute_single(input):
     # global precompute_rdc_file
@@ -943,6 +1081,7 @@ def precompute_single(input):
         fcntl.flock(f, fcntl.LOCK_UN)
     return (N, limit)
 
+
 """
 *************************************************************************
 """
@@ -950,10 +1089,13 @@ def precompute_single(input):
 """
 Precompute RDC limits using multiprocessing.
 """
+
+
 def get_rdc_single(N, alpha):
     limit = rdctest.RDC.rdc_sigthres(N, alpha)
     debug(0, "RDC_limit=%f for N=%d, alpha=%f", (limit, N, alpha))
 
+
 """
 *************************************************************************
 """
@@ -961,6 +1103,8 @@ def get_rdc_single(N, alpha):
 """
 Precompute RDC limits using multiprocessing.
 """
+
+
 def precompute_rdc_parallel(target, alpha):
     global precompute_rdc_file
     global precompute_alpha
@@ -970,11 +1114,12 @@ def precompute_rdc_parallel(target, alpha):
     pool_size = multiprocessing.cpu_count()
     with multiprocessing.Pool(pool_size, None, None) as pool:
         inp = list()
-        inp.extend([(i) for i in range(30,500,10)])
-        inp.extend([(i) for i in range(550,1000,50)])
-        inp.extend([(i) for i in range(5000,10000,200)])
+        inp.extend([(i) for i in range(30, 500, 10)])
+        inp.extend([(i) for i in range(550, 1000, 50)])
+        inp.extend([(i) for i in range(5000, 10000, 200)])
         debug(0, "Precompute parallel on %s", (inp))
         rdc = pool.map(precompute_single, inp)
+
 
 """
 *************************************************************************
@@ -983,8 +1128,11 @@ def precompute_rdc_parallel(target, alpha):
 """
 Merge leaks B into global leaks.
 """
+
+
 def merge_leaks(B):
     merge_leaks_recursive(B, CallStack())
+
 
 def merge_leaks_recursive(B, callstack):
     if debuglevel(3):
@@ -1001,12 +1149,14 @@ def merge_leaks_recursive(B, callstack):
         merge_leaks_recursive(child, callstack)
         callstack.doreturn_context()
 
+
 def match_filter(leak, filterarr):
-    status = str(leak.status).replace('"',"").replace("'","")
+    status = str(leak.status).replace('"', "").replace("'", "")
     for f in filterarr:
         if not f in status:
             return False
     return True
+
 
 """
 *************************************************************************
@@ -1015,7 +1165,11 @@ def match_filter(leak, filterarr):
 """
 mask ... bitmask to apply to all addresses
 """
-def collapse_leaks_recursive(leaks, collapsed, callstack, collapse_cfleaks, mask, filterarr):
+
+
+def collapse_leaks_recursive(
+    leaks, collapsed, callstack, collapse_cfleaks, mask, filterarr
+):
     for l in leaks.dataleaks:
         if len(filterarr) > 0 and not match_filter(l, filterarr):
             debug(1, "Filtering dleak %x", (l.ip))
@@ -1037,25 +1191,30 @@ def collapse_leaks_recursive(leaks, collapsed, callstack, collapse_cfleaks, mask
     for k in leaks.children:
         child = leaks.children[k]
         callstack.docall_context(child.ctxt)
-        collapse_leaks_recursive(child, collapsed, callstack, collapse_cfleaks, mask, filterarr)
+        collapse_leaks_recursive(
+            child, collapsed, callstack, collapse_cfleaks, mask, filterarr
+        )
         callstack.doreturn_context()
     return collapsed
+
 
 """
 granularity ... number of bits
 resfilter ... filter results by given strings, semicolon-separated
 """
-def collapse_cfleaks(leaks, collapse_cfleaks, granularity, resfilter = ""):
+
+
+def collapse_cfleaks(leaks, collapse_cfleaks, granularity, resfilter=""):
     mask = -1
     filterarr = []
     if granularity != 1:
         granularity -= 1
         blen = granularity.bit_length()
         # granularity must be power of 2
-        assert(1<<blen == granularity+1)
-        mask = (-1 << blen)
+        assert 1 << blen == granularity + 1
+        mask = -1 << blen
     if len(resfilter) > 0:
-        filterarr = resfilter.replace('"',"").replace("'","").split(';')
+        filterarr = resfilter.replace('"', "").replace("'", "").split(";")
         for f in filterarr:
             debug(0, "Filtering results for: " + f)
     if mask == -1 and collapse_cfleaks == False:
@@ -1063,8 +1222,9 @@ def collapse_cfleaks(leaks, collapse_cfleaks, granularity, resfilter = ""):
         return leaks
     else:
         debug(1, "Collapsing")
-        return collapse_leaks_recursive(leaks, CallHistory(), CallStack(), collapse_cfleaks, mask, filterarr)
-
+        return collapse_leaks_recursive(
+            leaks, CallHistory(), CallStack(), collapse_cfleaks, mask, filterarr
+        )
 
 
 """
@@ -1074,6 +1234,8 @@ def collapse_cfleaks(leaks, collapse_cfleaks, granularity, resfilter = ""):
 """
 Strip all evidences from leaks
 """
+
+
 def strip_evidences(leaks):
     for l in leaks.dataleaks:
         if len(l.evidence) > 0:
@@ -1087,11 +1249,13 @@ def strip_evidences(leaks):
         child = leaks.children[k]
         strip_evidences(child)
 
+
 """
 *************************************************************************
 """
 
-def print_leaks(leaks, printer, doflatten = False, printerFlat = None):
+
+def print_leaks(leaks, printer, doflatten=False, printerFlat=None):
     debug(1, "Storing XML file")
     if printerFlat is None:
         printerFlat = printer
@@ -1102,9 +1266,11 @@ def print_leaks(leaks, printer, doflatten = False, printerFlat = None):
         printerFlat.doprint_flat(flat)
     printer.printFooter()
 
+
 """
 *************************************************************************
 """
+
 
 def loadleaksglob(pfile):
     global leaks
@@ -1114,38 +1280,45 @@ def loadleaksglob(pfile):
     except IOError:
         return False
 
+
 def add_elf_syms(symfile, newsymfile):
-    with open(symfile, 'r') as f:
+    with open(symfile, "r") as f:
         SymbolInfo.open(f)
     SymbolInfo.reload_syms_from_elf()
-    with open(newsymfile, 'w') as f:
+    with open(newsymfile, "w") as f:
         SymbolInfo.write(f)
+
 
 def list_files(pattern, start, end):
     files = []
-    for i in range(start, end+1):
-        fname = pattern.replace('%', str(i))
+    for i in range(start, end + 1):
+        fname = pattern.replace("%", str(i))
         files.append(fname)
     return files
+
 
 """
 *************************************************************************
 """
 
+
 @click.group()
 def cli():
     pass
 
+
 """
 Print symbol info for virtual address
 """
-@cli.command('lookup')
-@click.argument('syms', default=None, type=click.File('r'))
-@click.argument('vaddr', default=None, type=str)
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("lookup")
+@click.argument("syms", default=None, type=click.File("r"))
+@click.argument("vaddr", default=None, type=str)
+@click.option("--debug", default=-1, type=int)
 def lookup(syms, vaddr, debug):
     set_debuglevel(debug)
-    assert(syms is not None)
+    assert syms is not None
     if syms:
         SymbolInfo.open(syms)
     try:
@@ -1159,28 +1332,34 @@ def lookup(syms, vaddr, debug):
     else:
         print(sym.strat(addr))
 
+
 """
 Add symbol information to existing symfile.
 """
-@cli.command('addsyms')
-@click.argument('symfile', type=str)
-@click.argument('newsymfile', type=str)
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("addsyms")
+@click.argument("symfile", type=str)
+@click.argument("newsymfile", type=str)
+@click.option("--debug", default=-1, type=int)
 def addsyms(symfile, newsymfile, debug):
     global printer
     set_debuglevel(debug)
     add_elf_syms(symfile, newsymfile)
 
+
 """
 Merge leakage from two pickle files.
 """
-@cli.command('merge')
-@click.argument('picklefiles', type=str, nargs=-1)
-@click.option('--syms', default=None, type=click.File('r'))
-@click.option('--xml', default=None, type=click.File('w'))
-@click.option('--pickle', default=None, type=str)
-@click.option('--strip', default=False, type=bool)
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("merge")
+@click.argument("picklefiles", type=str, nargs=-1)
+@click.option("--syms", default=None, type=click.File("r"))
+@click.option("--xml", default=None, type=click.File("w"))
+@click.option("--pickle", default=None, type=str)
+@click.option("--strip", default=False, type=bool)
+@click.option("--debug", default=-1, type=int)
 def merge(picklefiles, syms, xml, pickle, strip, debug):
     global printer
     global leaks
@@ -1207,20 +1386,23 @@ def merge(picklefiles, syms, xml, pickle, strip, debug):
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 
+
 """
 Load leaks from binary file. Open all leak-files
 and keys, where character '%' is replaced with
 index in range --start to --end.
 """
-@cli.command('loadleaks')
-@click.argument('pickle', type=str)
-@click.argument('files', nargs=-1, type=click.File('rb')) # Traditional file list
-@click.option('--filepattern', default=None, type=str)
-@click.option('--keypattern', default=None, type=str)
-@click.option('--start', default=1, type=int)
-@click.option('--end', default=1, type=int)
-@click.option('--source', default=0, type=int)
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("loadleaks")
+@click.argument("pickle", type=str)
+@click.argument("files", nargs=-1, type=click.File("rb"))  # Traditional file list
+@click.option("--filepattern", default=None, type=str)
+@click.option("--keypattern", default=None, type=str)
+@click.option("--start", default=1, type=int)
+@click.option("--end", default=1, type=int)
+@click.option("--source", default=0, type=int)
+@click.option("--debug", default=-1, type=int)
 def loadleaks(pickle, files, filepattern, keypattern, start, end, source, debug):
     global printer
     set_debuglevel(debug)
@@ -1229,22 +1411,25 @@ def loadleaks(pickle, files, filepattern, keypattern, start, end, source, debug)
     if filepattern is not None:
         files = list_files(filepattern, start, end)
     if keypattern is not None:
-        keys = list_files(keypattern, start, end);
+        keys = list_files(keypattern, start, end)
     else:
         keys = None
     load_leaks(files, keys, source)
     if pickle is not None:
         storepickle(pickle, leaks)
 
+
 """
 Print, convert leaks to/from binary/xml/pickle.
 """
-@cli.command('show')
-@click.argument('picklefile', type=str)
-@click.option('--syms', default=None, type=click.File('r'))
-@click.option('--xml', default=None, type=click.File('w'))
-@click.option('--leakout', default=None, type=click.File('wb'))
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("show")
+@click.argument("picklefile", type=str)
+@click.option("--syms", default=None, type=click.File("r"))
+@click.option("--xml", default=None, type=click.File("w"))
+@click.option("--leakout", default=None, type=click.File("wb"))
+@click.option("--debug", default=-1, type=int)
 def show(picklefile, syms, xml, leakout, debug):
     global printer
     global leaks
@@ -1252,41 +1437,47 @@ def show(picklefile, syms, xml, leakout, debug):
     assert xml is None or syms is not None
     if syms is not None:
         SymbolInfo.open(syms)
-    assert(loadleaksglob(picklefile))
-    leaks = collapse_cfleaks(leaks, True, 1, '')
+    assert loadleaksglob(picklefile)
+    leaks = collapse_cfleaks(leaks, True, 1, "")
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
     if leakout is not None:
         print_leaks(leaks, BinLeakPrinter(leakout))
 
+
 """
 Export results and framework files (ELF, sources) in a compressed zip file.
 """
-@cli.command('export')
-@click.argument('picklefile', type=str)
-@click.argument('zipfile', type=str)
-@click.option('--syms', default=None, type=click.File('r'))
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("export")
+@click.argument("picklefile", type=str)
+@click.argument("zipfile", type=str)
+@click.option("--syms", default=None, type=click.File("r"))
+@click.option("--debug", default=-1, type=int)
 def export(picklefile, zipfile, syms, debug):
     global leaks
     set_debuglevel(debug)
-    assert(syms is not None)
+    assert syms is not None
     if syms:
         SymbolInfo.open(syms)
-    assert(loadleaksglob(picklefile))
+    assert loadleaksglob(picklefile)
     export_leaks(leaks, zipfile, syms)
+
 
 """
 Analyze two trace files and extract all differences.
 """
-@cli.command('diff')
-@click.argument('file1', type=click.File('rb'))
-@click.argument('file2', type=click.File('rb'))
-@click.option('--syms', default=None, type=click.File('r'))
-@click.option('--pickle', default=None, type=str)
-@click.option('--xml', default=None, type=click.File('w'))
-@click.option('--fast', default=True, type=bool)
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("diff")
+@click.argument("file1", type=click.File("rb"))
+@click.argument("file2", type=click.File("rb"))
+@click.option("--syms", default=None, type=click.File("r"))
+@click.option("--pickle", default=None, type=str)
+@click.option("--xml", default=None, type=click.File("w"))
+@click.option("--fast", default=True, type=bool)
+@click.option("--debug", default=-1, type=int)
 def diff(file1, file2, syms, pickle, xml, fast, debug):
     global printer
     set_debuglevel(debug)
@@ -1301,16 +1492,19 @@ def diff(file1, file2, syms, pickle, xml, fast, debug):
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 
+
 """
 Generic leakage tests.
 """
-@cli.command('generic')
-@click.argument('fixedpickle', type=str)
-@click.argument('randompickle', type=str)
-@click.option('--pickle', default=None, type=str) # output pickle
-@click.option('--syms', default=None, type=click.File('r'))
-@click.option('--xml', default=None, type=click.File('w'))
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("generic")
+@click.argument("fixedpickle", type=str)
+@click.argument("randompickle", type=str)
+@click.option("--pickle", default=None, type=str)  # output pickle
+@click.option("--syms", default=None, type=click.File("r"))
+@click.option("--xml", default=None, type=click.File("w"))
+@click.option("--debug", default=-1, type=int)
 def generic(fixedpickle, randompickle, pickle, syms, xml, debug):
     global printer
     global leaks
@@ -1327,19 +1521,24 @@ def generic(fixedpickle, randompickle, pickle, syms, xml, debug):
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 
+
 """
 Specific leakage tests.
 """
-@cli.command('specific')
-@click.argument('randompickle', type=str)
-@click.argument('callback', type=str)
-@click.option('--pickle', default=None, type=str) # output pickle
-@click.option('--syms', default=None, type=click.File('r'))
-@click.option('--xml', default=None, type=click.File('w'))
-@click.option('--debug', default=-1, type=int)
-@click.option('--leaksonly', default=True, type=bool)
-@click.option('--multiprocessing', default=True, type=bool)
-def specific(randompickle, callback, pickle, syms, xml, debug, leaksonly, multiprocessing):
+
+
+@cli.command("specific")
+@click.argument("randompickle", type=str)
+@click.argument("callback", type=str)
+@click.option("--pickle", default=None, type=str)  # output pickle
+@click.option("--syms", default=None, type=click.File("r"))
+@click.option("--xml", default=None, type=click.File("w"))
+@click.option("--debug", default=-1, type=int)
+@click.option("--leaksonly", default=True, type=bool)
+@click.option("--multiprocessing", default=True, type=bool)
+def specific(
+    randompickle, callback, pickle, syms, xml, debug, leaksonly, multiprocessing
+):
     global printer
     global leaks
     set_debuglevel(debug)
@@ -1352,12 +1551,15 @@ def specific(randompickle, callback, pickle, syms, xml, debug, leaksonly, multip
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 
+
 """
 Get Statistics (from phase 3)
 """
-@cli.command('statistics')
-@click.argument('pickle_file', type=str)
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("statistics")
+@click.argument("pickle_file", type=str)
+@click.option("--debug", default=-1, type=int)
 def statistics(pickle_file, debug):
     global leaks
     set_debuglevel(debug)
@@ -1377,7 +1579,7 @@ def statistics(pickle_file, debug):
                 assert isinstance(leak, Leak)
                 max_leakage = 0
                 # Remove M_pos NSPType.Type3, as it does not work properly
-                #for l in (x for x in leak.status.spleak if x.isleak and x.sptype != NSPType.Type3):
+                # for l in (x for x in leak.status.spleak if x.isleak and x.sptype != NSPType.Type3):
                 for l in (x for x in leak.status.spleak if x.isleak):
                     key = (l.target, l.property)
                     leakage = l.normalized()
@@ -1393,13 +1595,12 @@ def statistics(pickle_file, debug):
             for k in sorted_keys(call_hierarchy.children):
                 self.get_leaks(call_hierarchy.children[k])
 
-
         def get_max_per_key(self, key):
             if not key in self.normalized_per_leakage_model:
                 return 0
-            return round(max(self.normalized_per_leakage_model[key]),3)*100
+            return round(max(self.normalized_per_leakage_model[key]), 3) * 100
 
-    #import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
 
     stats = Stats(leaks)
 
@@ -1408,47 +1609,69 @@ def statistics(pickle_file, debug):
     print("Phase 3 total: {}".format(len(stats.all_normalized_spleaks)))
     print("Phase3: Max leakage per leakage model:")
     for key in sorted(stats.normalized_per_leakage_model):
-            print("    {:35}  {:6.2f}%".format(str(key), stats.get_max_per_key(key)))
+        print("    {:35}  {:6.2f}%".format(str(key), stats.get_max_per_key(key)))
 
     no_spleaks = len(stats.allleaks) - len(stats.all_normalized_spleaks)
     # Note: using round, because we consider 0.999 as 1
-    exactly_100   = sum(round(x,2) >= 1.00 for x in stats.all_normalized_spleaks)
-    less_than_100 = sum(round(x,2) <  1.00 for x in stats.all_normalized_spleaks) + no_spleaks
-    less_than_50  = sum(round(x,2) <  0.50 for x in stats.all_normalized_spleaks) + no_spleaks
-    less_than_1   = sum(round(x,2) <  0.01 for x in stats.all_normalized_spleaks) + no_spleaks
-    exactly_100_relative   = exactly_100   * 100 / len(stats.allleaks)
+    exactly_100 = sum(round(x, 2) >= 1.00 for x in stats.all_normalized_spleaks)
+    less_than_100 = (
+        sum(round(x, 2) < 1.00 for x in stats.all_normalized_spleaks) + no_spleaks
+    )
+    less_than_50 = (
+        sum(round(x, 2) < 0.50 for x in stats.all_normalized_spleaks) + no_spleaks
+    )
+    less_than_1 = (
+        sum(round(x, 2) < 0.01 for x in stats.all_normalized_spleaks) + no_spleaks
+    )
+    exactly_100_relative = exactly_100 * 100 / len(stats.allleaks)
     less_than_100_relative = less_than_100 * 100 / len(stats.allleaks)
-    less_than_50_relative  = less_than_50  * 100 / len(stats.allleaks)
-    less_than_1_relative   = less_than_1   * 100 / len(stats.allleaks)
-    print("{:25} {:5} {:6.2f}%".format("exactly_100",   exactly_100,   exactly_100_relative))
-    print("{:25} {:5} {:6.2f}%".format("less_than_100", less_than_100, less_than_100_relative))
-    print("{:25} {:5} {:6.2f}%".format("less_than_50",  less_than_50,  less_than_50_relative))
-    print("{:25} {:5} {:6.2f}%".format("less_than_1",   less_than_1,   less_than_1_relative))
+    less_than_50_relative = less_than_50 * 100 / len(stats.allleaks)
+    less_than_1_relative = less_than_1 * 100 / len(stats.allleaks)
+    print(
+        "{:25} {:5} {:6.2f}%".format("exactly_100", exactly_100, exactly_100_relative)
+    )
+    print(
+        "{:25} {:5} {:6.2f}%".format(
+            "less_than_100", less_than_100, less_than_100_relative
+        )
+    )
+    print(
+        "{:25} {:5} {:6.2f}%".format(
+            "less_than_50", less_than_50, less_than_50_relative
+        )
+    )
+    print(
+        "{:25} {:5} {:6.2f}%".format("less_than_1", less_than_1, less_than_1_relative)
+    )
 
-    print("LaTeX Table line: \n{} & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\%".format(
-        len(stats.allleaks),
-        stats.get_max_per_key( ('dsa_nonce', 'bits(k)') ),
-        stats.get_max_per_key( ('dsa_nonce', 'bits(k+q)') ),
-        stats.get_max_per_key( ('dsa_nonce', 'bits(k+2q)') ),
-        stats.get_max_per_key( ('dsa_nonce', 'bits(kinv)') ),
-        stats.get_max_per_key( ('dsa_nonce', 'hw(k)') ),
-        stats.get_max_per_key( ('dsa_nonce', 'hw(k+q)') ),
-        stats.get_max_per_key( ('dsa_nonce', 'hw(k+2q)') ),
-        stats.get_max_per_key( ('dsa_nonce', 'hw(kinv)') ),
-        less_than_1_relative,
-        less_than_50_relative,
-        less_than_100_relative,
-    ))
+    print(
+        "LaTeX Table line: \n{} & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\%".format(
+            len(stats.allleaks),
+            stats.get_max_per_key(("dsa_nonce", "bits(k)")),
+            stats.get_max_per_key(("dsa_nonce", "bits(k+q)")),
+            stats.get_max_per_key(("dsa_nonce", "bits(k+2q)")),
+            stats.get_max_per_key(("dsa_nonce", "bits(kinv)")),
+            stats.get_max_per_key(("dsa_nonce", "hw(k)")),
+            stats.get_max_per_key(("dsa_nonce", "hw(k+q)")),
+            stats.get_max_per_key(("dsa_nonce", "hw(k+2q)")),
+            stats.get_max_per_key(("dsa_nonce", "hw(kinv)")),
+            less_than_1_relative,
+            less_than_50_relative,
+            less_than_100_relative,
+        )
+    )
 
 
 """
 Strip evidences
 """
-@cli.command('strip')
-@click.argument('pickle', type=str)
-@click.option('--syms', default=None, type=click.File('r'))
-@click.option('--xml', default=None, type=click.File('w'))
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("strip")
+@click.argument("pickle", type=str)
+@click.option("--syms", default=None, type=click.File("r"))
+@click.option("--xml", default=None, type=click.File("w"))
+@click.option("--debug", default=-1, type=int)
 def strip(pickle, syms, xml, debug):
     global printer
     global leaks
@@ -1464,27 +1687,34 @@ def strip(pickle, syms, xml, debug):
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
 
+
 """
 Precompute multiple RDC limits for given alpha
 """
-@cli.command('precompute_rdc')
-@click.option('--file', default='precompute_rdc.txt', type=str)
-@click.option('--alpha', default=0.9999, type=float)
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("precompute_rdc")
+@click.option("--file", default="precompute_rdc.txt", type=str)
+@click.option("--alpha", default=0.9999, type=float)
+@click.option("--debug", default=-1, type=int)
 def precompute_rdc(file, alpha, debug):
     set_debuglevel(debug)
     precompute_rdc_parallel(file, alpha)
 
+
 """
 Get single RDC limit for given alpha
 """
-@cli.command('get_rdc')
-@click.argument('val', type=int)
-@click.option('--alpha', default=0.9999, type=float)
-@click.option('--debug', default=-1, type=int)
+
+
+@cli.command("get_rdc")
+@click.argument("val", type=int)
+@click.option("--alpha", default=0.9999, type=float)
+@click.option("--debug", default=-1, type=int)
 def get_rdc(val, alpha, debug):
     set_debuglevel(debug)
     get_rdc_single(val, alpha)
+
 
 if __name__ == "__main__":
     cli()

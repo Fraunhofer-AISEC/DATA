@@ -30,9 +30,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import struct
 from datastub.utils import debug
 from datastub.SymbolInfo import SymbolInfo
-from datastub.leaks import LeakCounter,CallHistory,sorted_keys,CFLeak,\
-DataLeak,CFLeakEntry,DataLeakEntry,LeakStatus,LibHierarchy,Library,\
-FunctionLeak,Type
+from datastub.leaks import (
+    LeakCounter,
+    CallHistory,
+    sorted_keys,
+    CFLeak,
+    DataLeak,
+    CFLeakEntry,
+    DataLeakEntry,
+    LeakStatus,
+    LibHierarchy,
+    Library,
+    FunctionLeak,
+    Type,
+)
 
 """
 *************************************************************************
@@ -47,6 +58,7 @@ CFLEAK = "leak"
 """
 *************************************************************************
 """
+
 
 class XmlLeakPrinter:
     def __init__(self, outfile):
@@ -68,45 +80,45 @@ class XmlLeakPrinter:
         self.outstream.write("\n")
         if leak is not None:
             leak.doprint(self)
-    
+
     def doprint_line(self, text):
         self.outstream.write(" " * self.depth + text + "\n")
-    
+
     def doprint_summary(self, title, val):
         self.doprint_line("%s: %d" % (title, val))
-        
+
     def printHeader(self):
-        self.outstream.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+        self.outstream.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         self.startNode("Report")
-    
+
     def printFooter(self):
         self.endNode("Report")
-    
+
     def startNode(self, node):
         self.outstream.write(" " * self.depth)
         self.outstream.write("<%s>\n" % (node))
         self.depth += 1
-    
+
     def endNode(self, node):
-        assert(self.depth > 0)
+        assert self.depth > 0
         self.depth -= 1
         self.outstream.write(" " * self.depth)
         self.outstream.write("</%s>\n" % (node))
-    
+
     def startEndNode(self, node, text):
         self.outstream.write(" " * self.depth)
         self.outstream.write("<%s %s/>\n" % (node, text))
-        
+
     def doprint_hierarchy(self, leaks):
         self.startNode("CallHierarchy")
         leaks.doprint(self, True)
         LeakCounter.count(leaks).doprint(self)
         self.endNode("CallHierarchy")
-    
+
     def doprint_flat(self, flat):
         flat.doprint(self, True)
-    
-    def doprint_generic(self, obj, param1 = False):
+
+    def doprint_generic(self, obj, param1=False):
         if isinstance(obj, LeakCounter):
             self.startNode("LeakStats")
             self.startNode("Differences")
@@ -122,7 +134,9 @@ class XmlLeakPrinter:
             self.doprint_summary("cflow", obj.cflow_leaks_generic)
             self.doprint_summary("data", obj.data_leaks_generic)
             self.endNode("Generic")
-            combinedset = set(obj.cflow_leaks_specific.keys()).union(set(obj.data_leaks_specific.keys()))
+            combinedset = set(obj.cflow_leaks_specific.keys()).union(
+                set(obj.data_leaks_specific.keys())
+            )
             if len(combinedset) == 0:
                 self.startNode("Specific")
                 self.doprint_summary("cflow", 0)
@@ -230,7 +244,8 @@ class XmlLeakPrinter:
             debug(0, str(type(obj) is CallHistory))
             debug(0, str(id(type(obj))))
             debug(0, str(id(CallHistory)))
-            assert(False)
+            assert False
+
 
 """
 *************************************************************************
@@ -248,15 +263,16 @@ Used entries:
   DLEAK      ip         0
   CFLEAK     ip         n      mergepoint 1 ... mergepoint n
 """
+
+
 class BinLeakPrinter:
-  
     def __init__(self, outfile):
         self.outstream = outfile
 
     def doprint(self, text, ip, leak):
         pass
-    
-    def doprint_line(self, typ, ip = 0, val = ()):
+
+    def doprint_line(self, typ, ip=0, val=()):
         data = struct.pack("<BQB", *(typ.value, ip, len(val)))
         self.outstream.write(data)
         if len(val) > 0:
@@ -266,16 +282,15 @@ class BinLeakPrinter:
         self.outstream.write("%s: %x (%d) " % (str(typ), ip, len(val)))
         for v in val:
             self.outstream.write("%x," % (v))
-        self.outstream.write("\n");
-        
-    
+        self.outstream.write("\n")
+
     def doprint_hierarchy(self, leaks):
         self.doprint_generic(leaks)
-    
+
     def doprint_flat(self, flat):
         pass
-    
-    def doprint_generic(self, obj, param1 = None):
+
+    def doprint_generic(self, obj, param1=None):
         if isinstance(obj, LeakCounter):
             pass
         elif isinstance(obj, CallHistory):
@@ -297,11 +312,10 @@ class BinLeakPrinter:
             self.doprint_line(Type.DLEAK, obj.ip)
         else:
             debug(0, "Unknown instance %s", (obj.__class__))
-            assert(False)
-        
+            assert False
+
     def printHeader(self):
         pass
-    
+
     def printFooter(self):
         pass
-

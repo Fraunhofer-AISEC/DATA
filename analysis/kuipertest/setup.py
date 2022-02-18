@@ -37,20 +37,22 @@ python setup.py install
 *************************************************************************
 """
 
-kuipertest = Extension('kuipertest',
-                       sources=['kuipertest.c'],
-                       include_dirs=[numpy.get_include()])
+kuipertest = Extension(
+    "kuipertest", sources=["kuipertest.c"], include_dirs=[numpy.get_include()]
+)
 
-setup (name = 'kuipertest',
-       version = '0.2',
-       license='GPLv3+',
-       author='TUGraz IAIK, Fraunhofer AISEC',
-       author_email='data@iaik.tugraz.at',
-       url='https://github.com/Fraunhofer-AISEC/DATA',
-       description = 'Calculate Kuiper test statistic.',
-       classifiers=[
-         "Programming Language :: Python :: 2",
-         "Programming Language :: Python :: 3",
-         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",],
-       ext_modules = [kuipertest])
-
+setup(
+    name="kuipertest",
+    version="0.2",
+    license="GPLv3+",
+    author="TUGraz IAIK, Fraunhofer AISEC",
+    author_email="data@iaik.tugraz.at",
+    url="https://github.com/Fraunhofer-AISEC/DATA",
+    description="Calculate Kuiper test statistic.",
+    classifiers=[
+        "Programming Language :: Python :: 2",
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    ],
+    ext_modules=[kuipertest],
+)

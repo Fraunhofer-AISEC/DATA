@@ -38,21 +38,23 @@ Input: DSA nonces -- 2D list/array.
        The value can be decimal or hexadecimal (starting with 0x).
 Output: THINGS of all private key members -- 2D numpy array, row = THINGS(nonces)
 """
+
+
 def specific_leakage_callback(inputs):
     def input_to_lines(input):
         # each input is mapped to multiple lines containing a key & value each
-        #prefixes = ('bit', 'hw(')
-        prefixes = ('bits(', 'hw(')
-        lines = input.decode('ASCII').split('\n')
-        lines = [x.split('\t') for x in lines if x.strip() != '']
+        # prefixes = ('bit', 'hw(')
+        prefixes = ("bits(", "hw(")
+        lines = input.decode("ASCII").split("\n")
+        lines = [x.split("\t") for x in lines if x.strip() != ""]
         return [l for l in lines if l[0].startswith(prefixes)]
 
     # prepare output data structure:
-    labels = [k for k,v in input_to_lines(inputs[0]) ]
+    labels = [k for k, v in input_to_lines(inputs[0])]
     num_lines_per_input = len(input_to_lines(inputs[0]))
     result = numpy.ndarray((len(inputs), num_lines_per_input), dtype=numpy.int)
 
     for (i, input) in enumerate(inputs):
-        result[i][:] = [v for k,v in input_to_lines(input) ]
+        result[i][:] = [v for k, v in input_to_lines(input)]
 
-    return (result,labels)
+    return (result, labels)

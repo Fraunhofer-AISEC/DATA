@@ -34,24 +34,26 @@ from fs import zipfs, copy, osfs
 *************************************************************************
 """
 
+
 class DataFS:
     """
     write ... if True, creates a new empty container
               if False, opens existing container as read-only
     """
+
     def __init__(self, fsname, write):
         # Writable Zip fs
         self.datafs = zipfs.ZipFS(fsname, write)
         self.osfs = None
         self.write = write
         if write:
-            self.osfs = osfs.OSFS(u'/')
+            self.osfs = osfs.OSFS("/")
             self.cwd = os.getcwd()
-            with self.create_file(u'/cwd') as f:
-                f.write(self.cwd.encode('utf-8'))
+            with self.create_file("/cwd") as f:
+                f.write(self.cwd.encode("utf-8"))
         else:
-            assert(os.path.exists(fsname))
-            with self.datafs.open(u'/cwd', encoding='utf-8') as f:
+            assert os.path.exists(fsname)
+            with self.datafs.open("/cwd", encoding="utf-8") as f:
                 self.cwd = f.read()
                 if os.path.altsep is not None:
                     self.cwd += os.path.altsep
@@ -59,33 +61,32 @@ class DataFS:
                     self.cwd += os.path.sep
 
     def create_file(self, fname):
-        assert(self.write)
+        assert self.write
         if not os.path.isabs(fname):
             fname = os.path.join(self.cwd, fname)
         fdir = os.path.dirname(fname)
-        self.datafs.makedirs(fdir, recreate = True)
-        return self.datafs.openbin(fname, 'w+b')
+        self.datafs.makedirs(fdir, recreate=True)
+        return self.datafs.openbin(fname, "w+b")
 
     def add_file(self, fname):
-        assert(self.write)
+        assert self.write
         if not os.path.isabs(fname):
             fname = os.path.join(self.cwd, fname)
         fdir = os.path.dirname(fname)
-        self.datafs.makedirs(fdir, recreate = True)
+        self.datafs.makedirs(fdir, recreate=True)
         copy.copy_file(self.osfs, fname, self.datafs, fname)
 
     def get_binfile(self, fname):
-        assert(not self.write)
+        assert not self.write
         if not os.path.isabs(fname):
             fname = os.path.join(self.cwd, fname)
         return self.datafs.openbin(fname)
 
     def get_file(self, fname, **kwargs):
-        assert(not self.write)
+        assert not self.write
         if not os.path.isabs(fname):
             fname = os.path.join(self.cwd, fname)
         return self.datafs.open(fname, **kwargs)
 
     def close(self):
         self.datafs.close()
-

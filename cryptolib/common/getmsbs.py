@@ -2,7 +2,8 @@
 
 import sys
 
-q=eval(sys.argv[1])
+q = eval(sys.argv[1])
+
 
 def bitsize(num):
     i = 0
@@ -12,10 +13,11 @@ def bitsize(num):
         shift <<= 1
     return i
 
-bs=bitsize(q)
+
+bs = bitsize(q)
 i = 0
 while i < bs:
-    mask = 1 << (bs-i-1)
+    mask = 1 << (bs - i - 1)
     if q & mask == 0:
         break
     i += 1
