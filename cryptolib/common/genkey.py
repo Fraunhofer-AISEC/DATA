@@ -31,7 +31,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import os
 import sys
-import codecs
 
 kbytes = int(sys.argv[-1])
 fmt = "%0" + str(kbytes * 2) + "x"
