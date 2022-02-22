@@ -1024,9 +1024,9 @@ class CallHistory:
     def has_leak(self, callstack, leak):
         if callstack is None or len(callstack) == 0:
             if isinstance(leak, DataLeak):
-                return self.dataleaks.has_key(leak)
+                return leak in self.dataleaks
             elif isinstance(leak, CFLeak):
-                return self.cfleaks.has_key(leak)
+                return leak in self.cfleaks
             else:
                 assert False
         else:
