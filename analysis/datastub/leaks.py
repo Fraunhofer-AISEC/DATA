@@ -65,21 +65,21 @@ class MaskType(Enum):
 
 # fmt: off
 class Type(Enum):
-    READ  = MaskType.NONE.value | TYPE_A
-    WRITE = MaskType.NONE.value | TYPE_B
+    READ  = MaskType.NONE.value | TYPE_A # noqa
+    WRITE = MaskType.NONE.value | TYPE_B # noqa
 
-    BRANCH     = MaskType.BRANCH.value | TYPE_A
-    FUNC_ENTRY = MaskType.BRANCH.value | TYPE_B
-    FUNC_EXIT  = MaskType.BRANCH.value | TYPE_C
-    FUNC_BBL   = MaskType.BRANCH.value | TYPE_D
+    BRANCH     = MaskType.BRANCH.value | TYPE_A # noqa
+    FUNC_ENTRY = MaskType.BRANCH.value | TYPE_B # noqa
+    FUNC_EXIT  = MaskType.BRANCH.value | TYPE_C # noqa
+    FUNC_BBL   = MaskType.BRANCH.value | TYPE_D # noqa
 
-    HREAD  = MaskType.HEAP.value | TYPE_A
-    HWRITE = MaskType.HEAP.value | TYPE_B
-    HALLOC = MaskType.HEAP.value | TYPE_C
-    HFREE  = MaskType.HEAP.value | TYPE_D
+    HREAD  = MaskType.HEAP.value | TYPE_A # noqa
+    HWRITE = MaskType.HEAP.value | TYPE_B # noqa
+    HALLOC = MaskType.HEAP.value | TYPE_C # noqa
+    HFREE  = MaskType.HEAP.value | TYPE_D # noqa
 
-    DLEAK  = MaskType.LEAK.value | TYPE_A
-    CFLEAK = MaskType.LEAK.value | TYPE_B
+    DLEAK  = MaskType.LEAK.value | TYPE_A # noqa
+    CFLEAK = MaskType.LEAK.value | TYPE_B # noqa
 # fmt: on
 
     @classmethod
@@ -527,8 +527,8 @@ class LeakStatus:
 class NSPType(Enum):
     Type1a = 0  # number of addresses
     Type1b = 1  # number of unique addresses
-    Type2  = 2  # number of accesses per address
-    Type3  = 3  # position of address during access
+    Type2  = 2  # number of accesses per address    # noqa
+    Type3  = 3  # position of address during access # noqa
     Noleak = 4  # special: no leakage detected
 # fmt: on
 
