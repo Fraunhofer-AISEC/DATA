@@ -30,6 +30,7 @@ import warnings
 import pickle
 from datastub.utils import debug
 from scipy.stats import rankdata, pearsonr, norm
+from scipy.optimize import curve_fit
 from sklearn.cross_decomposition import CCA
 
 """
