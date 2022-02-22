@@ -42,7 +42,7 @@ def specific_leakage_callback(inputs):
         prefixes = ("bits(", "hw(")
         lines = input.decode("ASCII").split("\n")
         lines = [x.split("\t") for x in lines if x.strip() != ""]
-        return [l for l in lines if l[0].startswith(prefixes)]
+        return [line for line in lines if line[0].startswith(prefixes)]
 
     # prepare output data structure:
     labels = [k for k, v in input_to_lines(inputs[0])]

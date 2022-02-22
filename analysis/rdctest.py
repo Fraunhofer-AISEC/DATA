@@ -251,9 +251,9 @@ class RDC(object):
         """
 
         # compute sigthres level
-        l = 10000
-        v = numpy.zeros(l, dtype=numpy.float)
-        for i in range(0, l):
+        level = 10000
+        v = numpy.zeros(level, dtype=numpy.float)
+        for i in range(0, level):
             a = numpy.random.normal(size=N)
             b = numpy.random.normal(size=N)
             R = None
@@ -261,7 +261,7 @@ class RDC(object):
                 debug(
                     2,
                     "rdc_limit computation for N=%d, alpha=%f, iteration %d/%d",
-                    (N, Alpha, i, l),
+                    (N, Alpha, i, level),
                 )
                 (R, _, _) = RDC.rdc(a, b, Alpha, SkipThres=True, max_iter=-1)
                 # With max_iter=-1, R is always != None
@@ -364,9 +364,9 @@ class RDC(object):
         SkipThres -- Skip the significance threshold check
 
         Returns:
-        R -- Randomized dependence coefficient
-        L -- Significance level
-        I -- Independence (True=independent, False=dependent)
+        R           -- Randomized dependence coefficient
+        L           -- Significance level
+        independent -- Independence (True=independent, False=dependent)
         """
 
         # RDC params
@@ -433,5 +433,5 @@ class RDC(object):
             return (R, None, None)
         else:
             L = RDC.rdc_sigthres(n1, Alpha)
-            I = R <= L
-            return (R, L, I)
+            independent = R <= L
+            return (R, L, independent)

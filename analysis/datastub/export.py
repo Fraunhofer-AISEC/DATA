@@ -219,10 +219,10 @@ def export_ip_recursive(leaks, datafs, imgmap, info_map):
     if leaks.ctxt is not None:
         export_ip(leaks.ctxt.caller, datafs, imgmap, info_map)
         export_ip(leaks.ctxt.callee, datafs, imgmap, info_map)
-    for l in leaks.dataleaks:
-        export_ip(l.ip, datafs, imgmap, info_map)
-    for l in leaks.cfleaks:
-        export_ip(l.ip, datafs, imgmap, info_map)
+    for leak in leaks.dataleaks:
+        export_ip(leak.ip, datafs, imgmap, info_map)
+    for leak in leaks.cfleaks:
+        export_ip(leak.ip, datafs, imgmap, info_map)
     for k in leaks.children:
         child = leaks.children[k]
         export_ip_recursive(child, datafs, imgmap, info_map)
