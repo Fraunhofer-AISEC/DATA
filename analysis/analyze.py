@@ -405,18 +405,18 @@ def load_leaks(files, keys, source):
 
 def extract_leakdiff_to_array(A, LeaksOnly=False):
     array = []
-    for l in A.dataleaks:
+    for leak in A.dataleaks:
         if LeaksOnly:
-            if l.status.is_generic_leak():
-                array.append(l)
+            if leak.status.is_generic_leak():
+                array.append(leak)
         else:
-            array.append(l)
-    for l in A.cfleaks:
+            array.append(leak)
+    for leak in A.cfleaks:
         if LeaksOnly:
-            if l.status.is_generic_leak():
-                array.append(l)
+            if leak.status.is_generic_leak():
+                array.append(leak)
         else:
-            array.append(l)
+            array.append(leak)
     for k in A.children:
         child = A.children[k]
         array += extract_leakdiff_to_array(child, LeaksOnly)
@@ -1136,11 +1136,11 @@ def merge_leaks(B):
 def merge_leaks_recursive(B, callstack):
     if debuglevel(3):
         callstack.doprint_reverse()
-    for l in B.dataleaks:
-        c = copy.deepcopy(l)
+    for leak in B.dataleaks:
+        c = copy.deepcopy(leak)
         leaks.report_leak(callstack, c)
-    for l in B.cfleaks:
-        c = copy.deepcopy(l)
+    for leak in B.cfleaks:
+        c = copy.deepcopy(leak)
         leaks.report_leak(callstack, c)
     for k in B.children:
         child = B.children[k]
@@ -1169,20 +1169,20 @@ mask ... bitmask to apply to all addresses
 def collapse_leaks_recursive(
     leaks, collapsed, callstack, collapse_cfleaks, mask, filterarr
 ):
-    for l in leaks.dataleaks:
-        if len(filterarr) > 0 and not match_filter(l, filterarr):
-            debug(1, "Filtering dleak %x", (l.ip))
+    for leak in leaks.dataleaks:
+        if len(filterarr) > 0 and not match_filter(leak, filterarr):
+            debug(1, "Filtering dleak %x", (leak.ip))
             continue
-        n = l.clone_collapsed(mask)
+        n = leak.clone_collapsed(mask)
         if len(n.entries) <= 1:
             debug(1, "Ignoring dleak %x", (n.ip))
         else:
             collapsed.report_leak(callstack, n)
-    for l in leaks.cfleaks:
-        if len(filterarr) > 0 and not match_filter(l, filterarr):
-            debug(1, "Filtering cfleak %x", (l.ip))
+    for leak in leaks.cfleaks:
+        if len(filterarr) > 0 and not match_filter(leak, filterarr):
+            debug(1, "Filtering cfleak %x", (leak.ip))
             continue
-        n = l.clone_collapsed(mask, collapse_cfleaks)
+        n = leak.clone_collapsed(mask, collapse_cfleaks)
         if len(n.entries) <= 1:
             debug(1, "Ignoring cfleak %x", (n.ip))
         else:
@@ -1236,14 +1236,14 @@ Strip all evidences from leaks
 
 
 def strip_evidences(leaks):
-    for l in leaks.dataleaks:
-        if len(l.evidence) > 0:
-            debug(3, "Removing %d evidences" % (len(l.evidence)))
-        l.evidence = []
-    for l in leaks.cfleaks:
-        if len(l.evidence) > 0:
-            debug(3, "Removing %d evidences" % (len(l.evidence)))
-        l.evidence = []
+    for leak in leaks.dataleaks:
+        if len(leak.evidence) > 0:
+            debug(3, "Removing %d evidences" % (len(leak.evidence)))
+        leak.evidence = []
+    for leak in leaks.cfleaks:
+        if len(leak.evidence) > 0:
+            debug(3, "Removing %d evidences" % (len(leak.evidence)))
+        leak.evidence = []
     for k in leaks.children:
         child = leaks.children[k]
         strip_evidences(child)
@@ -1579,9 +1579,9 @@ def statistics(pickle_file, debug):
                 max_leakage = 0
                 # Remove M_pos NSPType.Type3, as it does not work properly
                 # for l in (x for x in leak.status.spleak if x.isleak and x.sptype != NSPType.Type3):
-                for l in (x for x in leak.status.spleak if x.isleak):
-                    key = (l.target, l.property)
-                    leakage = l.normalized()
+                for leak in (x for x in leak.status.spleak if x.isleak):
+                    key = (leak.target, leak.property)
+                    leakage = leak.normalized()
                     self.normalized_per_leakage_model[key].append(leakage)
                     max_leakage = max(max_leakage, leakage)
                 # get max leakage per leak (if a spleak exists with >= 0 leakage)
