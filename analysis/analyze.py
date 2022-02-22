@@ -1117,7 +1117,7 @@ def precompute_rdc_parallel(target, alpha):
         inp.extend([(i) for i in range(550, 1000, 50)])
         inp.extend([(i) for i in range(5000, 10000, 200)])
         debug(0, "Precompute parallel on %s", (inp))
-        rdc = pool.map(precompute_single, inp)
+        pool.map(precompute_single, inp)
 
 
 """
