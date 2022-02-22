@@ -302,7 +302,7 @@ class MergeMap:
                 (str(newmap.__class__), str(self.mytype)),
             )
         assert isinstance(newmap, self.mytype)
-        if not newmap in self.mymap:
+        if newmap not in self.mymap:
             self.mymap[newmap] = newmap
         else:
             self.mymap[newmap].merge(newmap)
@@ -982,7 +982,7 @@ class CallHistory:
 
             if nocreate:
                 assert ctxt in self.children
-            elif not ctxt in self.children:
+            elif ctxt not in self.children:
                 self.children[ctxt] = CallHistory(ctxt, self)
             self.children[ctxt].report_leak(callstack[1:], leak, nocreate)
 
@@ -1118,7 +1118,7 @@ class LeakCounter:
                         continue
                     if sp.target in counted_targets:
                         continue
-                    if not sp.target in counter.data_leaks_specific:
+                    if sp.target not in counter.data_leaks_specific:
                         counter.data_leaks_specific[sp.target] = 1
                     else:
                         counter.data_leaks_specific[sp.target] += 1
@@ -1156,7 +1156,7 @@ class LeakCounter:
                         continue
                     if sp.target in counted_targets:
                         continue
-                    if not sp.target in counter.cflow_leaks_specific:
+                    if sp.target not in counter.cflow_leaks_specific:
                         counter.cflow_leaks_specific[sp.target] = 1
                     else:
                         counter.cflow_leaks_specific[sp.target] += 1

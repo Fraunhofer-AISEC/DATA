@@ -154,7 +154,7 @@ def getAsmFileInfo(addr, asm_dump):
 def export_ip(ip, datafs, imgmap, info_map):
     if ip is None or ip == 0:
         return
-    if not ip in info_map:
+    if ip not in info_map:
         sym = SymbolInfo.lookup(ip)
         assert sym is not None
         if sym.img.dynamic:
@@ -164,7 +164,7 @@ def export_ip(ip, datafs, imgmap, info_map):
         bin_file_path = sym.img.name
         asm_file_path = bin_file_path + ".asm"
         # Add binary (ELF) + ASM objdump to datafs
-        if not bin_file_path in imgmap:
+        if bin_file_path not in imgmap:
             try:
                 datafs.add_file(bin_file_path)
             except:
@@ -190,7 +190,7 @@ def export_ip(ip, datafs, imgmap, info_map):
                 )
                 asm_dump = None
             imgmap[bin_file_path] = asm_dump
-        if not ip in info_map:
+        if ip not in info_map:
             # Search for leak in asm dump
             asm_dump = imgmap[bin_file_path]
             asm_line_nr = getAsmFileInfo(addr, asm_dump)

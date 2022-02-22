@@ -219,7 +219,7 @@ class Symbol:
             return
         if len(name) == 0:
             return
-        if not name in self.name:
+        if name not in self.name:
             self.name.append(name)
 
     def getname(self):

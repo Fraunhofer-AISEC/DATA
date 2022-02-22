@@ -1153,7 +1153,7 @@ def merge_leaks_recursive(B, callstack):
 def match_filter(leak, filterarr):
     status = str(leak.status).replace('"', "").replace("'", "")
     for f in filterarr:
-        if not f in status:
+        if f not in status:
             return False
     return True
 
@@ -1596,7 +1596,7 @@ def statistics(pickle_file, debug):
                 self.get_leaks(call_hierarchy.children[k])
 
         def get_max_per_key(self, key):
-            if not key in self.normalized_per_leakage_model:
+            if key not in self.normalized_per_leakage_model:
                 return 0
             return round(max(self.normalized_per_leakage_model[key]), 3) * 100
 
