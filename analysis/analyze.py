@@ -1644,8 +1644,9 @@ def statistics(pickle_file, debug):
         "{:25} {:5} {:6.2f}%".format("less_than_1", less_than_1, less_than_1_relative)
     )
 
+    print("LaTeX Table line: ")
     print(
-        "LaTeX Table line: \n{} & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\%".format(
+        r"{} & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\% & {:3.1f}\%".format(
             len(stats.allleaks),
             stats.get_max_per_key(("dsa_nonce", "bits(k)")),
             stats.get_max_per_key(("dsa_nonce", "bits(k+q)")),
