@@ -764,7 +764,7 @@ def spe_testfunction(input):
             property_idx, X_labels[property_idx], nsptype, dict_key
         ),
     )
-    if I == False:
+    if I is False:
         leak = SPLeak(
             nsptype,
             X_labels[property_idx],
@@ -1217,7 +1217,7 @@ def collapse_cfleaks(leaks, collapse_cfleaks, granularity, resfilter=""):
         filterarr = resfilter.replace('"', "").replace("'", "").split(";")
         for f in filterarr:
             debug(0, "Filtering results for: " + f)
-    if mask == -1 and collapse_cfleaks == False:
+    if mask == -1 and collapse_cfleaks is False:
         # Nothing to collapse
         return leaks
     else:
