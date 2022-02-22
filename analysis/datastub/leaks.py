@@ -1087,30 +1087,30 @@ class LeakCounter:
         counter = LeakCounter()
         if isinstance(obj, CallHistory) or isinstance(obj, FunctionLeak):
             # data leaks
-            for l in obj.dataleaks:
+            for leak in obj.dataleaks:
                 counted_generic = False
                 counter.data_diff_total += 1
-                if l.status.is_generic_tested():
-                    if l.status.is_generic_leak():
+                if leak.status.is_generic_tested():
+                    if leak.status.is_generic_leak():
                         counter.data_leaks_generic += 1
                         counter.data_leaks_total += 1
                         counted_generic = True
                     else:
-                        if l.status.has_generic_results():
-                            if not l.status.is_specific_leak():
+                        if leak.status.has_generic_results():
+                            if not leak.status.is_specific_leak():
                                 counter.data_diff_total_dropped += 1
                         else:
                             counter.data_diff_total_untested += 1
                 else:
                     if (
-                        l.status.is_specific_tested()
-                        and not l.status.is_specific_leak()
+                        leak.status.is_specific_tested()
+                        and not leak.status.is_specific_leak()
                     ):
                         counter.data_diff_total_dropped += 1
 
                 counted_targets = []
                 counted_leak = False
-                for sp in l.status.spleak:
+                for sp in leak.status.spleak:
                     if not sp.isleak:
                         continue
                     if sp.target in counted_targets:
@@ -1125,30 +1125,30 @@ class LeakCounter:
                             counter.data_leaks_total += 1
                         counted_leak = True
             # cflow leaks
-            for l in obj.cfleaks:
+            for leak in obj.cfleaks:
                 counted_generic = False
                 counter.cflow_diff_total += 1
-                if l.status.is_generic_tested():
-                    if l.status.is_generic_leak():
+                if leak.status.is_generic_tested():
+                    if leak.status.is_generic_leak():
                         counter.cflow_leaks_generic += 1
                         counter.cflow_leaks_total += 1
                         counted_generic = True
                     else:
-                        if l.status.has_generic_results():
-                            if not l.status.is_specific_leak():
+                        if leak.status.has_generic_results():
+                            if not leak.status.is_specific_leak():
                                 counter.cflow_diff_total_dropped += 1
                         else:
                             counter.cflow_diff_total_untested += 1
                 else:
                     if (
-                        l.status.is_specific_tested()
-                        and not l.status.is_specific_leak()
+                        leak.status.is_specific_tested()
+                        and not leak.status.is_specific_leak()
                     ):
                         counter.cflow_diff_total_dropped += 1
 
                 counted_targets = []
                 counted_leak = False
-                for sp in l.status.spleak:
+                for sp in leak.status.spleak:
                     if not sp.isleak:
                         continue
                     if sp.target in counted_targets:
