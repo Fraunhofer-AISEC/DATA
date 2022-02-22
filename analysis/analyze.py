@@ -227,8 +227,8 @@ def iterate_queue(files, fast=True):
             e1 = queues[0].get()
             e2 = queues[1].get()
 
-        if e1 == None or e2 == None:
-            if e1 != None or e2 != None:
+        if e1 is None or e2 is None:
+            if e1 is not None or e2 is not None:
                 debug(0, "Unbalanced end of trace")
             break
 
@@ -240,7 +240,7 @@ def iterate_queue(files, fast=True):
                 bdepth = queues[0].callstack.depth()
             continue
 
-        assert bp == None or Type.isbranch(bp)
+        assert bp is None or Type.isbranch(bp)
         if e1.type == e2.type and e1.ip == e2.ip:
             if Type.isbranch(e1):
                 bp = e1

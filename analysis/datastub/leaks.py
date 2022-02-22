@@ -110,7 +110,7 @@ class Entry:
         (self.type, self.ip, self.data) = arr
 
     def __eq__(self, other):
-        if other == None:
+        if other is None:
             return False
         return (self.type, self.ip, self.data) == (other.type, other.ip, other.data)
 
@@ -136,7 +136,7 @@ class MergePoint:
         (self.type, self.ip, self.depth) = (mtype, ip, depth)
 
     def __eq__(self, other):
-        if other == None:
+        if other is None:
             return False
         return (self.type, self.ip, self.depth) == (other.type, other.ip, other.depth)
 
@@ -212,7 +212,7 @@ class CallStack:
         return self.stack[index]
 
     def __eq__(self, other):
-        if other == None:
+        if other is None:
             return False
         return self.stack == other.stack
 
