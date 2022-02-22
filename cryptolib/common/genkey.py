@@ -25,9 +25,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @author See AUTHORS file.
 # @version 0.3
 
-"""
-*************************************************************************
-"""
 
 import os
 import sys
