@@ -117,15 +117,19 @@ def getSourceFileInfo(addr, binary_path):
         source_file_path, source_line_number = infos[0], infos[1]
         if "??" == source_file_path:
             raise subprocess.CalledProcessError
-    except:
+    except subprocess.CalledProcessError:
         debug(2, "[SRC] unavailable for %s in %s", (addr, binary_path))
         return None, 0
+
     if "discriminator" in source_line_number:
         source_line_number = source_line_number.split()[0]
+
     try:
-        return source_file_path, int(source_line_number)
-    except:
-        return source_file_path, 0
+        source_line_number = int(source_line_number)
+    except ValueError:
+        source_line_number = 0
+
+    return source_file_path, source_line_number
 
 
 """
@@ -164,7 +168,7 @@ def export_ip(ip, datafs, imgmap, info_map):
         if bin_file_path not in imgmap:
             try:
                 datafs.add_file(bin_file_path)
-            except:
+            except FileNotFoundError:
                 debug(0, "Error: Binary file missing: %s", (bin_file_path))
                 return
             asm_dump = ""

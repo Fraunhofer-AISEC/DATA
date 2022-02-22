@@ -293,7 +293,7 @@ class RDC(object):
             # Use precomputed parameters
             try:
                 return RDC.rdc_sigthres_approximate(N, Alpha)
-            except:
+            except ValueError:
                 # Maybe N is too large
                 debug(2, "rdc_sigthres_approximate fallthrough")
                 pass
@@ -320,7 +320,7 @@ class RDC(object):
                         if n not in RDC.RDC_SIGTHRES[c].keys():
                             RDC.RDC_SIGTHRES[c][n] = d[c][n]
                 RDC.RDC_SIGTHRES_FLOAD = True
-            except:
+            except OSError:
                 RDC.RDC_SIGTHRES_FLOAD = True
 
         # check pre-computed
@@ -342,7 +342,7 @@ class RDC(object):
                 fcntl.flock(f, fcntl.LOCK_EX)
                 pickle.dump(RDC.RDC_SIGTHRES, f)
                 fcntl.flock(f, fcntl.LOCK_UN)
-        except:
+        except OSError:
             debug(0, "Failed to store RDC significance threshold dictionary")
 
         return L
@@ -425,7 +425,7 @@ class RDC(object):
         # calc Pearson
         try:
             R = pearsonr(scx[:, 0], scy[:, 0])[0]
-        except:
+        except ValueError:
             return (None, None, None)
 
         # sig thres

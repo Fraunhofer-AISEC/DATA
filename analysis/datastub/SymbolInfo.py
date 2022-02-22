@@ -44,7 +44,7 @@ def readelfsyms(fname, image):
         command = "nm -nS --defined-only %s" % (fname)
         output = subprocess.check_output(command.split(" ")).decode("utf-8")
         lines = output.splitlines()
-    except:
+    except OSError:
         debug(0, "Exception reading ELF symbols: %s", (sys.exc_info()))
         return None
 
@@ -173,7 +173,7 @@ class SymbolInfo:
         try:
             (_, sym) = cls.instance.symbols.find_le(address)
             return sym
-        except:
+        except ValueError:
             return None
 
     @classmethod
