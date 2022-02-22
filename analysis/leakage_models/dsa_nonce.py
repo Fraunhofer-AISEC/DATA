@@ -28,8 +28,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 import numpy
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
 
 """
 Input: DSA nonces -- 2D list/array.

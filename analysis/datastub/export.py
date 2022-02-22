@@ -35,7 +35,6 @@ from datastub.DataFS import DataFS
 from datastub.IpInfoShort import IpInfoShort, IP_INFO_FILE
 from datastub.SymbolInfo import SymbolInfo
 from datastub.utils import debug
-from datastub.leaks import CallHistory
 
 """
 *************************************************************************
