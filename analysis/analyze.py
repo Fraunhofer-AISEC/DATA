@@ -122,6 +122,7 @@ def report_cfleak(callstack, bp, mp, e1, len1, e2, len2):
 *************************************************************************
 """
 
+
 # Both queues have advanced by a chunk which is not consumed yet but
 # equal. We search for calls and rets in one chunk and apply it to both
 # queue's call stacks.
