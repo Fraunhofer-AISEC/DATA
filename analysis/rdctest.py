@@ -127,6 +127,9 @@ class RDC(object):
                 1.2161893230883887e-16,
                 0.23285829194616056,
             ]
+            fit = False
+            if fit is False:
+                return poptl, popth
 
             # fmt: off
             lookup0_500 = {
@@ -182,41 +185,42 @@ class RDC(object):
             Xh.sort()
             Yh = [float(lookup500_10k[x]) for x in Xh]
 
-            fit = False
-            if fit:
-                # Fit two asymmetric sigmoidal functions to the measurements
-                poptl, pcovl = curve_fit(
-                    asymsigmoid, Xl, Yl, bounds=(0, [2, 200, 100, 1, 1])
-                )
-                popth, pcovh = curve_fit(asymsigmoid, Xh, Yh, bounds=(0, [200, 5, 1, 1, 1]))
+            # Fit two asymmetric sigmoidal functions to the measurements
+            poptl, pcovl = curve_fit(
+                asymsigmoid, Xl, Yl, bounds=(0, [2, 200, 100, 1, 1])
+            )
+            popth, pcovh = curve_fit(asymsigmoid, Xh, Yh, bounds=(0, [200, 5, 1, 1, 1]))
 
-            if False:  # Plot
-                # Single curve fitting
-                lookup = lookup0_500.copy()
-                lookup.update(lookup500_10k)
-                X = [k for k in lookup.keys()]
-                X.sort()
-                Y = [float(lookup[x]) for x in X]
-                popt, pcov = curve_fit(asymsigmoid, X, Y, bounds=(0, [2, 5, 100, 1, 1]))
+            plot = False
+            if plot is False:
+                return poptl, popth
 
-                import numpy as np
-                import matplotlib.pyplot as plt
+            # Single curve fitting
+            lookup = lookup0_500.copy()
+            lookup.update(lookup500_10k)
+            X = [k for k in lookup.keys()]
+            X.sort()
+            Y = [float(lookup[x]) for x in X]
+            popt, pcov = curve_fit(asymsigmoid, X, Y, bounds=(0, [2, 5, 100, 1, 1]))
 
-                # Plot original data points
-                plt.plot(X, Y, "o")
+            import numpy as np
+            import matplotlib.pyplot as plt
 
-                # Plot single curve fitting
-                new = np.linspace(min(X), max(X), num=10000, endpoint=True)
-                plt.plot(new, asymsigmoid(new, *popt), "r-")
+            # Plot original data points
+            plt.plot(X, Y, "o")
 
-                # Plot double curve fitting
-                newl = np.linspace(min(Xl), cutoff, num=10000, endpoint=True)
-                newh = np.linspace(cutoff, max(Xh), num=10000, endpoint=True)
-                # ~ newl = np.linspace(min(Xl), max(Xl), num=10000, endpoint=True)
-                # ~ newh = np.linspace(min(Xh), max(Xh), num=10000, endpoint=True)
-                plt.plot(newl, asymsigmoid(newl, *poptl), "b-")
-                plt.plot(newh, asymsigmoid(newh, *popth), "g-")
-                plt.show()
+            # Plot single curve fitting
+            new = np.linspace(min(X), max(X), num=10000, endpoint=True)
+            plt.plot(new, asymsigmoid(new, *popt), "r-")
+
+            # Plot double curve fitting
+            newl = np.linspace(min(Xl), cutoff, num=10000, endpoint=True)
+            newh = np.linspace(cutoff, max(Xh), num=10000, endpoint=True)
+            # ~ newl = np.linspace(min(Xl), max(Xl), num=10000, endpoint=True)
+            # ~ newh = np.linspace(min(Xh), max(Xh), num=10000, endpoint=True)
+            plt.plot(newl, asymsigmoid(newl, *poptl), "b-")
+            plt.plot(newh, asymsigmoid(newh, *popth), "g-")
+            plt.show()
 
             return poptl, popth
 
