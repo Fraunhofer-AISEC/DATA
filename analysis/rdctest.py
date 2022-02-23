@@ -105,31 +105,57 @@ class RDC(object):
     # based on curve fitting (Alpha=0.9999)
     ###
     def rdc_sigthres_approximate(N, Alpha):
-
         def asymsigmoid(x, a, b, c, d, e):
             # Asymmetric sigmoid
             return d + (a - d) / (1 + (x / c) ** b) ** e
 
+        # popt values are cached in "cached_popt.txt", i.e.:
+        # $ cat cached_popt.txt
+        # poptl 1.0405813870371978,5.906516651519792,32.67925715067476,7.420936678471437e-19,\
+        #         0.08354565093830184
+        # popth 80.45137912486614,2.1786178713255144,0.006666093739093521,1.2161893230883887e-16,\
+        #         0.23285829194616056
+        #
+        # poptl = [
+        #     1.0405813870371978,
+        #     5.906516651519792,
+        #     32.67925715067476,
+        #     7.420936678471437e-19,
+        #     0.08354565093830184,
+        # ]
+        # popth = [
+        #     80.45137912486614,
+        #     2.1786178713255144,
+        #     0.006666093739093521,
+        #     1.2161893230883887e-16,
+        #     0.23285829194616056,
+        # ]
         def precompute_curve_fit(cutoff):
+            # Try to recover cached popt values
+            try:
+                with open("cached_popt.txt", "r") as file:
+                    cached_popt = file.readlines()
+                    if (
+                        len(cached_popt) != 2
+                        or not cached_popt[0].startswith("poptl ")
+                        or not cached_popt[1].startswith("popth ")
+                    ):
+                        raise FileNotFoundError
 
-            # Cached for efficiency
-            poptl = [
-                1.0405813870371978,
-                5.906516651519792,
-                32.67925715067476,
-                7.420936678471437e-19,
-                0.08354565093830184,
-            ]
-            popth = [
-                80.45137912486614,
-                2.1786178713255144,
-                0.006666093739093521,
-                1.2161893230883887e-16,
-                0.23285829194616056,
-            ]
-            fit = False
-            if fit is False:
-                return poptl, popth
+                    poptl = [
+                        float(num)
+                        for num in cached_popt[0].strip("\n").split(" ")[1].split(",")
+                    ]
+                    popth = [
+                        float(num)
+                        for num in cached_popt[1].strip("\n").split(" ")[1].split(",")
+                    ]
+                    debug(3, "Cached popt recovered")
+                    return poptl, popth
+            # Generate popt values, as file does either not exist or is corrupted
+            except FileNotFoundError:
+                debug(2, "Generate popt")
+                pass
 
             # fmt: off
             lookup0_500 = {
@@ -190,6 +216,10 @@ class RDC(object):
                 asymsigmoid, Xl, Yl, bounds=(0, [2, 200, 100, 1, 1])
             )
             popth, pcovh = curve_fit(asymsigmoid, Xh, Yh, bounds=(0, [200, 5, 1, 1, 1]))
+
+            with open("cached_popt.txt", "w") as file:
+                file.write(f"poptl {','.join(str(number) for number in poptl)}\n")
+                file.write(f"popth {','.join(str(number) for number in popth)}\n")
 
             plot = False
             if plot is False:
