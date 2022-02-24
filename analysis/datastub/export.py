@@ -40,7 +40,7 @@ from datastub.utils import debug
 
 def storepickle(pfile, leaks):
     debug(1, "Storing pickle file")
-    with gzip.GzipFile(pfile, "wb") as f:
+    with gzip.GzipFile(pfile, "wb", compresslevel=6) as f:
         pickle.dump(leaks, f)
 
 
@@ -90,7 +90,7 @@ class MyUnpickler(pickle.Unpickler):
 def loadpickle(pfile):
     debug(1, "Loading pickle file")
     try:
-        with gzip.GzipFile(pfile, "rb") as f:
+        with gzip.GzipFile(pfile, "rb", compresslevel=6) as f:
             unp = MyUnpickler(f, encoding="latin1")
             new = unp.load()
             return new
