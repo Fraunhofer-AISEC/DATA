@@ -31,7 +31,7 @@ PROJ := DATA - Cryptolib Common
 #------------------------------------------------------------------------
 .PHONY: all clean dsa_nonce preload
 
-all: cleanenv openssl dsa_nonce preload
+all: cleanenv preload
 
 cleanenv: cleanenv.c
 	$(CC) -Wall $^ -o $@

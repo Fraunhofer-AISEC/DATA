@@ -11,7 +11,7 @@ source "${DATA_COMMON}/DATA_init.sh" || { echo "source data.sh first!" && exit 1
 #------------------------------------------------------------------------
 
 # The name of the framework. Do not use spaces or special characters.
-export FRAMEWORK=frameworkundertest
+export FRAMEWORK=template
 
 # The file containing all supported algorithms
 export TARGETFILE=targets.txt

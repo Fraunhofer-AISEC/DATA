@@ -1,0 +1,38 @@
+name: workspace
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install dependencies
+        run: |
+            sudo apt-get update
+            sudo apt-get install \
+                coreutils util-linux bash sed grep wget tar mawk time build-essential \
+                git python3 python3-setuptools python3-dev python3-virtualenv gcc-multilib
+      - name: Install DATA
+        run: |
+            make
+            make install
+      - name: Run DATA
+        run: |
+            source ~/data.sh
+            ./test_template.sh
+        working-directory: cryptolib
+      - name: Verify DATA output
+        run: |
+            echo "SHA1 (-) = b500a9e90d2c0d8332ac649dbc74285141e10aaa" > golden.tag
+            sed -n -e '/LibHierarchy/,$p' result_final.xml \
+                | sed -n -e '/LeakStats/,$p'
+            sed -n -e '/LibHierarchy/,$p' result_final.xml \
+                | sed -n -e '/LeakStats/,$p' \
+                | sha1sum --tag > ci.tag
+            cmp golden.tag ci.tag
+        working-directory: cryptolib/test_results/template/TEST/128
