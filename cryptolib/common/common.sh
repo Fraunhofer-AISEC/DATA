@@ -33,7 +33,7 @@ if [[ "${DATA_ROOT}" == "" ]]; then
 fi
 
 # DEBUG can be any non-negative digit
-if [[ "${DEBUG}" =~ "^[0-9]+$" ]] && [[ "${DEBUG}" -gt "0" ]]; then
+if ! [[ "${DEBUG}" =~ "^[0-9]+$" ]] && [[ "${DEBUG}" -gt "0" ]]; then
   export DEBUG=${DEBUG}
 else
   export DEBUG=0
