@@ -211,8 +211,9 @@ int kuipertest_kp_hist(int ne, float* x, float* y, int nx, int ny, float c, floa
   y_scale = (y_sum == 0.0f ? 1.0f : (1.0f / y_sum));
 
   /* calc significance threshold */
-  n = sqrt((float)(nx * ny) / (float)(nx + ny));
+  n = sqrt( ((float) nx * (float) ny) / (float)(nx + ny) );
   cd = n + 0.155f + (0.24f / n);
+
   if (kuipertest_qkp_inv(1.0f - c, &ct))
     return (2);
   ct /= cd;
