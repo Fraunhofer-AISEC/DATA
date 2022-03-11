@@ -596,6 +596,7 @@ def generic_leakage_test(fixed, random):
                 (D, L) = kuipertest.kp_histogram(
                     fhist, rhist, fhist_len, rhist_len, 0.9999
                 )
+                assert not (numpy.isnan(D) or numpy.isnan(L))
                 R = D > L
                 if R:
                     noleakdetected = False
@@ -649,6 +650,7 @@ def generic_leakage_test(fixed, random):
                 (D, L) = kuipertest.kp_histogram(
                     fhist, rhist, fhist_len, rhist_len, 0.9999
                 )
+                assert not (numpy.isnan(D) or numpy.isnan(L))
                 R = D > L
                 if R:
                     noleakdetected = False
@@ -702,6 +704,7 @@ def generic_leakage_test(fixed, random):
                 (D, L) = kuipertest.kp_histogram(
                     fhist, rhist, fhist_len, rhist_len, 0.9999
                 )
+                assert not (numpy.isnan(D) or numpy.isnan(L))
                 R = D > L
                 if R:
                     noleakdetected = False
