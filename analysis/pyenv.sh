@@ -52,7 +52,7 @@ if ! [[ -f ${ENV}/.done ]]; then
   $PIP install -U setuptools
   $PIP install click cffi ipaddress enum34 numpy scipy scikit-learn cryptography fs || exit 1
   pushd kuipertest
-  $PYTHON setup.py build install || exit 1
+  $PIP install . || exit 1
   popd
   if [[ -f "${DATAGUI}/setup.py" ]]; then
     $PIP install -e "${DATAGUI}"
