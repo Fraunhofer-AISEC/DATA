@@ -46,7 +46,7 @@ namespace CALLSTACK{
 
 	// struct that holds the instruction pointer address and the corresponding name of the image
 	typedef struct {
-		string name;
+		std::string name;
 		ADDRINT ipaddr;
 	} ipobj_t;
 
@@ -75,7 +75,7 @@ namespace CALLSTACK{
 	class CallStack {
 		public:
 			// print the call stack, emit only 'depth' entries
-			void emit_stack(UINT32 depth, vector<string>& out, IPVEC& ipvec);
+			void emit_stack(UINT32 depth, std::vector<std::string>& out, IPVEC& ipvec);
 
 			// return the depth of the call stack
 			UINT32 depth();
@@ -97,7 +97,7 @@ namespace CALLSTACK{
 			void process_return(ADDRINT current_sp, ADDRINT ip);
 
 			// print the call stack, emit only 'depth' entries
-			void get_targets(list<ADDRINT>& out);
+			void get_targets(std::list<ADDRINT>& out);
 
 		private:
 			typedef std::vector<CallEntry> CallVec;
@@ -110,7 +110,7 @@ namespace CALLSTACK{
 	typedef void (*CALL_STACK_HANDLER)(CONTEXT* ctxt, ADDRINT ip, THREADID tid, VOID *v);
 	class CallStackHandlerParams{
 		public:
-			CallStackHandlerParams(CALL_STACK_HANDLER h, const string& func_name, void* v,
+			CallStackHandlerParams(CALL_STACK_HANDLER h, const std::string& func_name, void* v,
 					ADDRINT func_ip = 0, BOOL name_handler = TRUE){
 				_handler = h;
 				_function_name = func_name;
@@ -120,8 +120,8 @@ namespace CALLSTACK{
 			}
 
 			CALL_STACK_HANDLER _handler;
-			string _function_name;
-			string _function_ip;
+			std::string _function_name;
+			std::string _function_ip;
 			BOOL _name_handler;
 			void* _args;
 			ADDRINT _first_ip; //the first ip of the function, used for recursive function call
@@ -159,10 +159,10 @@ namespace CALLSTACK{
 			void get_ip_info(ADDRINT ip, CallStackInfo& info);
 
 			//register a callback the will be called when entering to function: func_name
-			void on_function_enter(CALL_STACK_HANDLER handler, const string& func_name, void* v, BOOL use_ctxt);
+			void on_function_enter(CALL_STACK_HANDLER handler, const std::string& func_name, void* v, BOOL use_ctxt);
 
 			//register a callback the will be called when returning from function: func_name
-			void on_function_exit(CALL_STACK_HANDLER handler, const string& func_name, void* v, BOOL use_ctxt);
+			void on_function_exit(CALL_STACK_HANDLER handler, const std::string& func_name, void* v, BOOL use_ctxt);
 
 			// Register a callback that will be called when entering function: function_ip
 			// The parameters are: function handler
@@ -209,12 +209,12 @@ namespace CALLSTACK{
 			PIN_LOCK _lock;
 			BOOL _use_ctxt;
 
-			vector<CallStackHandlerParams> _enter_func_handlers;
-			vector<CallStackHandlerParams> _exit_func_handlers;
+			std::vector<CallStackHandlerParams> _enter_func_handlers;
+			std::vector<CallStackHandlerParams> _exit_func_handlers;
 
 			//map of ip to a vector of handlers
-			typedef vector<CallStackHandlerParams*> CallStackHandlerVec;
-			typedef map<ADDRINT, CallStackHandlerVec> IpFuncHnadlersMap;
+			typedef std::vector<CallStackHandlerParams*> CallStackHandlerVec;
+			typedef std::map<ADDRINT, CallStackHandlerVec> IpFuncHnadlersMap;
 			IpFuncHnadlersMap _enter_func_handlers_map;
 
 			//map of ip to a vector of handlers
@@ -227,7 +227,7 @@ namespace CALLSTACK{
 			DepthFuncHandlersTidVec _depth_func_handlers_tid_vec;
 
 			//holds the ips that we have marked for exit, needed for recursive calls
-			set<ADDRINT> _marked_ip_for_exit;
+			std::set<ADDRINT> _marked_ip_for_exit;
 
 
 	};

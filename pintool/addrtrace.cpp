@@ -306,7 +306,7 @@ std::vector<thread_state_t> thread_state;
 
 uint64_t getIndex(string hash) {
 	uint64_t to_shift;
-	sscanf(hash.c_str(), "%llx", &to_shift);
+	sscanf(hash.c_str(), "%llx", (long long unsigned int*) &to_shift);
 	/*std::cout << "shifted hash is " << (to_shift<<32) << std::endl;*/
 	return (to_shift<<32);
 }
@@ -1072,7 +1072,7 @@ VOID record_entry(entry_t entry)
 VOID RecordMainBegin(THREADID threadid, ADDRINT ins, ADDRINT target, const CONTEXT * ctxt) {
   PIN_LockClient();
   Record = true;
-  DEBUG(1) printf("Start main() %x to %x\n", ins, target);
+  DEBUG(1) printf("Start main() %x to %x\n", (unsigned int) ins, (unsigned int) target);
   RecordFunctionEntry(threadid, 0, 0, false, ins, ctxt, false);
   PIN_UnlockClient();
 }
@@ -1795,7 +1795,7 @@ VOID RecordMemRead(THREADID threadid, VOID * ip, VOID * addr, bool fast_recordin
   entry.ip =  getLogicalAddress(ip);
   entry.data = getLogicalAddress(addr);
   test_mem_heap(&entry);
-  DEBUG(3) printf("Read %llx to %llx\n", (uint64_t)entry.ip, (uint64_t)entry.data);
+  DEBUG(3) printf("Read %llx to %llx\n", (long long unsigned int) entry.ip, (long long unsigned int) entry.data);
   if (fast_recording) {
     leaks->dleak_consume((uint64_t)entry.ip, (uint64_t)entry.data);
   } else {
@@ -1821,7 +1821,7 @@ VOID RecordMemWrite(THREADID threadid, VOID * ip, VOID * addr, bool fast_recordi
   entry.ip = getLogicalAddress(ip);
   entry.data = getLogicalAddress(addr);
   test_mem_heap(&entry);
-  DEBUG(3) printf("Write %llx to %llx\n", (uint64_t)entry.ip, (uint64_t)entry.data);
+  DEBUG(3) printf("Write %llx to %llx\n", (long long unsigned int) entry.ip, (long long unsigned int) entry.data);
   if (fast_recording) {
     leaks->dleak_consume((uint64_t)entry.ip, (uint64_t)entry.data);
   } else {
@@ -2316,12 +2316,12 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v)
   //std::cout << la << " la is " << std::endl;
   uint64_t l = (uint64_t)la;
   static int count;
-  DEBUG(3) printf("leaking instruction  %x with count  %d \n", ip, count);
+  DEBUG(3) printf("leaking instruction  %x with count  %d \n", (unsigned int) ip, count);
   count++;
 
   if (leaks->get_erase_dleak(l) || leaks->was_erased_dleak(l)) {
     /* Instrument dataleaking instruction */
-    DEBUG(1) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int)ip);
+    DEBUG(1) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int) ip);
     bool found = instrumentMemIns(ins, true);
     ASSERT(found, "[pintool] Error: Memory instruction to instument not found. Have you provided the flag -mem?");
   }
