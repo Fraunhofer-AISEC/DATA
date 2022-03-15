@@ -207,7 +207,7 @@ ofstream vdsofile;          /* Holds vdso shared library */
 
 typedef struct {
   uint32_t id;
-  char *type;
+  char const *type;
   size_t size;
   uint64_t base;
   ADDRINT callsite;
@@ -272,14 +272,14 @@ std::unordered_map<uint64_t, uint64_t> conversionMap; // Logical Address is  the
 PIN_MUTEX lock;
 
 typedef struct {
-  char *type;
+  char const *type;
   ADDRINT size;
   ADDRINT callsite;
   std::string callstack;
 } alloc_state_t;
 
 typedef struct {
-  char *type;
+  char const *type;
   ADDRINT old;
   ADDRINT size;
   ADDRINT callsite;
@@ -1259,7 +1259,7 @@ ADDRINT get_callsite_offset(ADDRINT callsite) {
  * Handle calls to [m|re|c]alloc by keeping a list of all heap objects
  * This function is not thread-safe. Lock first.
  */
-void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite, char *type, std::string callstack, ADDRINT old_ptr) {
+void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite, char const *type, std::string callstack, ADDRINT old_ptr) {
   heapcache = NULL;
   bool insert = true;
   memobj_t obj;
@@ -1457,19 +1457,19 @@ void * MallocWrapper( CONTEXT * ctxt, AFUNPTR pf_malloc, size_t size)
   DEBUG(0) std::cout << "Malloc returned " << std::hex << addr << std::endl;
 #if 1
   THREADID threadid = PIN_ThreadId();
-    DEBUG(0) std::cout << "Malloc called with " << std::hex << size << std::endl;
-    thread_state[threadid].malloc_type = "malloc";
-    thread_state[threadid].malloc_size = size;
-    //thread_state[threadid].malloc_callsite = get_callsite_offset(ret);
-    thread_state[threadid].malloc_callsite = 0;
-    SHA1 hash;
-    hash.update(getcallstack(threadid)); /* calculte the hash of the set of IPs in the Callstack */
-    thread_state[threadid].malloc_callstack = hash.final().substr(28,12); /* 6 byte SHA1 hash */
-    thread_state[threadid].malloc_pending = true;
-  	ASSERT(thread_state[threadid].malloc_pending == true, "[Error] Malloc returned but not called");
-  	doalloc( (ADDRINT) addr, thread_state[threadid].malloc_size, 0, thread_state[threadid].malloc_callsite,
-      	thread_state[threadid].malloc_type, thread_state[threadid].malloc_callstack, 0);
-  	thread_state[threadid].malloc_pending = false;
+  DEBUG(0) std::cout << "Malloc called with " << std::hex << size << std::endl;
+  SHA1 hash;
+  hash.update(getcallstack(threadid)); /* calculte the hash of the set of IPs in the Callstack */
+  alloc_state_t state = {
+      .type = "malloc",
+      .size = size,
+      .callsite = 0,
+      .callstack = hash.final().substr(28,12), /* 6 byte SHA1 hash */
+  };
+
+  // ASSERT(thread_state[threadid].malloc_state.size(), "[Error] Malloc returned but not called");
+  doalloc((ADDRINT) addr, state.size, 0, state.callsite, state.type, state.callstack, 0);
+  // thread_state[threadid].malloc_pending = false;
 #endif
 return addr;
 }
@@ -1524,24 +1524,25 @@ void * ReallocWrapper( CONTEXT * ctxt, AFUNPTR pf_realloc, void *ptr, size_t siz
   DEBUG(0) std::cout << "Realloc called with " << std::hex << ptr << " " << size << std::endl;
   DEBUG(0) std::cout << "Realloc returned " << std::hex << addr << std::endl;
   THREADID threadid = PIN_ThreadId();
-  thread_state[threadid].realloc_old = ( ADDRINT ) ptr;
-  thread_state[threadid].realloc_type = "realloc";
-  thread_state[threadid].realloc_size = size;
-  //thread_state[threadid].realloc_callsite = get_callsite_offset(ret);
-  thread_state[threadid].realloc_callsite = 0;
   SHA1 hash;
   hash.update(getcallstack(threadid)); /* calculte the hash of the set of IPs in the Callstack */
-  thread_state[threadid].realloc_callstack = hash.final().substr(28,12); /* 6 byte SHA1 hash */
-  thread_state[threadid].realloc_pending = true;
-#if 1
-  ASSERT(thread_state[threadid].realloc_pending == true, "[Error] Realloc returned but not called");
+  realloc_state_t state = {
+      .type = "realloc",
+      .old = (ADDRINT) ptr,
+      .size = size,
+      .callsite = 0,
+      .callstack = hash.final().substr(28,12), /* 6 byte SHA1 hash */
+  };
 
+  // thread_state[threadid].realloc_pending = true;
+#if 1
+  // ASSERT(thread_state[threadid].realloc_pending == true, "[Error] Realloc returned but not called");
   uint32_t objid = 0;
-  if (thread_state[threadid].realloc_old) {
-    objid = dofree(thread_state[threadid].realloc_old);
+  if (state.old) {
+    objid = dofree(state.old);
   }
-  doalloc((ADDRINT)addr, thread_state[threadid].realloc_size, objid, thread_state[threadid].realloc_callsite, thread_state[threadid].realloc_type, thread_state[threadid].realloc_callstack, thread_state[threadid].realloc_old);
-  thread_state[threadid].realloc_pending = false;
+  doalloc((ADDRINT) addr, state.size, objid, state.callsite, state.type, state.callstack, state.old);
+  // thread_state[threadid].realloc_pending = false;
 #endif
 return addr;
 }
@@ -1555,15 +1556,18 @@ return addr;
 VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem, ADDRINT size, ADDRINT ret) {
   if (!Record) return;
   PIN_MutexLock(&lock);
-  if (!thread_state[threadid].calloc_pending) {
+  if (thread_state[threadid].calloc_state.size() == 0) {
     DEBUG(1) std::cout << "Calloc called with " << std::hex << nelem << " " << size << std::endl;
-    thread_state[threadid].calloc_type = name;
-    thread_state[threadid].calloc_size = nelem * size;
-    thread_state[threadid].calloc_callsite = get_callsite_offset(ret);
     SHA1 hash;
-    hash.update(getcallstack(threadid)); /* calculte the hash of the set of IPs in the Callstack */
-    thread_state[threadid].calloc_callstack = hash.final().substr(28,12); /* 6 byte SHA1 hash */
-    thread_state[threadid].calloc_pending = true;
+    hash.update(getcallstack(threadid)); /* calculate the hash of the set of IPs in the Callstack */
+    alloc_state_t state = {
+        .type = name,
+        .size = nelem * size,
+        .callsite = get_callsite_offset(ret),
+        .callstack = hash.final().substr(28,12), /* 6 byte SHA1 hash */
+    };
+
+    thread_state[threadid].calloc_state.push_back(state);
   }
   PIN_MutexUnlock(&lock);
 }
@@ -1580,9 +1584,10 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     DEBUG(1) std::cout << "ignoring" << std::endl;
     return;
   }
-  ASSERT(thread_state[threadid].calloc_pending == true, "[Error] Calloc returned but not called");
-  doalloc(addr, thread_state[threadid].calloc_size, 0, thread_state[threadid].calloc_callsite, thread_state[threadid].calloc_type, thread_state[threadid].calloc_callstack, 0);
-  thread_state[threadid].calloc_pending = false;
+  ASSERT(thread_state[threadid].calloc_state.size() != 0, "[Error] Calloc returned but not called");
+  alloc_state_t state = thread_state[threadid].calloc_state.back();
+  thread_state[threadid].calloc_state.pop_back();
+  doalloc(addr, state.size, 0, state.callsite, state.type, state.callstack, 0);
   PIN_MutexUnlock(&lock);
 }
 
@@ -1620,15 +1625,18 @@ VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len) {
 VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size, ADDRINT ret) {
   if (!Record) return;
   PIN_MutexLock(&lock);
-  if (!thread_state[threadid].mremap_pending) {
+  if (thread_state[threadid].mremap_state.size() == 0) {
     DEBUG(1) std::cout << "mmap called with " << std::hex << size << std::endl;
-    thread_state[threadid].mmap_type = name;
-    thread_state[threadid].mmap_size = size;
-    thread_state[threadid].mmap_callsite = get_callsite_offset(ret);
     SHA1 hash;
     hash.update(getcallstack(threadid)); /* calculate the hash of the set of IPs in the Callstack */
-    thread_state[threadid].mmap_callstack = hash.final().substr(28,12); /* 6 byte SHA1 hash */
-    thread_state[threadid].mmap_pending = true;
+    alloc_state_t state = {
+        .type = name,
+        .size = size,
+        .callsite = get_callsite_offset(ret),
+        .callstack = hash.final().substr(28,12), /* 6 byte SHA1 hash */
+    };
+
+    thread_state[threadid].mmap_state.push_back(state);
   }
   PIN_MutexUnlock(&lock);
 }
@@ -1640,11 +1648,15 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size, ADDRINT ret) 
  */
 VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
   PIN_MutexLock(&lock);
+
   DEBUG(1) std::cout << "mmap returned " << std::hex << addr << std::endl;
-  ASSERT(thread_state[threadid].mmap_pending == true, "[Error] mmap returned but not called");
-  doalloc(addr, thread_state[threadid].mmap_size, 0, thread_state[threadid].mmap_callsite,
-      thread_state[threadid].mmap_type, thread_state[threadid].mmap_callstack, 0);
-  thread_state[threadid].mmap_pending = false;
+  ASSERT(thread_state[threadid].mmap_state.size() != 0, "[Error] mmap returned but not called");
+
+  alloc_state_t state = thread_state[threadid].mmap_state.back();
+  thread_state[threadid].mmap_state.pop_back();
+
+  doalloc(addr, state.size, 0, state.callsite, state.type, state.callstack, 0);
+
   PIN_MutexUnlock(&lock);
 }
 
@@ -1658,14 +1670,18 @@ VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr, ADDRINT old
   if (!Record) return;
   PIN_MutexLock(&lock);
   DEBUG(1) std::cout << "mremap called with " << std::hex << addr << " " << new_size << std::endl;
-  thread_state[threadid].mremap_type = name;
-  thread_state[threadid].mremap_old = addr;
-  thread_state[threadid].mremap_size = new_size;
-  thread_state[threadid].mremap_callsite = get_callsite_offset(ret);
+
   SHA1 hash;
-  hash.update(getcallstack(threadid)); /* calculate the hash of the set of IPs in the Callstack */
-  thread_state[threadid].mremap_callstack = hash.final().substr(28,12); /* 6 byte SHA1 hash */
-  thread_state[threadid].mremap_pending = true;
+  hash.update(getcallstack(threadid)); /* calculte the hash of the set of IPs in the Callstack */
+  realloc_state_t state = {
+      .type = name,
+      .old = addr,
+      .size = new_size,
+      .callsite = get_callsite_offset(ret),
+      .callstack = hash.final().substr(28,12), /* 6 byte SHA1 hash */
+  };
+  thread_state[threadid].mremap_state.push_back(state);
+
   PIN_MutexUnlock(&lock);
 }
 
@@ -1678,14 +1694,16 @@ VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
   if (!Record) return;
   PIN_MutexLock(&lock);
   DEBUG(1) std::cout << "mremap returned " << std::hex << addr << std::endl;
-  ASSERT(thread_state[threadid].mremap_pending == true, "[Error] mremap returned but not called");
+  ASSERT(thread_state[threadid].mremap_state.size() != 0, "[Error] mremap returned but not called");
+
+  realloc_state_t state = thread_state[threadid].mremap_state.back();
+  thread_state[threadid].mremap_state.pop_back();
 
   uint32_t objid = 0;
-  if (thread_state[threadid].mremap_old) {
-    objid = dofree(thread_state[threadid].mremap_old);
+  if (state.old) {
+    objid = dofree(state.old);
   }
-  doalloc(addr, thread_state[threadid].mremap_size, objid, thread_state[threadid].mremap_callsite, thread_state[threadid].mremap_type, thread_state[threadid].mremap_callstack, 0);
-  thread_state[threadid].mremap_pending = false;
+  doalloc(addr, state.size, objid, state.callsite, state.type, state.callstack, 0);
   PIN_MutexUnlock(&lock);
 }
 
