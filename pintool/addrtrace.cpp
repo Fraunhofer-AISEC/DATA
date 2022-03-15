@@ -68,7 +68,7 @@ using namespace std;
 
 /***********************************************************************/
 
-VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT bp, BOOL indirect, ADDRINT target, bool report_as_cfleak);
+VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT bp, BOOL indirect, ADDRINT target, const CONTEXT * ctxt, bool report_as_cfleak);
 VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT* ctxt, bool report_as_cfleak);
 
 /***********************************************************************/
@@ -93,6 +93,15 @@ KNOB<string> KnobSyms(KNOB_MODE_WRITEONCE, "pintool",
 
 KNOB<string> KnobVDSO(KNOB_MODE_WRITEONCE, "pintool",
         "vdso", "vdso.so", "Output file for the vdso shared library.");
+
+KNOB<string> KnobHeapData(KNOB_MODE_WRITEONCE, "pintool",
+    "heapData", "", "Output file for storing heap related information.");
+
+KNOB<string> Knoblogaddr(KNOB_MODE_WRITEONCE, "pintool",
+    "logaddr", "", "Output file for storing the logical address of the Instrumented instructions.");
+
+KNOB<string> Knoballocmap(KNOB_MODE_WRITEONCE, "pintool",
+    "allocmap", "", "Output file for Realloc invariance.");
 
 KNOB<bool> KnobLeaks(KNOB_MODE_WRITEONCE, "pintool",
         "leaks", "0", "Enable fast recording of leaks, provided via leakin.");
@@ -145,8 +154,8 @@ bool use_callstack = false;
 typedef struct __attribute__((packed))
 {
   uint8_t type; /* holds values of entry_type_t */
-  uint64_t ip;     /* instruction pointer */
-  uint64_t data;   /* additional data, depending on type */
+  void* ip;     /* instruction pointer */
+  void* data;   /* additional data, depending on type */
 }
 entry_t;
 
@@ -297,7 +306,7 @@ std::vector<thread_state_t> thread_state;
 
 uint64_t getIndex(string hash) {
 	uint64_t to_shift;
-	sscanf(hash.c_str(), "%lx", &to_shift);
+	sscanf(hash.c_str(), "%llx", &to_shift);
 	/*std::cout << "shifted hash is " << (to_shift<<32) << std::endl;*/
 	return (to_shift<<32);
 }
@@ -1063,7 +1072,7 @@ VOID record_entry(entry_t entry)
 VOID RecordMainBegin(THREADID threadid, ADDRINT ins, ADDRINT target, const CONTEXT * ctxt) {
   PIN_LockClient();
   Record = true;
-  DEBUG(1) printf("Start main() %lx to %lx\n", ins, target);
+  DEBUG(1) printf("Start main() %x to %x\n", ins, target);
   RecordFunctionEntry(threadid, 0, 0, false, ins, ctxt, false);
   PIN_UnlockClient();
 }
@@ -1144,8 +1153,8 @@ void printheap() {
   }
 }
 
-memobj_t* lookup_heap(uint64_t addr) {
-  uint64_t paddr = addr;
+memobj_t* lookup_heap(VOID* addr) {
+  uintptr_t paddr = (uintptr_t)addr;
   if (heapcache) {
     ASSERT(heapcache->used, "[pintool] Error: Heapcache corrupt");
     if (paddr >= heapcache->base && paddr < heapcache->base + heapcache->size) {
@@ -1171,11 +1180,11 @@ memobj_t* lookup_heap(uint64_t addr) {
 VOID test_mem_heap(entry_t* pentry) {
   memobj_t* obj = lookup_heap(pentry->data);
   if (obj) {
-    uint64_t pdata = pentry->data;
+    uint64_t pdata = (uint64_t) pentry->data;
     pdata -= obj->base;
     ASSERT((pdata & 0xFFFFFFFF00000000ULL) == 0, "[pintool] Error: Heap object too big");
     pdata |= (uint64_t)obj->id << 32ULL;
-    pentry->data = pdata;
+    pentry->data = (void*) pdata;
     pentry->type |= MASK_HEAP;
   }
 }
@@ -1768,7 +1777,7 @@ VOID RecordMemRead(THREADID threadid, VOID * ip, VOID * addr, bool fast_recordin
   entry.ip =  getLogicalAddress(ip);
   entry.data = getLogicalAddress(addr);
   test_mem_heap(&entry);
-  DEBUG(3) printf("Read %lx to %lx\n", (uint64_t)entry.ip, (uint64_t)entry.data);
+  DEBUG(3) printf("Read %llx to %llx\n", (uint64_t)entry.ip, (uint64_t)entry.data);
   if (fast_recording) {
     leaks->dleak_consume((uint64_t)entry.ip, (uint64_t)entry.data);
   } else {
@@ -1794,7 +1803,7 @@ VOID RecordMemWrite(THREADID threadid, VOID * ip, VOID * addr, bool fast_recordi
   entry.ip = getLogicalAddress(ip);
   entry.data = getLogicalAddress(addr);
   test_mem_heap(&entry);
-  DEBUG(3) printf("Write %lx to %lx\n", (uint64_t)entry.ip, (uint64_t)entry.data);
+  DEBUG(3) printf("Write %llx to %llx\n", (uint64_t)entry.ip, (uint64_t)entry.data);
   if (fast_recording) {
     leaks->dleak_consume((uint64_t)entry.ip, (uint64_t)entry.data);
   } else {
@@ -1816,8 +1825,8 @@ VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target, const
   if (!Record) return;
   entry_t entry;
   entry.type = BRANCH;
-  entry.ip = ins;
-  entry.data = target;
+  entry.ip = getLogicalAddress((void*) ins);
+  entry.data = getLogicalAddress((void*) target);
   record_entry(entry);
 }
 
@@ -1831,16 +1840,23 @@ VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target, const
  */
 VOID RecordBranch(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT * ctxt, bool fast_recording)
 {
-  //PIN_MutexLock(&lock);
+  PIN_MutexLock(&lock);
   ADDRINT target = (ADDRINT)PIN_GetContextReg( ctxt, REG_INST_PTR );
-  DEBUG(3) std::cout << "[pintool] Branch " << std::hex << bp << " to " << target << std::endl;
-  RecordBranch_unlocked(threadid, bp, target);
+  DEBUG(3) std::cout << "Branch " << std::hex << bp << " to " << target << std::endl;
+  RecordBranch_unlocked(threadid, bp, target, ctxt);
   if (fast_recording) {
-    leaks->cfleak_consume(bp, target);
+  		auto ix = (getLogicalAddress((void*)bp));
+  		uint64_t *li = static_cast<uint64_t *>(ix);
+  		uint64_t b = (uint64_t)li;
+  		auto id = (getLogicalAddress((void*)target));
+  		uint64_t *ld = static_cast<uint64_t *>(id);
+  		uint64_t t = (uint64_t)ld;
+    leaks->cfleak_consume(b, t);
   }
-  //PIN_MutexUnlock(&lock);
+  PIN_MutexUnlock(&lock);
 }
 
+#if 0
 /**
  * Record conditional branch due to REP-prefix. 
  * @param threadid The thread
@@ -1860,6 +1876,7 @@ VOID RecordRep(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT * ctxt,
   }
   //PIN_MutexUnlock(&lock);
 }
+#endif
 
 /**
  * Record call instructions.
@@ -1959,20 +1976,20 @@ VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins, const CONTE
 {
   if (!Record) return;
   ADDRINT target = ctxt != NULL ? (ADDRINT)PIN_GetContextReg( ctxt, REG_INST_PTR ) : 0;
-  //PIN_MutexLock(&lock);
+  PIN_MutexLock(&lock);
   if (KnobFunc.Value()) {
-    RecordFunctionExit_unlocked(threadid, ins, target);
+    RecordFunctionExit_unlocked(threadid, ins, target, ctxt);
   }
   if (fast_recording) {
-    auto ix = (getLogicalAddress((void*)ins));
-    uint64_t *li = static_cast<uint64_t *>(ix);
-    uint64_t i = (uint64_t)li;
-    auto id = (getLogicalAddress((void*)target));
-    uint64_t *ld = static_cast<uint64_t *>(id);
-    uint64_t t = (uint64_t)ld;
-    leaks->cfleak_consume(ins, target);
+  		auto ix = (getLogicalAddress((void*)ins));
+  		uint64_t *li = static_cast<uint64_t *>(ix);
+  		uint64_t i = (uint64_t)li;
+  		auto id = (getLogicalAddress((void*)target));
+  		uint64_t *ld = static_cast<uint64_t *>(id);
+  		uint64_t t = (uint64_t)ld;
+    leaks->cfleak_consume(i, t);
   }
-  //PIN_MutexUnlock(&lock);
+  PIN_MutexUnlock(&lock);
 }
 
 /***********************************************************************/
@@ -2051,6 +2068,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v)
       } else {
         DEBUG(1) std::cout << "[pintool] Instrumenting allocation" << std::endl;
         if (KnobTrackHeap.Value()) {
+#if 0
           RTN mallocRtn = RTN_FindByName(img, MALLOC);
           if (mallocRtn.is_valid()) {
             DEBUG(1) std::cout << "[pintool] Malloc found in " << IMG_Name(img) << std::endl;
@@ -2067,7 +2085,21 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v)
               IARG_END);
             RTN_Close(mallocRtn);
           }
+#endif
+            RTN MallocRtn = RTN_FindByName(img, "malloc");  //  Find the malloc() function.
+            if (RTN_Valid(MallocRtn)) {
+                PROTO protoMalloc = PROTO_Allocate( PIN_PARG(void *), CALLINGSTD_DEFAULT, "malloc", PIN_PARG(size_t), PIN_PARG_END() );
 
+                RTN_ReplaceSignature(MallocRtn, AFUNPTR(MallocWrapper),
+                    IARG_PROTOTYPE, protoMalloc,
+                    IARG_CONST_CONTEXT,
+                    IARG_ORIG_FUNCPTR,
+                    IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                    IARG_END
+                );
+            }
+
+#if 0
           RTN reallocRtn = RTN_FindByName(img, REALLOC);
           if (reallocRtn.is_valid()) {
             DEBUG(1) std::cout << "[pintool] Realloc found in " << IMG_Name(img) << std::endl;
@@ -2085,6 +2117,21 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v)
               IARG_END);
             RTN_Close(reallocRtn);
           }
+#endif
+
+            RTN ReallocRtn = RTN_FindByName(img, "realloc");  //  Find the malloc() function.
+            if (RTN_Valid(ReallocRtn))
+            {
+                PROTO protoRealloc = PROTO_Allocate( PIN_PARG(void *), CALLINGSTD_DEFAULT, "realloc", PIN_PARG(size_t), PIN_PARG_END() );
+                RTN_ReplaceSignature(ReallocRtn, AFUNPTR(ReallocWrapper),
+                    IARG_PROTOTYPE, protoRealloc,
+                    IARG_CONST_CONTEXT,
+                    IARG_ORIG_FUNCPTR,
+                    IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                    IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+                    IARG_END
+                );
+            }
 
           RTN callocRtn = RTN_FindByName(img, CALLOC);
           if (callocRtn.is_valid()) {
@@ -2170,90 +2217,58 @@ BOOL instrumentMemIns(INS ins, bool fast_recording)
  * @param bp The branch point. Same as bbl, except for fast_recording
  * @param fast_recording Fast recording
  */
-bool instrumentCallBranch(INS bbl, INS bp, bool fast_recording)
+VOID instrumentCallBranch(INS bbl, INS bp, bool fast_recording)
 {
-  bool instrumented = false;
   if (INS_IsCall(bp)) {
     if (KnobFunc.Value() || KnobBbl.Value()) {
       INS_InsertCall(bp, IPOINT_BEFORE, AFUNPTR(RecordFunctionEntry),
-                          IARG_THREAD_ID,
-                          IARG_ADDRINT, INS_Address(bbl),
-                          IARG_ADDRINT, INS_Address(bp),
-                          IARG_BOOL, INS_IS_INDIRECT(bp),
-                          IARG_BRANCH_TARGET_ADDR,
-                          IARG_BOOL, fast_recording,
-                          IARG_END);
-      DEBUG(1) printf("[pintool] Instrumented call@%lx\n", (long unsigned int)INS_Address(bp));
-      instrumented = true;
+          IARG_THREAD_ID,
+          IARG_ADDRINT, INS_Address(bbl),
+          IARG_ADDRINT, INS_Address(bp),
+          IARG_BOOL, INS_IS_INDIRECT(bp),
+          IARG_BRANCH_TARGET_ADDR,
+          IARG_CONTEXT,
+          IARG_BOOL, fast_recording,
+          IARG_END);
     }
   } else if (INS_IsRet(bp)) {
     /* RET would be also detected as branch, therefore we use 'else if' */
     if (KnobFunc.Value() || KnobBbl.Value()) {
-      ASSERT(INS_HAS_TAKEN_BRANCH(bp), "[pintool] Error: Return instruction should support taken branch.");
       INS_InsertCall(bp, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordFunctionExit),
-                          IARG_THREAD_ID,
-                          IARG_ADDRINT, INS_Address(bbl),
-                          IARG_ADDRINT, INS_Address(bp),
-                          IARG_CONTEXT,
-                          IARG_BOOL, fast_recording,
-                          IARG_END);
-      DEBUG(1) printf("[pintool] Instrumented ret@%lx\n", (long unsigned int)INS_Address(bp));
-      instrumented = true;
+          IARG_THREAD_ID,
+          IARG_ADDRINT, INS_Address(bbl),
+          IARG_ADDRINT, INS_Address(bp),
+          IARG_CONTEXT,
+          IARG_BOOL, fast_recording,
+          IARG_END);
     }
   } else if (INS_IsBranch(bp)) {
     if (KnobBbl.Value()) {
-      if (!INS_HAS_TAKEN_BRANCH(bp)) {
-        std::cout << "[pintool] Warning: Branch instruction " << INS_Mnemonic(bp) << "@ 0x" << std::hex << INS_Address(bp) << " does not support taken branch. Ignoring." << std::endl;
-        // TODO: test for leaks in XBEGIN/XEND/XABORT
+      if (INS_Opcode(bp) == XED_ICLASS_XEND) {
+        std::cout << "Ignoring XEND" << std::endl;
       } else {
         /* unconditional jumps */
         INS_InsertCall(bp, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordBranch),
-                            IARG_THREAD_ID,
-                            IARG_ADDRINT, INS_Address(bbl),
-                            IARG_ADDRINT, INS_Address(bp),
-                            IARG_CONTEXT,
-                            IARG_BOOL, fast_recording,
-                            IARG_END);
-        DEBUG(1) printf("[pintool] Instrumented jump@%lx\n", (long unsigned int)INS_Address(bp));
-        instrumented = true;
+            IARG_THREAD_ID,
+            IARG_ADDRINT, INS_Address(bbl),
+            IARG_ADDRINT, INS_Address(bp),
+            IARG_CONTEXT,
+            IARG_BOOL, fast_recording,
+            IARG_END);
       }
-      
-      if (INS_HAS_IPOINT_AFTER(bp)) {
+
+      if (INS_HasFallThrough(bp)) {
         /* conditional/indirect jumps */
         INS_InsertCall(bp, IPOINT_AFTER, AFUNPTR(RecordBranch),
-                            IARG_THREAD_ID,
-                            IARG_ADDRINT, INS_Address(bbl),
-                            IARG_ADDRINT, INS_Address(bp),
-                            IARG_CONTEXT,
-                            IARG_BOOL, fast_recording,
-                            IARG_END);
-        DEBUG(1) printf("[pintool] Instrumented indirect jump@%lx\n", (long unsigned int)INS_Address(bp));
-        instrumented = true;
+            IARG_THREAD_ID,
+            IARG_ADDRINT, INS_Address(bbl),
+            IARG_ADDRINT, INS_Address(bp),
+            IARG_CONTEXT,
+            IARG_BOOL, fast_recording,
+            IARG_END);
       }
     }
-  } else if (INS_RepPrefix(bp)) {
-    ADDRINT ip = INS_Address(bp);
-    DEBUG(2) printf("[pintool] REP@%lx: REP-predicated instruction\n", (long unsigned int)ip);
-
-    /* Rep-prefix does not necessarily show architectural effect
-     * E.g. repz retq (see http://pages.cs.wisc.edu/~lena/repzret.php)
-     */
-
-    if (INS_HAS_IPOINT_AFTER(bp)) {
-      DEBUG(2) printf("[pintool] REP@%lx has fall-through\n", (long unsigned int)ip);
-      /* REP-prefixed instruction where REP is in effect (e.g. rep stos) */
-      INS_InsertCall(bp, IPOINT_AFTER, AFUNPTR(RecordRep),
-                          IARG_THREAD_ID,
-                          IARG_ADDRINT, INS_Address(bbl),
-                          IARG_ADDRINT, INS_Address(bp),
-                          IARG_CONTEXT,
-                          IARG_BOOL, fast_recording,
-                          IARG_END);
-      instrumented = true;
-      DEBUG(1) printf("[pintool] Instrumented rep@%lx\n", (long unsigned int)INS_Address(bp));
-    }
   }
-  return instrumented;
 }
 
 /**
@@ -2283,7 +2298,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v)
   //std::cout << la << " la is " << std::endl;
   uint64_t l = (uint64_t)la;
   static int count;
-  DEBUG(3) printf("leaking instruction  %lx with count  %d \n", ip, count);
+  DEBUG(3) printf("leaking instruction  %x with count  %d \n", ip, count);
   count++;
 
   if (leaks->get_erase_dleak(l) || leaks->was_erased_dleak(l)) {
@@ -2330,7 +2345,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v)
     bool found = false;
     while (bp != INS_Invalid()) {
       DEBUG(2) printf("[pintool] Testing ins %lx\n", (long unsigned int)INS_Address(bp));
-      if (INS_IsBranchOrCall(bp)) {
+      if (INS_HAS_TAKEN_BRANCH(bp)) {
         DEBUG(2) printf("[pintool] Found bp %lx\n", (long unsigned int)INS_Address(bp));
         /* We instrument the actual branch point (bp) but report leaks
          * with respect to the BBL (ins)
