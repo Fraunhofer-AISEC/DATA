@@ -39,6 +39,28 @@ END_LEGAL */
 #define strdup _strdup
 #endif
 
+/**
+ * Pin 3.11 Documentation:
+ * https://software.intel.com/sites/landingpage/pintool/docs/97998/Pin/html
+ */
+
+// Pin above 3.7.97720 deprecates some functions
+#if (PIN_PRODUCT_VERSION_MAJOR > 3) || \
+    (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR > 7) || \
+    (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR == 7 && PIN_BUILD_NUMBER > 97720)
+  #define INS_DIRECT INS_DirectControlFlowTargetAddress
+  #define INS_IS_DIRECT INS_IsDirectControlFlow
+  #define INS_IS_INDIRECT INS_IsIndirectControlFlow
+  #define INS_HAS_TAKEN_BRANCH INS_IsValidForIpointTakenBranch
+  #define INS_HAS_IPOINT_AFTER INS_IsValidForIpointAfter
+#else
+  #define INS_DIRECT INS_DirectBranchOrCallTargetAddress
+  #define INS_IS_DIRECT INS_IsDirectBranchOrCall
+  #define INS_IS_INDIRECT INS_IsIndirectBranchOrCall
+  #define INS_HAS_TAKEN_BRANCH INS_IsBranchOrCall
+  #define INS_HAS_IPOINT_AFTER INS_HasFallThrough
+#endif
+
 using namespace std;
 using namespace CALLSTACK;
 static REG vreg;
@@ -125,9 +147,9 @@ i_trace(TRACE trace, void *v)
             continue;
         }
 #endif
-        if( INS_IsDirectBranchOrCall(tail) ) {
+        if( INS_IS_DIRECT(tail) ) {
             //check if direct or indirect call and take the target accordingly
-            ADDRINT target = INS_DirectBranchOrCallTargetAddress(tail);
+            ADDRINT target = INS_DIRECT(tail);
             INS_InsertCall(tail, IPOINT_BEFORE,
                                 (AFUNPTR)a_process_call,
                                 IARG_ADDRINT, target,
@@ -144,7 +166,7 @@ i_trace(TRACE trace, void *v)
                     IARG_END);
             }
         }
-        if( INS_IsIndirectBranchOrCall(tail) && !INS_IsRet(tail) ) {
+        if( INS_IS_INDIRECT(tail) && !INS_IsRet(tail) ) {
             INS_InsertCall(tail, IPOINT_TAKEN_BRANCH,
                                 (AFUNPTR)a_process_call,
                                 IARG_BRANCH_TARGET_ADDR,
