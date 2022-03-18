@@ -55,10 +55,14 @@
 #if (PIN_PRODUCT_VERSION_MAJOR > 3) || \
     (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR > 7) || \
     (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR == 7 && PIN_BUILD_NUMBER > 97720)
+  #define INS_DIRECT INS_DirectControlFlowTargetAddress
+  #define INS_IS_DIRECT INS_IsDirectControlFlow
   #define INS_IS_INDIRECT INS_IsIndirectControlFlow
   #define INS_HAS_TAKEN_BRANCH INS_IsValidForIpointTakenBranch
   #define INS_HAS_IPOINT_AFTER INS_IsValidForIpointAfter
 #else
+  #define INS_DIRECT INS_DirectBranchOrCallTargetAddress
+  #define INS_IS_DIRECT INS_IsDirectBranchOrCall
   #define INS_IS_INDIRECT INS_IsIndirectBranchOrCall
   #define INS_HAS_TAKEN_BRANCH INS_IsBranchOrCall
   #define INS_HAS_IPOINT_AFTER INS_HasFallThrough
@@ -1814,10 +1818,11 @@ VOID RecordMemRead(THREADID threadid, VOID * ip, VOID * addr, bool fast_recordin
 VOID RecordMemWrite(THREADID threadid, VOID * ip, VOID * addr, bool fast_recording, const CONTEXT * ctxt)
 {
   if (!Record) return;
-//  PIN_MutexLock(&lock);
+  // PIN_MutexLock(&lock);
   entry_t entry;
   entry.type = WRITE;
-	std::cout << " TOP from WRITE is "<< PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
+  ADDRINT target = ctxt != NULL ? (ADDRINT)PIN_GetContextReg( ctxt, REG_STACK_PTR ) : 0;
+  std::cout << " TOP from WRITE is " << target << std::endl;
   entry.ip = getLogicalAddress(ip);
   entry.data = getLogicalAddress(addr);
   test_mem_heap(&entry);
@@ -1827,7 +1832,7 @@ VOID RecordMemWrite(THREADID threadid, VOID * ip, VOID * addr, bool fast_recordi
   } else {
     record_entry(entry);
   }
-//  PIN_MutexUnlock(&lock);
+  // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1972,7 +1977,7 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
   if (!Record) return;
   entry_t entry;
   entry.type = FUNC_EXIT;
-	std::cout << " TOP from func EXIT is "<< PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
+  std::cout << " TOP from func EXIT is "<< PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
   entry.ip = getLogicalAddress((void*) ((uintptr_t)ins));
   entry.data = getLogicalAddress((void*) ((uintptr_t)target));
   DEBUG(2) std::cout << "Ret " << std::hex << ins << " to " << target << std::endl;
@@ -2219,6 +2224,7 @@ BOOL instrumentMemIns(INS ins, bool fast_recording)
                 IARG_INST_PTR,
                 IARG_MEMORYOP_EA, memOp,
                 IARG_BOOL, fast_recording,
+                IARG_CONTEXT,
                 IARG_END);
         found = true;
       }

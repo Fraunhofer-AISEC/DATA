@@ -34,7 +34,7 @@ TEST_TOOL_ROOTS := addrtrace
 #------------------------------------------------------------------------
 .PHONY: all clean clean2 i386 x86_64 32 64
 
-all: i386 x86_64 32 64
+all: x86_64 64 #i386 x86_64 32 64
 
 # Pin Root
 ifneq ($(MAKECMDGOALS),help)
