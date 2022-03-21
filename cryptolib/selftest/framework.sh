@@ -11,23 +11,23 @@ source "${DATA_COMMON}/DATA_init.sh" || { echo "source data.sh first!" && exit 1
 #------------------------------------------------------------------------
 
 # The name of the framework. Do not use spaces or special characters.
-export FRAMEWORK=frameworkundertest
+export FRAMEWORK=selftest
 
 # The file containing all supported algorithms
 export TARGETFILE=targets.txt
 
 # The number of measurements for difference detection (phase1)
-export PHASE1_TRACES=3
+export PHASE1_TRACES=6
 
 # The number of constant keys for generic tests (phase2)
 # Make sure that PHASE2_FIXEDKEYS <= PHASE1_TRACES
-export PHASE2_FIXEDKEYS=3
+export PHASE2_FIXEDKEYS=6
 
 # The number of measurements per constant key for generic tests (phase2)
-export PHASE2_TRACES=60
+export PHASE2_TRACES=100
 
 # The number of measurements for specific tests (phase3)
-export PHASE3_TRACES=200
+export PHASE3_TRACES=300
 
 # (Optional) Additional flags for the pintool. Supported flags are:
 #  -main <main>    Start recording at function <main>. Note that the <main>
@@ -56,7 +56,7 @@ export BINARY=${PWD}/main
 
 # The leakage model of phase 3.
 # See ${DATA_LEAKAGE_MODELS} for all options.
-export SPECIFIC_LEAKAGE_CALLBACK=${DATA_LEAKAGE_MODELS}/sym_byte_value.py
+export SPECIFIC_LEAKAGE_CALLBACK=${DATA_LEAKAGE_MODELS}/sym_nibble_high.py
 
 # DATA callback for setting up the framework to analyze. This callback
 # is invoked once inside the current directory before analysis starts.
