@@ -949,6 +949,7 @@ function measure_phase3 {
 # Analyze specific leakage
 #
 # PHASE3_TRACES ... number of specific measurements to analyze
+# PHASE3_KEYDIR ... directory where the generated keys for phase3 are stored
 # $1 ... .py file that defines the specific leakage as a callback function
 function analyze_phase3 {
   enter_workdir
@@ -972,6 +973,10 @@ function analyze_phase3 {
   TSC=$CUR_TIME_CPU
   if [[ "${PHASE3_TRACES}" == "" ]]; then
     log_error "Please specify PHASE3_TRACES!"
+    exit 1
+  fi
+  if [[ "${PHASE3_KEYDIR}" == "" ]]; then
+    log_error "Please specify PHASE3_KEYDIR!"
     exit 1
   fi
   if ! [[ -f ${SPLEAKCB} ]]; then
@@ -1030,7 +1035,7 @@ function analyze_phase3 {
     if [[ "${DO_PARALLEL}" -eq "1" ]]; then
       MP="True"
     fi
-    execute "${ANALYZE}" specific ${PHASE3_RNDPIC} "${SPLEAKCB}" --pickle "${RESPICFILE_PHASE3_LM}" --syms ${EXTSYMFILE} --debug ${DEBUG} --leaksonly ${LEAKSONLY} --multiprocessing ${MP}
+    execute "${ANALYZE}" specific ${PHASE3_RNDPIC} "${SPLEAKCB}" ${PHASE3_KEYDIR} --pickle "${RESPICFILE_PHASE3_LM}" --syms ${EXTSYMFILE} --debug ${DEBUG} --leaksonly ${LEAKSONLY} --multiprocessing ${MP}
     log_info "Phase3: Statistical tests completed."
   fi
   if ! [[ -f ${RESXMLFILE_PHASE3_LM} ]]; then
@@ -1070,24 +1075,20 @@ function generate_final_result_XMLs {
   ALLXML="${RESXMLFILE_FINAL}"
 
   log_info "Generating final result and report files."
-  if ! [[ -f ${ALLPIC} ]]; then
-    if [[ -f ${NSPIC} ]]; then
-      cp ${NSPIC} ${ALLPIC}
-    elif [[ -f ${DIFFPIC} ]] ; then
-      cp ${DIFFPIC} ${ALLPIC}
-    else
-      log_error "${DIFFPIC} and ${NSPIC} files not found!"
-      exit 1
+  if [[ -f ${NSPIC} ]]; then
+    cp ${NSPIC} ${ALLPIC}
+  elif [[ -f ${DIFFPIC} ]] ; then
+    cp ${DIFFPIC} ${ALLPIC}
+  else
+    log_error "${DIFFPIC} and ${NSPIC} files not found!"
+    exit 1
+  fi
+  for f in ${SPPIC}; do
+    if [[ -f ${f} ]]; then
+      execute "${ANALYZE}" merge ${ALLPIC} "${f}" --syms ${EXTSYMFILE} --pickle ${ALLPIC} --strip True --debug ${DEBUG}
     fi
-    for f in ${SPPIC}; do
-      if [[ -f ${f} ]]; then
-        execute "${ANALYZE}" merge ${ALLPIC} "${f}" --syms ${EXTSYMFILE} --pickle ${ALLPIC} --strip True --debug ${DEBUG}
-      fi
-    done
-  fi
-  if ! [[ -f ${ALLXML} ]]; then
-    execute "${ANALYZE}" show ${ALLPIC} --syms ${EXTSYMFILE} --xml ${ALLXML} --debug ${DEBUG}
-  fi
+  done
+  execute "${ANALYZE}" show ${ALLPIC} --syms ${EXTSYMFILE} --xml ${ALLXML} --debug ${DEBUG}
   log_info "Generating completed."
   log_info "Results generated: $(readlink -f $ALLXML)"
   leave_workdir
@@ -1415,6 +1416,7 @@ function help {
   echo "options:"
   echo "-h|--help          Print this help"
   echo "-l|--list          List all available targets"
+  echo "-f|--full          Run phases 1-3 and generate final result XML files"
   echo "               [n] Optional argument to overwrite PHASE[123]_TRACES"
   echo "--phase1       [n] Run the whole phase1 with PHASE1_TRACES traces (-g -d -ad)"
   echo "--phase2       [n] Run the whole phase2 with PHASE2_TRACES traces (-ns -an)"
