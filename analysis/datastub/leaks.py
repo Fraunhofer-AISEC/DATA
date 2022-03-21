@@ -595,8 +595,10 @@ class NSLeak(object):
         if self.nstype == NSPType.Noleak:
             return str.format("result='none'")
         else:
-            if self.nstype == NSPType.Type1a or self.nstype == NSPType.Type1b:
-                source = "H_pos"
+            if self.nstype == NSPType.Type1a:
+                source = "H_pos(a)"
+            elif self.nstype == NSPType.Type1b:
+                source = "H_pos(b)"
             elif self.nstype == NSPType.Type2:
                 source = "H_addr"
             else:
