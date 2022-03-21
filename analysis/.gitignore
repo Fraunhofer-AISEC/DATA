@@ -2,3 +2,5 @@
 build
 .pyenv
 __pycache__
+.project
+.pydevproject
