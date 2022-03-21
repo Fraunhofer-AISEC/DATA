@@ -34,6 +34,8 @@ import struct
 import copy
 import numpy
 import types
+import fnmatch
+import natsort
 from collections import Counter, defaultdict
 import kuipertest
 import rdctest
@@ -336,6 +338,22 @@ def iterate_queue(files, fast=True):
             # This should never happen. We miss some conditional branches in the code
             debug(0, "Missed some branch (outer miss) @ %08x vs %08x", (e1.ip, e2.ip))
             assert False
+
+
+"""
+*************************************************************************
+"""
+
+
+def loadkeys(directory):
+    keyfiles = fnmatch.filter(os.listdir(directory), "*.key")
+    keyfiles = natsort.natsorted(keyfiles)
+    keys = list()
+    for k in keyfiles:
+        with open(os.path.join(directory, k)) as f:
+            key = f.readline().encode("utf-8")
+            keys.append(key)
+    return keys
 
 
 """
@@ -766,11 +784,11 @@ def spe_testfunction(input):
             property_idx, X_labels[property_idx], nsptype, dict_key
         ),
     )
-    if I is False:
+    if I is not None and bool(I) is False:
         leak = SPLeak(
             nsptype,
             X_labels[property_idx],
-            property_idx,
+            dict_key,
             None,
             R,
             L,
@@ -799,7 +817,7 @@ def spe_testfunction(input):
 #         ...
 #         return a
 #
-def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
+def specific_leakage_test(random, callback, keys, LeaksOnly=True, mp=False):
     global nospleak
 
     # load callback function
@@ -828,30 +846,6 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
     debug(0, "Got %d leaks.", (len(randomleaks)))
     sys.stdout.flush()
 
-    # Build Leakage Model Input
-    keyset = set()
-    debug(1, "Loading keys")
-    for rli in range(0, len(randomleaks)):
-        rl = randomleaks[rli]
-
-        if len(rl.evidence) == 0:
-            debug(3, "Skipping empty evidence")
-            continue
-
-        for e in rl.evidence:
-            if len(e.entries) == 0:
-                debug(3, "Skipping empty entries")
-                continue
-            if e.source != EvidenceSource.Specific.value:
-                debug(3, "Skipping non-specific sources")
-                continue
-
-            # gather information -- keys
-            if e.key is None or len(e.key) == 0:
-                debug(0, "Error: Key is empty: %s", ((e.key)))
-                assert False
-            keyset.add(e.key)
-
     # convert keys with callback
     # the callback always returns the matrix X:
     #
@@ -863,7 +857,6 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
     # M ... number of keys (one row per key)
     # N ... number of properties in X (one column per property)
     debug(1, "Building leakage model input from keys")
-    keys = list(keyset)
     X = splcb.specific_leakage_callback(keys)
     X_labels = []
     # unpack specific leakage result tuple to extract labels
@@ -951,11 +944,11 @@ def specific_leakage_test(random, callback, LeaksOnly=True, mp=False):
 
         # postprocessing -- type2
         for c in rdic.keys():
-            rdic[c] = numpy.asarray(rdic[c], dtype=numpy.uint)
+            rdic[c] = numpy.asarray(rdic[c], dtype=numpy.uint64)
 
         # postprocessing -- type3
         for c in rdic_pos.keys():
-            rdic_pos[c] = numpy.array(rdic_pos[c], dtype=numpy.int)
+            rdic_pos[c] = numpy.array(rdic_pos[c], dtype=numpy.int64)
 
         # Extract X in correct order
         X = numpy.asarray([Xglob[k] for k in keys])
@@ -1219,7 +1212,7 @@ def collapse_cfleaks(leaks, collapse_cfleaks, granularity, resfilter=""):
         filterarr = resfilter.replace('"', "").replace("'", "").split(";")
         for f in filterarr:
             debug(0, "Filtering results for: " + f)
-    if mask == -1 and collapse_cfleaks is False:
+    if mask == -1 and not collapse_cfleaks:
         # Nothing to collapse
         return leaks
     else:
@@ -1532,6 +1525,7 @@ Specific leakage tests.
 @cli.command("specific")
 @click.argument("randompickle", type=str)
 @click.argument("callback", type=str)
+@click.argument("keydir", type=str)
 @click.option("--pickle", default=None, type=str)  # output pickle
 @click.option("--syms", default=None, type=click.File("r"))
 @click.option("--xml", default=None, type=click.File("w"))
@@ -1539,15 +1533,16 @@ Specific leakage tests.
 @click.option("--leaksonly", default=True, type=bool)
 @click.option("--multiprocessing", default=True, type=bool)
 def specific(
-    randompickle, callback, pickle, syms, xml, debug, leaksonly, multiprocessing
+    randompickle, callback, keydir, pickle, syms, xml, debug, leaksonly, multiprocessing
 ):
     global printer
     global leaks
     set_debuglevel(debug)
     if syms:
         SymbolInfo.open(syms)
+    keys = loadkeys(keydir)
     leaks = loadpickle(randompickle)
-    specific_leakage_test(leaks, callback, leaksonly, multiprocessing)
+    specific_leakage_test(leaks, callback, keys, leaksonly, multiprocessing)
     if pickle is not None:
         storepickle(pickle, leaks)
     if xml is not None:
