@@ -10,7 +10,7 @@ PROJ := DATA - <Library under test>
 #------------------------------------------------------------------------
 .PHONY: all clean
 
-all: 
+all:
 	$(CC) -g -O0 main.c -o main
 
 clean:

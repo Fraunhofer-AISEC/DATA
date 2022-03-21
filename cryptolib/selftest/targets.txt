@@ -1,0 +1,2 @@
+basic 8
+basic 64
