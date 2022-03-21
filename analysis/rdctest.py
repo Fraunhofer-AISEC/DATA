@@ -94,11 +94,10 @@ class RDC(object):
             return (None, None, None)
 
         # varying input/observations
-        else:
-            (R, L, I) = RDC.rdc(
-                Inputs, Observations, Confidence, SkipThres=False, max_iter=max_iter
-            )
-            return (R, L, I)
+        (R, L, I) = RDC.rdc(
+            Inputs, Observations, Confidence, SkipThres=False, max_iter=max_iter
+        )
+        return (R, L, I)
 
     ###
     # Approximate Significance Threshold
@@ -222,7 +221,7 @@ class RDC(object):
                 file.write(f"popth {','.join(str(number) for number in popth)}\n")
 
             plot = False
-            if plot is False:
+            if not plot:
                 return poptl, popth
 
             # Single curve fitting
