@@ -366,85 +366,30 @@ void *getLogicalAddress(void *ip) {
         return nullptr;
     }
 
-    // is the Virtual Address in the IMG/Code address space?
-    for (auto i : imgvec) {
-        if ((uint64_t)ip >= i.baseaddr && (uint64_t)ip <= i.endaddr) {
-            logaddrfile << setw(25) << "IMG/Code"
-                        << " " << setw(25) << (uint64_t)ip << " ";
-            la =
-                (uint64_t *)(getIndex(i.imghash) | ((uint64_t)ip - i.baseaddr));
-            // std::cout<<"returned la is " << la <<std::endl;
-            logaddrfile << setw(25) << la << " " << std::endl;
-            /*	if (addressMap.count((uint64_t)ip)) {
-                                          //assert? Same instruction
-               instrumented angain? } else { addressMap.insert({(uint64_t) ip,
-               (uint64_t) la}); conversionMap.insert({(uint64_t) la, (uint64_t)
-               ip});
-                          }*/
-            /*		for (auto i : funcvec) {
-                                    if ((uint64_t)ip >= i.baseaddr &&
-               (uint64_t)ip <= i.endaddr) { std::cout<< " IP missed is " <<
-               (uint64_t)ip << " Image name is " << i.name << " Function is " <<
-               i.funcname<<std::endl; logaddrfile << setw(25) << "IMG/Code" << "
-               " << setw(25) << (uint64_t)ip << " "; la = (uint64_t *)
-               (getIndex(i.imghash) | ((uint64_t)ip - i.baseaddr)); logaddrfile
-               << setw(25) << la << " " << std::endl;
-                                    }
-                            }*/
-            return la;
-        }
-    }
-
     // is the Virtual Address in the Heap object address space?
     for (auto i : heap) {
-        if (((uint64_t)ip >= i.base && (uint64_t)ip <= (i.base + i.size)) ||
-            ((uint64_t)ip <= i.base && (uint64_t)ip >= (i.base - i.size))) {
+        if ((uint64_t)ip >= i.base && (uint64_t)ip <= (i.base + i.size)) {
             logaddrfile << setw(25) << "HEAP"
                         << " " << setw(25) << (uint64_t)ip << " ";
-            // la  = (uint64_t *) (getIndex(i.hash) | ((uint64_t)ip - i.base));
             la = (uint64_t *)(getIndex(i.hash.substr(32, 8)) |
-                              std::labs(i.base - (uint64_t)ip));
+                              ((uint64_t)ip - i.base));
             std::cout << " heap hash " << (uint64_t)la << std::endl;
             logaddrfile << setw(25) << la << " " << std::endl;
-            if (addressMap.count((uint64_t)ip)) {
-                // assert? Same instruction instrumented angain?
-            } else {
-                addressMap.insert({(uint64_t)ip, (uint64_t)la});
-                conversionMap.insert({(uint64_t)la, (uint64_t)ip});
-            }
 
             return la;
         }
-    }
-
-    // is the Virtual Address in the Stack address space?
-    if ((uint64_t)ip <= stackBaseAddr && (uint64_t)ip >= stackEndAddr) {
-        logaddrfile << setw(25) << "Stack"
-                    << " " << setw(25) << (uint64_t)ip << " ";
-        la = (uint64_t *)(getIndex(stackBaseAddr_hash) |
-                          (stackBaseAddr - (uint64_t)ip));
-        // std::cout << " converted log addr for stack is  " << (uint64_t)la <<
-        // std::endl;
-        logaddrfile << setw(25) << la << " " << std::endl;
-        if (addressMap.count((uint64_t)ip)) {
-            // assert? Same instruction instrumented angain?
-        } else {
-            addressMap.insert({(uint64_t)ip, (uint64_t)la});
-            conversionMap.insert({(uint64_t)la, (uint64_t)ip});
-        }
-        return la;
     }
 
     // is the Virtual Address in the Heap address space
     // but does not belong to any heap object already tracked?
     if ((uint64_t)ip >= heapBaseAddr && (uint64_t)ip <= heapEndAddr) {
-        la = (uint64_t *)(getIndex(heapBaseAddr_hash) |
-                          ((uint64_t)ip - heapBaseAddr));
-        return la;
+        std::cout << "ERROR: Heap corruption?" << std::endl;
+        std::cout << "Questionable Address 0x" << std::hex << ip << std::endl;
+        return ip;
     }
 
-    std::cout << "classification error with inst " << (uint64_t)ip << std::endl;
-    /*	for (auto i : funcvec) {
+    DEBUG(1) std::cout << "Not classified IP " << (uint64_t)ip << std::endl;
+    /* for (auto i : funcvec) {
                     if ((uint64_t)ip >= i.baseaddr && (uint64_t)ip <= i.endaddr)
        { std::cout<< "Missed IP is " << (uint64_t)ip << "Image name is " <<
        i.name << "Function is " << i.funcname<<std::endl;
