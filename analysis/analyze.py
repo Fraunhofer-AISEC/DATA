@@ -281,6 +281,10 @@ def iterate_queue(files, fast=True):
 
                 assert isinstance(mergepoint, MergePoint)
                 debug(2, "found mp: %08x, depth %d", (mergepoint.ip, mergepoint.depth))
+                for mp in lhA.myset:
+                    debug(3, f"lhA {mp.ip:x}")
+                for mp in lhB.myset:
+                    debug(3, f"lhB {mp.ip:x}")
 
                 # Advance to mergepoint
                 debug(2, "advancing to mp:")
