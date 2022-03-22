@@ -2181,7 +2181,8 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                 RTN_Open(mainRtn);
                 RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
                                IARG_THREAD_ID, IARG_ADDRINT,
-                               RTN_Address(mainRtn), IARG_END);
+                               RTN_Address(mainRtn), IARG_END, IARG_CONTEXT,
+                               IARG_END);
                 RTN_InsertCall(mainRtn, IPOINT_AFTER, (AFUNPTR)RecordMainEnd,
                                IARG_THREAD_ID, IARG_ADDRINT,
                                RTN_Address(mainRtn), IARG_END);
@@ -2277,15 +2278,17 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                         std::cout << "Calloc found in " << IMG_Name(img)
                                   << std::endl;
                         RTN_Open(callocRtn);
+                        RTN_InsertCall(callocRtn, IPOINT_BEFORE,
+                                       (AFUNPTR)RecordCallocBefore,
+                                       IARG_ADDRINT, CALLOC, IARG_THREAD_ID,
+                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+                                       IARG_RETURN_IP, IARG_END);
                         RTN_InsertCall(
-                            callocRtn, IPOINT_BEFORE,
-                            (AFUNPTR)RecordCallocBefore, IARG_THREAD_ID,
-                            IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
-                        RTN_InsertCall(callocRtn, IPOINT_AFTER,
-                                       (AFUNPTR)RecordCallocAfter,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
+                            callocRtn, IPOINT_AFTER, (AFUNPTR)RecordCallocAfter,
+                            IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
+                            IARG_RETURN_IP, IARG_END);
+                        DEBUG(1) std::cout << "after Calloc insert " << endl;
                         RTN_Close(callocRtn);
                     }
 
@@ -2300,6 +2303,55 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                             IARG_THREAD_ID, IARG_INST_PTR,
                             IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
                         RTN_Close(freeRtn);
+                    }
+
+                    RTN mmapRtn = RTN_FindByName(img, MMAP);
+                    if (mmapRtn.is_valid()) {
+                        DEBUG(1)
+                        std::cout << "mmap found in " << IMG_Name(img)
+                                  << std::endl;
+                        RTN_Open(mmapRtn);
+                        RTN_InsertCall(mmapRtn, IPOINT_BEFORE,
+                                       (AFUNPTR)RecordmmapBefore, IARG_ADDRINT,
+                                       MMAP, IARG_THREAD_ID,
+                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+                                       IARG_RETURN_IP, IARG_END);
+                        RTN_InsertCall(mmapRtn, IPOINT_AFTER,
+                                       (AFUNPTR)RecordmmapAfter, IARG_THREAD_ID,
+                                       IARG_FUNCRET_EXITPOINT_VALUE,
+                                       IARG_RETURN_IP, IARG_END);
+                        RTN_Close(mmapRtn);
+                    }
+
+                    RTN mremapRtn = RTN_FindByName(img, MREMAP);
+                    if (mremapRtn.is_valid()) {
+                        DEBUG(1)
+                        std::cout << "mremap found in " << IMG_Name(img)
+                                  << std::endl;
+                        RTN_Open(mremapRtn);
+                        RTN_InsertCall(mremapRtn, IPOINT_BEFORE,
+                                       (AFUNPTR)RecordmremapBefore,
+                                       IARG_ADDRINT, MREMAP, IARG_THREAD_ID,
+                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 2,
+                                       IARG_RETURN_IP, IARG_END);
+                        RTN_InsertCall(
+                            mremapRtn, IPOINT_AFTER, (AFUNPTR)RecordmremapAfter,
+                            IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
+                            IARG_RETURN_IP, IARG_END);
+                        RTN_Close(mremapRtn);
+                    }
+
+                    RTN munmapRtn = RTN_FindByName(img, MUNMAP);
+                    if (munmapRtn.is_valid()) {
+                        RTN_Open(munmapRtn);
+                        RTN_InsertCall(
+                            munmapRtn, IPOINT_BEFORE,
+                            (AFUNPTR)RecordmunmapBefore, IARG_THREAD_ID,
+                            IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+                        RTN_Close(munmapRtn);
                     }
                 }
                 alloc_instrumented = 1;
@@ -2326,7 +2378,8 @@ BOOL instrumentMemIns(INS ins, bool fast_recording) {
             if (INS_MemoryOperandIsRead(ins, memOp)) {
                 INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)RecordMemRead,
                                IARG_THREAD_ID, IARG_INST_PTR, IARG_MEMORYOP_EA,
-                               memOp, IARG_BOOL, fast_recording, IARG_END);
+                               memOp, IARG_BOOL, fast_recording, IARG_CONTEXT,
+                               IARG_END);
                 found = true;
             }
             if (INS_MemoryOperandIsWritten(ins, memOp)) {
