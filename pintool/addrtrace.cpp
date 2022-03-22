@@ -1458,151 +1458,109 @@ uint32_t dofree(ADDRINT addr) {
     return 0;
 }
 
-#if 0
 /**
  * Record malloc
  * @param threadid The thread
  * @param size The size parameter passed to malloc
  */
-VOID RecordMallocBefore(THREADID threadid, VOID* ip, ADDRINT size) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  if (thread_state[threadid].realloc_state.size() == 0) {
-    DEBUG(1) std::cout << "[pintool] Malloc called with " << std::hex << size << " at " << ip << std::endl;
-    alloc_state_t state = { .size = size };
-    thread_state[threadid].malloc_state.push_back(state);
-  } else {
-    DEBUG(1) std::cout << "[pintool] Malloc ignored due to realloc_pending (size= " << std::hex << size << ") at " << ip << std::endl;
-  }
-  //PIN_MutexUnlock(&lock);
+VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
+    if (!Record)
+        return;
+    // PIN_MutexLock(&lock);
+    if (thread_state[threadid].realloc_state.size() == 0) {
+        DEBUG(1)
+        std::cout << "[pintool] Malloc called with " << std::hex << size
+                  << " at " << ip << std::endl;
+        SHA1 hash;
+        hash.update(getcallstack(threadid)); /* calculte the hash of the set of
+                                                IPs in the Callstack */
+        alloc_state_t state = {
+            .type = "malloc",
+            .size = size,
+            .callsite = 0,
+            .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+        };
+        thread_state[threadid].malloc_state.push_back(state);
+    } else {
+        DEBUG(1)
+        std::cout << "[pintool] Malloc ignored due to realloc_pending (size= "
+                  << std::hex << size << ") at " << ip << std::endl;
+    }
+    // PIN_MutexUnlock(&lock);
 }
-#endif
 
-#if 0
 /**
  * Record malloc's result
  * @param threadid The thread
  * @param addr The allocated heap pointer
  */
-VOID RecordMallocAfter(THREADID threadid, VOID* ip, ADDRINT addr) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Malloc returned " << std::hex << addr << std::endl;
-  ASSERT(thread_state[threadid].malloc_state.size() > 0, "[pintool] Error: Malloc returned but not called");
-  alloc_state_t state = thread_state[threadid].malloc_state.back();
-  thread_state[threadid].malloc_state.pop_back();
-  domalloc(addr, state.size, 0);
-  //PIN_MutexUnlock(&lock);
-}
-#endif
-
-void *MallocWrapper(CONTEXT *ctxt, AFUNPTR pf_malloc, size_t size) {
-    void *addr;
-    PIN_CallApplicationFunction(ctxt, PIN_ThreadId(), CALLINGSTD_DEFAULT,
-                                pf_malloc, NULL, PIN_PARG(void *), &addr,
-                                PIN_PARG(size_t), size, PIN_PARG_END());
-    DEBUG(0) std::cout << "Malloc returned " << std::hex << addr << std::endl;
-#if 1
-    THREADID threadid = PIN_ThreadId();
-    DEBUG(0)
-    std::cout << "Malloc called with " << std::hex << size << std::endl;
-    SHA1 hash;
-    hash.update(getcallstack(
-        threadid)); /* calculte the hash of the set of IPs in the Callstack */
-    alloc_state_t state = {
-        .type = "malloc",
-        .size = size,
-        .callsite = 0,
-        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
-    };
-
-    // ASSERT(thread_state[threadid].malloc_state.size(), "[Error] Malloc
-    // returned but not called");
+VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
+    if (!Record)
+        return;
+    // PIN_MutexLock(&lock);
+    DEBUG(1)
+    std::cout << "[pintool] Malloc returned " << std::hex << addr << std::endl;
+    ASSERT(thread_state[threadid].malloc_state.size() > 0,
+           "[pintool] Error: Malloc returned but not called");
+    alloc_state_t state = thread_state[threadid].malloc_state.back();
+    thread_state[threadid].malloc_state.pop_back();
     doalloc((ADDRINT)addr, state.size, 0, state.callsite, state.type,
             state.callstack, 0);
-    // thread_state[threadid].malloc_pending = false;
-#endif
-    return addr;
+    // PIN_MutexUnlock(&lock);
 }
 
-#if 0
 /**
  * Record realloc
  * @param threadid The thread
  * @param addr The heap pointer param of realloc
  * @param size The size parameter passed to realloc
  */
-VOID RecordReallocBefore(THREADID threadid, VOID* ip, ADDRINT addr, ADDRINT size) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Realloc called with " << std::hex << addr << " " << size << " at " << ip << std::endl;
-  realloc_state_t state;
-  state.size = size;
-  state.old = addr;
-  thread_state[threadid].realloc_state.push_back(state);
-  //PIN_MutexUnlock(&lock);
-}
-#endif
-
-#if 0
-/**
- * Record realloc's result
- * @param threadid The thread
- * @param addr The allocated heap pointer
- */
-VOID RecordReallocAfter(THREADID threadid, VOID* ip, ADDRINT addr) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Realloc returned " << std::hex << addr << " at " << ip << std::endl;
-  ASSERT(thread_state[threadid].realloc_state.size() > 0, "[pintool] Error: Realloc returned but not called");
-  realloc_state_t state = thread_state[threadid].realloc_state.back();
-  thread_state[threadid].realloc_state.pop_back();
-
-  uint32_t objid = 0;
-  if (state.old) {
-    objid = dofree(state.old);
-  }
-  domalloc(addr, state.size, objid);
-  //PIN_MutexUnlock(&lock);
-}
-#endif
-
-void *ReallocWrapper(CONTEXT *ctxt, AFUNPTR pf_realloc, void *ptr,
-                     size_t size) {
-    void *addr;
-    PIN_CallApplicationFunction(ctxt, PIN_ThreadId(), CALLINGSTD_DEFAULT,
-                                pf_realloc, NULL, PIN_PARG(void *), &addr,
-                                PIN_PARG(void *), ptr, PIN_PARG(size_t), size,
-                                PIN_PARG_END());
-    DEBUG(0)
-    std::cout << "Realloc called with " << std::hex << ptr << " " << size
-              << std::endl;
-    DEBUG(0) std::cout << "Realloc returned " << std::hex << addr << std::endl;
-    THREADID threadid = PIN_ThreadId();
+VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
+                         ADDRINT size) {
+    if (!Record)
+        return;
+    // PIN_MutexLock(&lock);
+    DEBUG(1)
+    std::cout << "[pintool] Realloc called with " << std::hex << addr << " "
+              << size << " at " << ip << std::endl;
     SHA1 hash;
     hash.update(getcallstack(
         threadid)); /* calculte the hash of the set of IPs in the Callstack */
     realloc_state_t state = {
         .type = "realloc",
-        .old = (ADDRINT)ptr,
+        .old = addr,
         .size = size,
         .callsite = 0,
         .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
     };
+    thread_state[threadid].realloc_state.push_back(state);
+    // PIN_MutexUnlock(&lock);
+}
 
-    // thread_state[threadid].realloc_pending = true;
-#if 1
-    // ASSERT(thread_state[threadid].realloc_pending == true, "[Error] Realloc
-    // returned but not called");
+/**
+ * Record realloc's result
+ * @param threadid The thread
+ * @param addr The allocated heap pointer
+ */
+VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
+    if (!Record)
+        return;
+    // PIN_MutexLock(&lock);
+    DEBUG(1)
+    std::cout << "[pintool] Realloc returned " << std::hex << addr << " at "
+              << ip << std::endl;
+    ASSERT(thread_state[threadid].realloc_state.size() > 0,
+           "[pintool] Error: Realloc returned but not called");
+    realloc_state_t state = thread_state[threadid].realloc_state.back();
+    thread_state[threadid].realloc_state.pop_back();
+
     uint32_t objid = 0;
     if (state.old) {
         objid = dofree(state.old);
     }
     doalloc((ADDRINT)addr, state.size, objid, state.callsite, state.type,
             state.callstack, state.old);
-    // thread_state[threadid].realloc_pending = false;
-#endif
-    return addr;
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -2154,11 +2112,11 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         }
 
         DEBUG(1)
-            std::cout << "[pintool] Image low:  0x " << std::hex << low
-                      << std::endl;
+        std::cout << "[pintool] Image low:  0x " << std::hex << low
+                  << std::endl;
         DEBUG(1)
-            std::cout << "[pintool] Image high: 0x " << std::hex << high
-                      << std::endl;
+        std::cout << "[pintool] Image high: 0x " << std::hex << high
+                  << std::endl;
         imgfile << "Image:" << std::endl;
         imgfile << name << std::endl;
         imgfile << std::hex << low << ":" << high << std::endl;
@@ -2208,68 +2166,40 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                 DEBUG(1)
                 std::cout << "[pintool] Instrumenting allocation" << std::endl;
                 if (KnobTrackHeap.Value()) {
-#if 0
-          RTN mallocRtn = RTN_FindByName(img, MALLOC);
-          if (mallocRtn.is_valid()) {
-            DEBUG(1) std::cout << "[pintool] Malloc found in " << IMG_Name(img) << std::endl;
-            RTN_Open(mallocRtn);
-            RTN_InsertCall(mallocRtn, IPOINT_BEFORE, (AFUNPTR)RecordMallocBefore,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-              IARG_END);
-            RTN_InsertCall(mallocRtn, IPOINT_AFTER, (AFUNPTR)RecordMallocAfter,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCRET_EXITPOINT_VALUE,
-              IARG_END);
-            RTN_Close(mallocRtn);
-          }
-#endif
-                    RTN MallocRtn = RTN_FindByName(
-                        img, "malloc"); //  Find the malloc() function.
-                    if (RTN_Valid(MallocRtn)) {
-                        PROTO protoMalloc = PROTO_Allocate(
-                            PIN_PARG(void *), CALLINGSTD_DEFAULT, "malloc",
-                            PIN_PARG(size_t), PIN_PARG_END());
-
-                        RTN_ReplaceSignature(
-                            MallocRtn, AFUNPTR(MallocWrapper), IARG_PROTOTYPE,
-                            protoMalloc, IARG_CONST_CONTEXT, IARG_ORIG_FUNCPTR,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
+                    RTN mallocRtn = RTN_FindByName(img, MALLOC);
+                    if (mallocRtn.is_valid()) {
+                        DEBUG(1)
+                        std::cout << "[pintool] Malloc found in "
+                                  << IMG_Name(img) << std::endl;
+                        RTN_Open(mallocRtn);
+                        RTN_InsertCall(mallocRtn, IPOINT_BEFORE,
+                                       (AFUNPTR)RecordMallocBefore,
+                                       IARG_THREAD_ID, IARG_INST_PTR,
+                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                                       IARG_END);
+                        RTN_InsertCall(mallocRtn, IPOINT_AFTER,
+                                       (AFUNPTR)RecordMallocAfter,
+                                       IARG_THREAD_ID, IARG_INST_PTR,
+                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
+                        RTN_Close(mallocRtn);
                     }
 
-#if 0
-          RTN reallocRtn = RTN_FindByName(img, REALLOC);
-          if (reallocRtn.is_valid()) {
-            DEBUG(1) std::cout << "[pintool] Realloc found in " << IMG_Name(img) << std::endl;
-            RTN_Open(reallocRtn);
-            RTN_InsertCall(reallocRtn, IPOINT_BEFORE, (AFUNPTR)RecordReallocBefore,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-              IARG_END);
-            RTN_InsertCall(reallocRtn, IPOINT_AFTER, (AFUNPTR)RecordReallocAfter,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCRET_EXITPOINT_VALUE,
-              IARG_END);
-            RTN_Close(reallocRtn);
-          }
-#endif
-
-                    RTN ReallocRtn = RTN_FindByName(
-                        img, "realloc"); //  Find the malloc() function.
-                    if (RTN_Valid(ReallocRtn)) {
-                        PROTO protoRealloc = PROTO_Allocate(
-                            PIN_PARG(void *), CALLINGSTD_DEFAULT, "realloc",
-                            PIN_PARG(size_t), PIN_PARG_END());
-                        RTN_ReplaceSignature(
-                            ReallocRtn, AFUNPTR(ReallocWrapper), IARG_PROTOTYPE,
-                            protoRealloc, IARG_CONST_CONTEXT, IARG_ORIG_FUNCPTR,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                    RTN reallocRtn = RTN_FindByName(img, REALLOC);
+                    if (reallocRtn.is_valid()) {
+                        DEBUG(1)
+                        std::cout << "[pintool] Realloc found in "
+                                  << IMG_Name(img) << std::endl;
+                        RTN_Open(reallocRtn);
+                        RTN_InsertCall(
+                            reallocRtn, IPOINT_BEFORE,
+                            (AFUNPTR)RecordReallocBefore, IARG_THREAD_ID,
+                            IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
                             IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+                        RTN_InsertCall(reallocRtn, IPOINT_AFTER,
+                                       (AFUNPTR)RecordReallocAfter,
+                                       IARG_THREAD_ID, IARG_INST_PTR,
+                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
+                        RTN_Close(reallocRtn);
                     }
 
                     RTN callocRtn = RTN_FindByName(img, CALLOC);
