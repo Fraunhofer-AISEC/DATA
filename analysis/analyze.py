@@ -242,6 +242,10 @@ def iterate_queue(files, fast=True):
             continue
 
         assert bp is None or Type.isbranch(bp)
+        if e1.ip != e2.ip:
+            # This should never happen. We miss some conditional branches in the code
+            debug(0, "Missed some branch (outer miss) @ %08x vs %08x", (e1.ip, e2.ip))
+            assert False
         if e1.type == e2.type and e1.ip == e2.ip:
             if Type.isbranch(e1):
                 bp = e1
