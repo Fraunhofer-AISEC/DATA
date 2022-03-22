@@ -1661,11 +1661,13 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
  * @param threadid The thread
  * @param addr The heap pointer which is freed
  */
-VOID RecordFreeBefore(THREADID threadid, ADDRINT addr) {
+VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
     if (!Record)
         return;
     //  PIN_MutexLock(&lock);
-    DEBUG(0) std::cout << "Free called with " << std::hex << addr << std::endl;
+    DEBUG(1)
+    std::cout << "[pintool] Free called with " << std::hex << addr << " at "
+              << ip << std::endl;
     dofree(addr);
     //  PIN_MutexUnlock(&lock);
 }
