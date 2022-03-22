@@ -1505,7 +1505,7 @@ void *MallocWrapper(CONTEXT *ctxt, AFUNPTR pf_malloc, size_t size) {
 #if 1
     THREADID threadid = PIN_ThreadId();
     DEBUG(0)
-        std::cout << "Malloc called with " << std::hex << size << std::endl;
+    std::cout << "Malloc called with " << std::hex << size << std::endl;
     SHA1 hash;
     hash.update(getcallstack(
         threadid)); /* calculte the hash of the set of IPs in the Callstack */
@@ -1697,7 +1697,7 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
     //  PIN_MutexLock(&lock);
     if (thread_state[threadid].mremap_state.size() == 0) {
         DEBUG(1)
-            std::cout << "mmap called with " << std::hex << size << std::endl;
+        std::cout << "mmap called with " << std::hex << size << std::endl;
         SHA1 hash;
         hash.update(getcallstack(threadid)); /* calculate the hash of the set of
                                                 IPs in the Callstack */
@@ -1932,6 +1932,11 @@ VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
     entry.ip = getLogicalAddress((void *)ins);
     entry.data = getLogicalAddress((void *)target);
     record_entry(entry);
+    DEBUG(4) std::cout << "Branch entry" << std::endl;
+    DEBUG(4) std::cout << "ip \t" << std::hex << entry.ip << std::endl;
+    DEBUG(4) std::cout << "data \t" << std::hex << entry.data << std::endl;
+    DEBUG(4) std::cout << "ins \t" << std::hex << ins << std::endl;
+    DEBUG(4) std::cout << "target \t" << std::hex << target << std::endl;
 }
 
 /**
@@ -1948,6 +1953,7 @@ VOID RecordBranch(THREADID threadid, ADDRINT bbl, ADDRINT bp,
     ADDRINT target = (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR);
     DEBUG(3)
     std::cout << "Branch " << std::hex << bp << " to " << target << std::endl;
+    std::cout << "fast_recording " << fast_recording << std::endl;
     RecordBranch_unlocked(threadid, bp, target, ctxt);
     if (fast_recording) {
         auto ix = (getLogicalAddress((void *)bp));
@@ -2145,6 +2151,12 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
             name = KnobVDSO.Value();
         }
 
+        DEBUG(1)
+            std::cout << "[pintool] Image low:  0x " << std::hex << low
+                      << std::endl;
+        DEBUG(1)
+            std::cout << "[pintool] Image high: 0x " << std::hex << high
+                      << std::endl;
         imgfile << "Image:" << std::endl;
         imgfile << name << std::endl;
         imgfile << std::hex << low << ":" << high << std::endl;
@@ -2163,6 +2175,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         if (KnobMain.Value().compare("ALL") != 0) {
             RTN mainRtn = RTN_FindByName(img, KnobMain.Value().c_str());
             if (mainRtn.is_valid()) {
+                DEBUG(1) std::cout << "KnobMain is valid" << std::endl;
                 RTN_Open(mainRtn);
                 RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
                                IARG_THREAD_ID, IARG_ADDRINT,
@@ -2190,8 +2203,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                           << std::endl;
             } else {
                 DEBUG(1)
-                    std::cout << "[pintool] Instrumenting allocation"
-                              << std::endl;
+                std::cout << "[pintool] Instrumenting allocation" << std::endl;
                 if (KnobTrackHeap.Value()) {
 #if 0
           RTN mallocRtn = RTN_FindByName(img, MALLOC);
@@ -2260,8 +2272,8 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                     RTN callocRtn = RTN_FindByName(img, CALLOC);
                     if (callocRtn.is_valid()) {
                         DEBUG(1)
-                        std::cout << "[pintool] Calloc found in "
-                                  << IMG_Name(img) << std::endl;
+                        std::cout << "Calloc found in " << IMG_Name(img)
+                                  << std::endl;
                         RTN_Open(callocRtn);
                         RTN_InsertCall(
                             callocRtn, IPOINT_BEFORE,
@@ -2305,9 +2317,8 @@ BOOL instrumentMemIns(INS ins, bool fast_recording) {
         UINT32 memOperands = INS_MemoryOperandCount(ins);
         bool found = false;
         ADDRINT ip = INS_Address(ins);
-        DEBUG(1)
-        printf("[pintool] Adding %lx to instrumentation\n",
-               (long unsigned int)ip);
+        /* convert this Virtual IP to corresponding Memory Index here */
+        DEBUG(1) printf("Adding %lx to instrumentation\n", ip);
 
         for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
             if (INS_MemoryOperandIsRead(ins, memOp)) {
