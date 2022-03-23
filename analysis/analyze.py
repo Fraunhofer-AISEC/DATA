@@ -66,7 +66,6 @@ from datastub.leaks import (
     SPLeak,
     TraceQueue,
     Type,
-    MaskType,
     Leak,
 )
 import multiprocessing
@@ -319,9 +318,6 @@ def iterate_queue(files, fast=True):
                 assert e1.data != 0
                 assert e2.data != 0
                 assert queues[0].callstack == queues[1].callstack
-                if Type(e1.type) in (Type.HREAD, Type.HWRITE):
-                    e1.data &= 0x00000000FFFFFFFF
-                    e2.data &= 0x00000000FFFFFFFF
                 if e1.data != e2.data:
                     report_dataleak(queues[0].callstack, e1, e2)
             else:
@@ -332,11 +328,6 @@ def iterate_queue(files, fast=True):
                 # Mixture of heap and non-heap read/write. Maybe, heap tracking is imprecise
                 # We require that both elements are either (h)read or (h)write
                 debug(0, "Imprecise heap tracking @ %08x", (e1.ip))
-                # assert((e1.type | MaskType.HEAP.value) == (e2.type | MaskType.HEAP.value))
-                if (e1.type | MaskType.HEAP.value) > 0:
-                    e1.data &= 0x00000000FFFFFFFF
-                if (e2.type | MaskType.HEAP.value) > 0:
-                    e2.data &= 0x00000000FFFFFFFF
                 report_dataleak(queues[0].callstack, e1, e2)
             else:
                 # This should never happen. We miss some conditional branches in the code
