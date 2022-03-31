@@ -50,7 +50,7 @@ if ! [[ -f ${ENV}/.done ]]; then
   source ${ENV}/bin/activate
   $PIP install -U pip
   $PIP install -U setuptools
-  $PIP install click cffi ipaddress enum34 numpy scipy scikit-learn cryptography fs || exit 1
+  $PIP install click cffi natsort ipaddress enum34 numpy scipy scikit-learn cryptography fs || exit 1
   pushd kuipertest
   $PIP install . || exit 1
   popd
