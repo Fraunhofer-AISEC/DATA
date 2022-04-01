@@ -70,6 +70,9 @@ install: setup data.sh
 	cp data.sh ~/
 	@echo "Installation complete. To run data, source ~/data.sh"
 
+lint: setup data.sh
+	./lint.sh
+
 clean:
 	$(MAKE) clean -C pintool
 	$(MAKE) clean -C cryptolib/common
@@ -82,6 +85,8 @@ mrproper: clean
 	rm -f config.mk
 	rm -f .gitsetup
 	rm -f data.sh
+	rm -f black.log
+	rm -f flake8.log
 
 help:
 	@echo
@@ -89,6 +94,7 @@ help:
 	@echo
 	@echo "  make [setup] ........... Prepare the framework."
 	@echo "  make install ........... Install data.sh in HOME."
+	@echo "  make lint .............. Run code linting."
 	@echo "  make help .............. Show this text."
 	@echo "  make clean ............. Clean up lightweight."
 	@echo "  make mrproper .......... Clean up everything."
