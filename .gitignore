@@ -2,3 +2,5 @@ data.sh
 .gitsetup
 results
 test.log
+black.log
+flake8.log
