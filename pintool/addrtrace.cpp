@@ -1750,7 +1750,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
     //  PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = READ;
-    entry.ip = getLogicalAddress(ip);
+    entry.ip = ip; // getLogicalAddress(ip);
     entry.data = getLogicalAddress(addr);
     test_mem_heap(&entry);
     DEBUG(3)
@@ -1781,7 +1781,7 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_STACK_PTR) : 0;
     std::cout << " TOP from WRITE is " << target << std::endl;
-    entry.ip = getLogicalAddress(ip);
+    entry.ip = ip; // getLogicalAddress(ip);
     entry.data = getLogicalAddress(addr);
     test_mem_heap(&entry);
     DEBUG(3)
@@ -1809,7 +1809,7 @@ VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
         return;
     entry_t entry;
     entry.type = BRANCH;
-    entry.ip = getLogicalAddress((void *)ins);
+    entry.ip = (void *)ins; // getLogicalAddress((void *)ins);
     entry.data = getLogicalAddress((void *)target);
     record_entry(entry);
     DEBUG(4) std::cout << "Branch entry" << std::endl;
@@ -1833,13 +1833,14 @@ VOID RecordBranch(THREADID threadid, ADDRINT bbl, ADDRINT bp,
     ADDRINT target = (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR);
     DEBUG(3)
     std::cout << "Branch " << std::hex << bp << " to " << target << std::endl;
+    DEBUG(3)
     std::cout << "fast_recording " << fast_recording << std::endl;
     RecordBranch_unlocked(threadid, bp, target, ctxt);
     if (fast_recording) {
-        auto ix = (getLogicalAddress((void *)bp));
+        auto ix = (void *)bp; //(getLogicalAddress((void *)bp));
         uint64_t *li = static_cast<uint64_t *>(ix);
         uint64_t b = (uint64_t)li;
-        auto id = (getLogicalAddress((void *)target));
+        auto id = (void *)target; //(getLogicalAddress((void *)target));
         uint64_t *ld = static_cast<uint64_t *>(id);
         uint64_t t = (uint64_t)ld;
         leaks->cfleak_consume(b, t);
@@ -1885,7 +1886,7 @@ VOID RecordFunctionEntry_unlocked(THREADID threadid, ADDRINT ins, BOOL indirect,
     entry_t entry;
     entry.type = FUNC_ENTRY;
     // entry.ip = getLogicalAddress((void*) ((uintptr_t)ins), ctxt);
-    entry.ip = getLogicalAddress((void *)(ins));
+    entry.ip = (void *)ins; // getLogicalAddress((void *)(ins));
     if (entry.ip == nullptr) {
         entry.ip = (void *)ins;
     }
@@ -1925,10 +1926,10 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
         RecordFunctionEntry_unlocked(threadid, ins, indirect, target, ctxt);
     }
     if (fast_recording) {
-        auto ix = (getLogicalAddress((void *)ins));
+        auto ix = (void *)ins; //(getLogicalAddress((void *)ins));
         uint64_t *li = static_cast<uint64_t *>(ix);
         uint64_t i = (uint64_t)li;
-        auto id = (getLogicalAddress((void *)target));
+        auto id = (void *)target; //(getLogicalAddress((void *)target));
         uint64_t *ld = static_cast<uint64_t *>(id);
         uint64_t t = (uint64_t)ld;
         leaks->cfleak_consume(i, t);
@@ -1952,7 +1953,7 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
     entry.type = FUNC_EXIT;
     std::cout << " TOP from func EXIT is "
               << PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
-    entry.ip = getLogicalAddress((void *)((uintptr_t)ins));
+    entry.ip = (void *)ins; // getLogicalAddress((void *)((uintptr_t)ins));
     entry.data = getLogicalAddress((void *)((uintptr_t)target));
     DEBUG(2)
     std::cout << "Ret " << std::hex << ins << " to " << target << std::endl;
@@ -1981,10 +1982,10 @@ VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins,
         RecordFunctionExit_unlocked(threadid, ins, target, ctxt);
     }
     if (fast_recording) {
-        auto ix = (getLogicalAddress((void *)ins));
+        auto ix = (void *)ins; //(getLogicalAddress((void *)ins));
         uint64_t *li = static_cast<uint64_t *>(ix);
         uint64_t i = (uint64_t)li;
-        auto id = (getLogicalAddress((void *)target));
+        auto id = (void *)target; //(getLogicalAddress((void *)target));
         uint64_t *ld = static_cast<uint64_t *>(id);
         uint64_t t = (uint64_t)ld;
         leaks->cfleak_consume(i, t);
@@ -2312,7 +2313,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
     ADDRINT ip = INS_Address(ins);
 
     // ip = getLogicalAddress();
-    auto ix = (getLogicalAddress((void *)ip));
+    auto ix = (void *)ip; //(getLogicalAddress((void *)ip));
     uint64_t *la = static_cast<uint64_t *>(ix);
     // std::cout << la << " la is " << std::endl;
     uint64_t l = (uint64_t)la;
