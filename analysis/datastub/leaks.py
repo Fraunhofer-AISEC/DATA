@@ -759,6 +759,13 @@ class Leak:
         return clone
 
     def append(self, entry):
+        if len(self.entries) == 0:
+            debug(0, f"Empty Leak @{hex(self.ip)}")
+        if isinstance(entry, DataLeakEntry):
+            location = f"addr={hex(entry.addr)}"
+        else:
+            location = f"  bp={hex(entry.bp.ip)}"
+        debug(0, f"New entry for Leak @{hex(self.ip)}: {location} count={hex(entry.count)}")
         self.entries.merge(entry)
 
     def __hash__(self):
