@@ -1379,7 +1379,6 @@ def merge(picklefiles, syms, xml, pickle, strip, debug):
         else:
             leakB = loadpickle(p)
             merge_leaks(leakB)
-    merge_leaks(leakB)
     if strip:
         strip_evidences(leaks)
     if pickle is not None:
