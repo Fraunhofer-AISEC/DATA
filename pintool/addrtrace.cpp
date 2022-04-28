@@ -365,23 +365,23 @@ void *getLogicalAddress(void *virt_addr) {
         std::cout << " ERROR: dereferenced a nullptr " << std::endl;
         return nullptr;
     }
-
     // Is the Virtual Address in the Heap object address space?
     uint64_t *log_addr = static_cast<uint64_t *>(virt_addr);
     for (auto i : heap) {
-        if ((uint64_t)virt_addr >= i.base &&
-            (uint64_t)virt_addr <= (i.base + i.size)) {
-            logaddrfile << setw(25) << "HEAP"
-                        << " " << setw(25) << (uint64_t)virt_addr << " ";
-            log_addr = (uint64_t *)(getIndex(i.hash.substr(32, 8)) |
-                                    ((uint64_t)virt_addr - i.base));
-            logaddrfile << setw(25) << log_addr << " " << std::endl;
-            std::cout << " heap hash " << log_addr << std::endl;
-
-            return log_addr;
+        if (!i.used) {
+            continue;
         }
+        if ((uint64_t)virt_addr < i.base ||
+            (uint64_t)virt_addr >= (i.base + i.size)) {
+            continue;
+        }
+        auto offset = (uint64_t)virt_addr - i.base;
+        log_addr = (uint64_t *)(getIndex(allocmap[i.base].front()) | offset);
+        logaddrfile << setw(25) << "HEAP"
+                    << " " << setw(25) << (uint64_t)virt_addr << " " << setw(25)
+                    << log_addr << " " << std::endl;
+        return log_addr;
     }
-
     // Is the Virtual Address in the Heap address space,
     // but does not belong to any heap object already tracked?
     if ((uint64_t)virt_addr >= heapBaseAddr &&
