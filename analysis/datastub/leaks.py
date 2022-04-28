@@ -310,6 +310,9 @@ class MergeMap:
     def keys(self):
         return self.mymap.keys()
 
+    def values(self):
+        return self.mymap.values()
+
     def doprint(self, printer):
         for e in sorted_keys(self.mymap):
             self.mymap[e].doprint(printer)
