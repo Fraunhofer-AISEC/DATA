@@ -4,3 +4,5 @@ build
 __pycache__
 .project
 .pydevproject
+kuipertest/dist
+kuipertest/files.txt
