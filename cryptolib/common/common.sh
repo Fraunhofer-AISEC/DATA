@@ -827,22 +827,13 @@ function analyze_phase2 {
   abortonerror
   log_info "Phase2: Statistical tests completed."
   if ! [[ -e ${RESPICFILE_PHASE2} ]]; then
+    log_info "Phase2: Starting merging with random results."
+    cp ${PHASE2_RNDPIC} ${RESPICFILE_PHASE2}
     log_info "Phase2: Merging results."
-    if [[ "$PHASE2_FIXEDKEYS" -eq "1" ]]; then
-      FIRSTPIC="result_gen_1.pickle"
-      ln -s ${FIRSTPIC} ${RESPICFILE_PHASE2}
-      execute "${ANALYZE}" show "${FIRSTPIC}" --syms ${EXTSYMFILE} --xml ${RESXMLFILE_PHASE2} --debug ${DEBUG}
-    else
-      for i in $(seq 2 "$PHASE2_FIXEDKEYS"); do
-        PREVPIC=result_gen_$((i-1)).pickle
+    for i in $(seq 1 "$PHASE2_FIXEDKEYS"); do
         CURPIC=result_gen_${i}.pickle
-        if [[ "${i}" -eq "2" ]]; then
-          execute "${ANALYZE}" merge ${PREVPIC} "${CURPIC}" --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --debug ${DEBUG}
-        else
-          execute "${ANALYZE}" merge "${CURPIC}" ${RESPICFILE_PHASE2} --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --debug ${DEBUG}
-        fi
-      done
-    fi
+        execute "${ANALYZE}" merge "${CURPIC}" ${RESPICFILE_PHASE2} --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --debug ${DEBUG}
+    done
     log_info "Phase2: Merging completed."
   fi
   getelapsedtime
