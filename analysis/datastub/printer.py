@@ -35,9 +35,11 @@ from datastub.leaks import (
     DataLeak,
     CFLeakEntry,
     DataLeakEntry,
+    EvidenceEntry,
     LeakStatus,
     LibHierarchy,
     Library,
+    MergeMap,
     FunctionLeak,
     Type,
 )
@@ -180,24 +182,36 @@ class XmlLeakPrinter:
             self.doprint_generic(obj.status)
             self.endNode(CFLEAK)
         elif isinstance(obj, DataLeak):
+            obj_print = obj.entries
+            if len(obj.evidence) > 0:
+                obj_print = MergeMap(EvidenceEntry)
+                obj_print.merge(obj.evidence)
             self.startNode(DATALEAK)
-            self.doprint("", obj.ip, obj.entries if param1 else None)
+            self.doprint("", obj.ip, obj_print if param1 else None)
             self.doprint_generic(obj.status)
             if param1:
-                keys = sorted_keys(obj.entries)
+                keys = sorted_keys(obj_print)
                 if len(keys) > 0:
                     self.startNode("MIN")
-                    self.doprint("", obj.entries[keys[0]].addr, None)
+                    if obj_print.mytype is EvidenceEntry:
+                        self.doprint("", obj_print[keys[0]].__hash__(), None)
+                    else:
+                        self.doprint("", obj_print[keys[0]].addr, None)
                     self.endNode("MIN")
-                    if len(keys) >= 2:
-                        self.startNode("MAX")
-                        self.doprint("", obj.entries[keys[-1]].addr, None)
-                        self.endNode("MAX")
+                if len(keys) >= 2:
+                    self.startNode("MAX")
+                    if obj_print.mytype is EvidenceEntry:
+                        self.doprint("", obj_print[keys[-1]].__hash__(), None)
+                    else:
+                        self.doprint("", obj_print[keys[-1]].addr, None)
+                    self.endNode("MAX")
             self.endNode(DATALEAK)
         elif isinstance(obj, CFLeakEntry):
             self.doprint_line(obj.__str__())
         elif isinstance(obj, DataLeakEntry):
             self.doprint_line(obj.__str__())
+        elif isinstance(obj, EvidenceEntry):
+            self.doprint_line(obj.__str_printer__())
         elif isinstance(obj, LeakStatus):
             if len(obj.nsleak) > 0 or len(obj.spleak) > 0:
                 self.startNode("result " + str(obj))
