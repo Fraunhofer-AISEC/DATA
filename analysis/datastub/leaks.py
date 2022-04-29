@@ -969,6 +969,8 @@ class LibHierarchy:
 
 
 class DataLeak(Leak):
+    name = "DataLeak"
+
     def __init__(self, ip, entry=None):
         Leak.__init__(self, ip)
         self.entries = MergeMap(DataLeakEntry)
@@ -980,6 +982,8 @@ class DataLeak(Leak):
 
 
 class CFLeak(Leak):
+    name = "CFLeak"
+
     def __init__(self, ip, entry=None):
         Leak.__init__(self, ip)
         self.entries = MergeMap(CFLeakEntry)
