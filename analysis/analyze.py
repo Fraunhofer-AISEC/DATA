@@ -1170,6 +1170,7 @@ def collapse_leaks_recursive(
     leaks, collapsed, callstack, collapse_cfleaks, mask, filterarr
 ):
     for leak in leaks.dataleaks:
+        debug(1, "Collapse dleak %x", (leak.ip))
         if len(filterarr) > 0 and not match_filter(leak, filterarr):
             debug(1, "Filtering dleak %x", (leak.ip))
             continue
@@ -1179,6 +1180,7 @@ def collapse_leaks_recursive(
         else:
             collapsed.report_leak(callstack, n)
     for leak in leaks.cfleaks:
+        debug(1, "Collapse dleak %x", (leak.ip))
         if len(filterarr) > 0 and not match_filter(leak, filterarr):
             debug(1, "Filtering cfleak %x", (leak.ip))
             continue
