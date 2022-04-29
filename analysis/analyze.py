@@ -1519,7 +1519,7 @@ def generic(fixedpickle, randompickle, pickle, syms, xml, debug):
     fixed = loadpickle(fixedpickle)
     random = loadpickle(randompickle)
     generic_leakage_test(fixed, random)
-    leaks = random
+    leaks = fixed
     if pickle is not None:
         storepickle(pickle, leaks)
     if xml is not None:
