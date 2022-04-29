@@ -291,6 +291,10 @@ class MergeMap:
         self.mymap = {}
 
     def merge(self, newmap):
+        if isinstance(newmap, list):
+            for item in newmap:
+                self.merge(item)
+            return
         if not isinstance(newmap, self.mytype):
             debug(0, newmap.__class__)
             debug(
