@@ -370,58 +370,72 @@ def loadkeys(directory):
 
 
 def load_leaks(files, keys, source):
-    for i in range(0, len(files)):
-        with open(files[i], "rb") as f:
-            chunk = f.read()
-
-        if keys is not None:
-            with open(keys[i], "rb") as fk:
-                k = fk.read()
+    def read_and_advance(chunk, idx, format_type, length):
+        if format_type == "B":
+            byte_length = length
+        elif format_type == "Q":
+            byte_length = length * 8
         else:
-            k = None
+            assert False
+        format_character = f"<{length}{format_type}"
+        data = struct.unpack(format_character, chunk[idx : idx + byte_length])
+        return (data, idx + byte_length)
+
+    if keys is None:
+        assert False
+
+    origin = "fixed" if len(set(keys)) == 1 else "random"
+
+    key_index = 0
+    if origin == "fixed":
+        # This parsing requires a naming scheme like: `key1.key`
+        key_index = int(set(keys).pop().replace("key", "").replace(".", ""))
+
+    for (trace_file, key_file) in zip(files, keys):
+        with open(trace_file, "rb") as tf, open(key_file, "rb") as kf:
+            trace = tf.read()
+            key = kf.read()
 
         idx = 0
         cs = CallStack()
-        while idx < len(chunk):
-            typ = struct.unpack("B", chunk[idx : idx + 1])[0]
-            idx += 1
-            if typ == Type.FUNC_ENTRY.value:
-                (caller, callee) = struct.unpack("<QQ", chunk[idx : idx + 16])
-                idx += 16
-                debug(2, "FUNC_ENTRY %x->%x", (caller, callee))
-                cs.docall_context(Context(caller, callee))
-            elif typ == Type.FUNC_EXIT.value:
+        while idx < len(trace):
+            (data, idx) = read_and_advance(trace, idx, "B", 1)
+            typ = data[0]
+
+            if typ not in [
+                Type.FUNC_ENTRY.value,
+                Type.FUNC_EXIT.value,
+                Type.CFLEAK.value,
+                Type.DLEAK.value,
+            ]:
+                debug(0, f"Unknown type: {typ}")
+                assert False
+
+            if typ == Type.FUNC_EXIT.value:
                 debug(2, "FUNC_EXIT")
                 cs.doreturn_context()
-            elif typ == Type.CFLEAK.value:
-                (ip, no) = struct.unpack("<QQ", chunk[idx : idx + 16])
-                idx += 16
-                debug(2, "CFLEAK %x (%d)", (ip, no))
-                evidence = struct.unpack("<" + "Q" * no, chunk[idx : idx + 8 * no])
-                debug(2, str(evidence))
-                idx += no * 8
-                leak = CFLeak(ip)
-                ee = EvidenceEntry(evidence, k, source)
-                leak.add_evidence(ee)
-                if debuglevel(3):
-                    cs.doprint_reverse()
-                leaks.report_leak(cs, leak, False)
-            elif typ == Type.DLEAK.value:
-                (ip, no) = struct.unpack("<QQ", chunk[idx : idx + 16])
-                idx += 16
-                debug(2, "DLEAK %x (%d)", (ip, no))
-                evidence = struct.unpack("<" + "Q" * no, chunk[idx : idx + 8 * no])
-                debug(2, str(evidence))
-                idx += no * 8
-                leak = DataLeak(ip)
-                ee = EvidenceEntry(evidence, k, source)
-                leak.add_evidence(ee)
-                if debuglevel(3):
-                    cs.doprint_reverse()
-                leaks.report_leak(cs, leak, False)
-            else:
-                debug(0, "Unknown type")
-                assert False
+                continue
+
+            (data, idx) = read_and_advance(trace, idx, "Q", 2)
+
+            if typ == Type.FUNC_ENTRY.value:
+                (caller, callee) = data
+                debug(2, "FUNC_ENTRY %x->%x", (caller, callee))
+                cs.docall_context(Context(caller, callee))
+                continue
+
+            (ip, no) = data
+            leak = CFLeak(ip) if typ == Type.CFLEAK.value else DataLeak(ip)
+            debug(2, f"{leak.name} {hex(ip)} ({no})")
+
+            (evidence, idx) = read_and_advance(trace, idx, "Q", no)
+            debug(2, str(evidence))
+
+            ee = EvidenceEntry(evidence, key, source, origin, key_index)
+            leak.add_evidence(ee)
+            if debuglevel(3):
+                cs.doprint_reverse()
+            leaks.report_leak(cs, leak, False)
 
 
 """
