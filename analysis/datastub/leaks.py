@@ -724,17 +724,58 @@ class EvidenceSource(Enum):
 
 
 class EvidenceEntry:
-    def __init__(self, entries, evkey, evsource):
+    # EvidenceEntry class attributes
+    # entries:  For DLeak: Access address; For CFLeak:
+    # key:      Key for which this EE was recorded.
+    # source:
+    # count:    If EEs are merged, duplicates are collapsed and count is increased.
+    def __init__(self, entries, key, source, origin, key_index):
         self.entries = entries
-        self.key = evkey
-        self.source = evsource
+        self.key = key
+        self.source = source
+        self.origin = origin
+        self.key_index = key_index
+        self.count = 1
+
+    def element(self):
+        entry = -1
+        if len(self.entries) != 0:
+            entry = self.entries[0]
+        return (self.key_index, entry)
+
+    def __hash__(self):
+        return hash(self.element())
+
+    def __eq__(self, other):
+        return self.element() == other.element()
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        return self.element() < other.element()
+
+    def merge(self, newentry):
+        self.count += newentry.count
+
+    def __str_printer__(self):
+        entry = "       empty"
+        if len(self.entries) != 0:
+            entry = format(self.entries[0], 'x')
+        string = f"{entry}: {self.count}"
+        return string
 
     def __str__(self):
+        # TODO Added assert to find out, if used anywhere in the code base
+        assert False
         string = "Key: " + str(self.key) + "\n"
         string += "Source: " + str(self.source) + "\n"
         for e in self.entries:
             string += str.format("%x " % e)
         return string
+
+    def doprint(self, printer):
+        printer.doprint_generic(self)
 
 
 """
