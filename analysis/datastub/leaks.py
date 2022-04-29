@@ -782,6 +782,7 @@ class Leak:
 
     def merge(self, newleak):
         assert self.ip == newleak.ip
+        debug(1, "Merge Leaks into one.")
         for e in newleak.entries:
             self.entries.merge(newleak.entries[e])
         self.status.merge(newleak.status)
@@ -789,6 +790,7 @@ class Leak:
 
     def add_evidence(self, ev):
         assert isinstance(ev, EvidenceEntry)
+        debug(1, f"New evidence for Leak @{hex(self.ip)}")
         self.evidence.append(ev)
 
     def __str__(self):
