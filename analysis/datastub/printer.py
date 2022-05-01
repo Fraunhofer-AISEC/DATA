@@ -25,6 +25,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
 import struct
+from collections import Counter
+from copy import deepcopy
+
 from datastub.utils import debug
 from datastub.SymbolInfo import SymbolInfo
 from datastub.leaks import (
@@ -53,6 +56,7 @@ DATALEAKS = "dataleaks"
 CFLEAKS = "cfleaks"
 DATALEAK = "leak"
 CFLEAK = "leak"
+LEAK = "leak"
 
 """
 *************************************************************************
@@ -176,36 +180,45 @@ class XmlLeakPrinter:
                 obj.children[k].doprint(self, param1)
             if obj.ctxt is not None:
                 self.endNode(CONTEXT)
-        elif isinstance(obj, CFLeak):
-            self.startNode(CFLEAK)
-            self.doprint("", obj.ip, obj.entries if param1 else None)
-            self.doprint_generic(obj.status)
-            self.endNode(CFLEAK)
-        elif isinstance(obj, DataLeak):
-            obj_print = obj.entries
+        elif isinstance(obj, CFLeak) or isinstance(obj, DataLeak):
+            self.startNode(LEAK)
+            self.doprint("", obj.ip, None)
+
+            self.startNode("entries")
+            obj.entries.doprint(self)
+            self.endNode("entries")
+
             if len(obj.evidence) > 0:
-                obj_print = MergeMap(EvidenceEntry)
-                obj_print.merge(obj.evidence)
-            self.startNode(DATALEAK)
-            self.doprint("", obj.ip, obj_print if param1 else None)
+                self.startNode("evidences")
+
+                key_indxs = [e.key_index for e in obj.evidence]
+                evidences = [[] for _ in range(max(key_indxs) + 1)]
+                for (idx, key_indx) in enumerate(key_indxs):
+                    evidences[key_indx].append(obj.evidence[idx])
+
+                for (idx, evidence) in enumerate(evidences):
+                    if len(evidence) == 0:
+                        continue
+                    evidence = deepcopy(evidence)
+
+                    obj_print = MergeMap(EvidenceEntry)
+                    obj_print.merge(evidence)
+
+                    node_plain = "phase2"
+                    if idx == 0:
+                        node = f"{node_plain} origin='random'"
+                    else:
+                        key = evidence[0].key.decode()
+                        node = f"{node_plain} origin='fixed' key='{key}'"
+                    self.startNode(node)
+                    obj_print.doprint(self)
+                    self.endNode(node_plain)
+
+                self.endNode("evidences")
+
             self.doprint_generic(obj.status)
-            if param1:
-                keys = sorted_keys(obj_print)
-                if len(keys) > 0:
-                    self.startNode("MIN")
-                    if obj_print.mytype is EvidenceEntry:
-                        self.doprint("", obj_print[keys[0]].__hash__(), None)
-                    else:
-                        self.doprint("", obj_print[keys[0]].addr, None)
-                    self.endNode("MIN")
-                if len(keys) >= 2:
-                    self.startNode("MAX")
-                    if obj_print.mytype is EvidenceEntry:
-                        self.doprint("", obj_print[keys[-1]].__hash__(), None)
-                    else:
-                        self.doprint("", obj_print[keys[-1]].addr, None)
-                    self.endNode("MAX")
-            self.endNode(DATALEAK)
+
+            self.endNode(LEAK)
         elif isinstance(obj, CFLeakEntry):
             self.doprint_line(obj.__str__())
         elif isinstance(obj, DataLeakEntry):
