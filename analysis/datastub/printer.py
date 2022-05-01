@@ -215,7 +215,7 @@ class XmlLeakPrinter:
         elif isinstance(obj, LeakStatus):
             if len(obj.nsleak) > 0 or len(obj.spleak) > 0:
                 self.startNode("result " + str(obj))
-                for n in sorted(list(obj.nsleak)):
+                for n in sorted(obj.nsleak):
                     self.startEndNode("generic", str(n))
                 for n in sorted(list(obj.spleak)):
                     self.startEndNode("specific", str(n))
