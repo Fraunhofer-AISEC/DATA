@@ -425,13 +425,13 @@ class LeakStatus:
         self.spperformed = (
             set()
         )  # contains targets, if specific leakage tests were performed
-        self.nsleak = set()  # results of generic leakage-tests, if any
+        self.nsleak = list()  # results of generic leakage-tests, if any
         self.spleak = set()  # results of specific leakage-tests, if any
 
     def merge(self, other):
         self.nsperformed |= other.nsperformed
         self.spperformed = self.spperformed.union(other.spperformed)
-        self.nsleak = self.nsleak.union(other.nsleak)
+        self.nsleak += other.nsleak
         self.spleak = self.spleak.union(other.spleak)
 
     def is_generic_tested(self):
