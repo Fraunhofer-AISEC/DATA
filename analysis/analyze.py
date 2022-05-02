@@ -71,7 +71,6 @@ from datastub.leaks import (
 import multiprocessing
 
 nospleak = None
-nonsleak = NSLeak(NSPType.Noleak)
 
 """
 *************************************************************************
@@ -496,6 +495,15 @@ def generic_leakage_test(fixed, random):
         else:
             cursym = None
 
+        # Parse key_index and key
+        key_index = set(e.key_index for e in fl.evidence)
+        key = set(e.key for e in fl.evidence)
+        ## Check if `fl` only contains fixed traces
+        if len(key_index) != 1 or len(key) != 1:
+            assert False
+        key_index = key_index.pop()
+        key = key.pop()
+
         # always test
         leaktype = "dataleak" if isinstance(fl, DataLeak) else "cfleak"
         msgwarning += "Testing %s@%x...\n" % (leaktype, fl.ip)
@@ -640,8 +648,8 @@ def generic_leakage_test(fixed, random):
                 R = D > L
                 if R:
                     noleakdetected = False
-                    cfl = NSLeak(NSPType.Type1a, None, D, L, 0.9999, R)
-                    crl = NSLeak(NSPType.Type1a, None, D, L, 0.9999, R)
+                    cfl = NSLeak(NSPType.Type1a, key_index, key, None, D, L, 0.9999, R, key_index, key)
+                    crl = NSLeak(NSPType.Type1a, key_index, key, None, D, L, 0.9999, R, key_index, key)
                     fl.status.nsleak += [cfl]
                     rl.status.nsleak += [crl]
                     msgleak += "    [Test1a] -- %s\n" % str(cfl)
@@ -694,8 +702,8 @@ def generic_leakage_test(fixed, random):
                 R = D > L
                 if R:
                     noleakdetected = False
-                    cfl = NSLeak(NSPType.Type1b, None, D, L, 0.9999, R)
-                    crl = NSLeak(NSPType.Type1b, None, D, L, 0.9999, R)
+                    cfl = NSLeak(NSPType.Type1b, key_index, key, None, D, L, 0.9999, R, key_index, key)
+                    crl = NSLeak(NSPType.Type1b, key_index, key, None, D, L, 0.9999, R, key_index, key)
                     fl.status.nsleak += [cfl]
                     rl.status.nsleak += [crl]
                     msgleak += "    [Test1b] -- %s\n" % str(cfl)
@@ -748,18 +756,18 @@ def generic_leakage_test(fixed, random):
                 R = D > L
                 if R:
                     noleakdetected = False
-                    cfl = NSLeak(NSPType.Type2, None, D, L, 0.9999, R)
-                    crl = NSLeak(NSPType.Type2, None, D, L, 0.9999, R)
+                    cfl = NSLeak(NSPType.Type2, key_index, key, None, D, L, 0.9999, R)
+                    crl = NSLeak(NSPType.Type2, key_index, key, None, D, L, 0.9999, R)
                     fl.status.nsleak += [cfl]
                     rl.status.nsleak += [crl]
                     msgleak += "    [Test2]  -- %s\n" % str(cfl)
 
         # add noleak element to document that no leakage was found
         if noleakdetected:
-            fl.status.nsleak += [nonsleak]
-            rl.status.nsleak += [nonsleak]
+            fl.status.nsleak += [NSLeak(NSPType.Noleak, key_index, key)]
+            rl.status.nsleak += [NSLeak(NSPType.Noleak, key_index, key)]
             debug(1, "Testing %s@%x...", (leaktype, fl.ip))
-            debug(1, "    %s", (str(nonsleak)))
+            # debug(1, "    %s", (str(nonsleak)))
         else:
             debug(1, msgleak.rstrip())
 
