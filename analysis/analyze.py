@@ -1251,6 +1251,29 @@ def collapse_cfleaks(leaks, collapse_cfleaks, granularity, resfilter=""):
 """
 
 """
+Strip all entries from leaks
+"""
+
+
+def strip_entries(leaks):
+    for leak in leaks.dataleaks:
+        if len(leak.entries) > 0:
+            debug(3, "Removing %d entries" % (len(leak.entries)))
+        leak.entries = []
+    for leak in leaks.cfleaks:
+        if len(leak.entries) > 0:
+            debug(3, "Removing %d entries" % (len(leak.entries)))
+        leak.entries = []
+    for k in leaks.children:
+        child = leaks.children[k]
+        strip_entries(child)
+
+
+"""
+*************************************************************************
+"""
+
+"""
 Strip all evidences from leaks
 """
 
@@ -1377,9 +1400,10 @@ Merge leakage from two pickle files.
 @click.option("--syms", default=None, type=click.File("r"))
 @click.option("--xml", default=None, type=click.File("w"))
 @click.option("--pickle", default=None, type=str)
+@click.option("--strip_entry", default=False, type=bool)
 @click.option("--strip", default=False, type=bool)
 @click.option("--debug", default=-1, type=int)
-def merge(picklefiles, syms, xml, pickle, strip, debug):
+def merge(picklefiles, syms, xml, pickle, strip, strip_entry, debug):
     global printer
     global leaks
     set_debuglevel(debug)
@@ -1397,6 +1421,8 @@ def merge(picklefiles, syms, xml, pickle, strip, debug):
         else:
             leakB = loadpickle(p)
             merge_leaks(leakB)
+    if strip_entry:
+        strip_entries(leaks)
     if strip:
         strip_evidences(leaks)
     if pickle is not None:
