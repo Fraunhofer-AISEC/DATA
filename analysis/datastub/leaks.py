@@ -619,6 +619,8 @@ class NSLeak(object):
         return not self.__eq__(other)
 
     def __hash__(self):
+        if self.isleak is False:
+            return hash(self.nstype)
         return hash(tuple(sorted(self.__dict__.items())))
 
     def __str__(self):
