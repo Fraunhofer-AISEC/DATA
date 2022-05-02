@@ -589,13 +589,17 @@ class NSLeak(object):
         return self.limit
 
     def __lt__(self, other):
-        if (
+        if self.isleak is False and other.isleak is True:
+            return True
+        elif self.isleak is True and other.isleak is False:
+            return False
+        elif self.isleak is False and other.isleak is False:
+            return self.nstype < other.nstype
+        elif (
             (self.nstype in [NSPType.Type1a, NSPType.Type1b])
             and (other.nstype in [NSPType.Type1a, NSPType.Type1b])
         ) or ((self.nstype in [NSPType.Type2]) and (other.nstype in [NSPType.Type2])):
             return self.teststat < other.teststat
-        else:
-            return self.nstype < other.nstype
 
     def __eq__(self, other):
         if (
