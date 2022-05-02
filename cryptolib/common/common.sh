@@ -832,7 +832,7 @@ function analyze_phase2 {
     log_info "Phase2: Merging results."
     for i in $(seq 1 "$PHASE2_FIXEDKEYS"); do
         CURPIC=result_gen_${i}.pickle
-        execute "${ANALYZE}" merge "${CURPIC}" ${RESPICFILE_PHASE2} --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --debug ${DEBUG}
+        execute "${ANALYZE}" merge "${CURPIC}" ${RESPICFILE_PHASE2} --syms ${EXTSYMFILE} --pickle ${RESPICFILE_PHASE2} --xml ${RESXMLFILE_PHASE2} --strip_entry 1 --debug ${DEBUG}
     done
     log_info "Phase2: Merging completed."
   fi
