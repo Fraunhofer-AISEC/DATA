@@ -486,7 +486,6 @@ def generic_leakage_test(fixed, random):
         fl = fixedleaks[i]
         rl = randomleaks[i]
         assert fl.ip == rl.ip
-        noleakdetected = True
         msgwarning = ""
         msgleak = ""
         cursym = SymbolInfo.lookup(fl.ip)
@@ -604,6 +603,7 @@ def generic_leakage_test(fixed, random):
         # Test1a: number of addresses
         ######
 
+        cfl = NSLeak(NSPType.Type1a, key_index, key)
         # sanity check
         cont = False
         if len(fnum) == 0:
@@ -646,18 +646,15 @@ def generic_leakage_test(fixed, random):
                 )
                 assert not (numpy.isnan(D) or numpy.isnan(L))
                 R = D > L
-                if R:
-                    noleakdetected = False
-                    cfl = NSLeak(NSPType.Type1a, key_index, key, None, D, L, 0.9999, R, key_index, key)
-                    crl = NSLeak(NSPType.Type1a, key_index, key, None, D, L, 0.9999, R, key_index, key)
-                    fl.status.nsleak += [cfl]
-                    rl.status.nsleak += [crl]
-                    msgleak += "    [Test1a] -- %s\n" % str(cfl)
+                cfl = NSLeak(NSPType.Type1a, key_index, key, None, D, L, 0.9999, R)
+        fl.status.nsleak += [cfl]
+        msgleak += "    [Test1a] -- %s\n" % str(cfl)
 
         ######
         # Test1b: number of unique addresses
         ######
 
+        cfl = NSLeak(NSPType.Type1b, key_index, key)
         # sanity check
         cont = False
         if len(fnum_uniq) == 0:
@@ -700,18 +697,15 @@ def generic_leakage_test(fixed, random):
                 )
                 assert not (numpy.isnan(D) or numpy.isnan(L))
                 R = D > L
-                if R:
-                    noleakdetected = False
-                    cfl = NSLeak(NSPType.Type1b, key_index, key, None, D, L, 0.9999, R, key_index, key)
-                    crl = NSLeak(NSPType.Type1b, key_index, key, None, D, L, 0.9999, R, key_index, key)
-                    fl.status.nsleak += [cfl]
-                    rl.status.nsleak += [crl]
-                    msgleak += "    [Test1b] -- %s\n" % str(cfl)
+                cfl = NSLeak(NSPType.Type1b, key_index, key, None, D, L, 0.9999, R)
+        fl.status.nsleak += [cfl]
+        msgleak += "    [Test1b] -- %s\n" % str(cfl)
 
         ######
         # Test2: number of accesses per address
         ######
 
+        cfl = NSLeak(NSPType.Type2, key_index, key)
         # sanity check
         cont = False
         if len(fdic.keys()) == 0:
@@ -754,22 +748,11 @@ def generic_leakage_test(fixed, random):
                 )
                 assert not (numpy.isnan(D) or numpy.isnan(L))
                 R = D > L
-                if R:
-                    noleakdetected = False
-                    cfl = NSLeak(NSPType.Type2, key_index, key, None, D, L, 0.9999, R)
-                    crl = NSLeak(NSPType.Type2, key_index, key, None, D, L, 0.9999, R)
-                    fl.status.nsleak += [cfl]
-                    rl.status.nsleak += [crl]
-                    msgleak += "    [Test2]  -- %s\n" % str(cfl)
+                cfl = NSLeak(NSPType.Type2, key_index, key, None, D, L, 0.9999, R)
+        fl.status.nsleak += [cfl]
+        msgleak += "    [Test2]  -- %s\n" % str(cfl)
 
-        # add noleak element to document that no leakage was found
-        if noleakdetected:
-            fl.status.nsleak += [NSLeak(NSPType.Noleak, key_index, key)]
-            rl.status.nsleak += [NSLeak(NSPType.Noleak, key_index, key)]
-            debug(1, "Testing %s@%x...", (leaktype, fl.ip))
-            # debug(1, "    %s", (str(nonsleak)))
-        else:
-            debug(1, msgleak.rstrip())
+        debug(1, msgleak.rstrip())
 
         # progress
         if len(fixedleaks) > 100:
