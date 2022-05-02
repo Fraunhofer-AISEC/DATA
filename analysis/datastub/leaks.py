@@ -549,7 +549,7 @@ class NSPType(Enum):
 
 class NSLeak(object):
     def __init__(
-        self, nstype, addr=0, statistic=0.0, limit=0.0, conf=0.0, isleak=False
+        self, nstype, key_index, key, addr=0, statistic=0.0, limit=0.0, conf=0.0, isleak=False
     ):
         self.nstype = nstype
         self.address = addr
@@ -557,6 +557,9 @@ class NSLeak(object):
         self.limit = limit
         self.confidence = conf
         self.isleak = isleak
+
+        self.key_index = key_index
+        self.key = key
 
     def normalized(self):
         if not self.isleak or self.nstype == NSPType.Noleak:
@@ -587,6 +590,7 @@ class NSLeak(object):
             and (self.limit == other.limit)
             and (self.confidence == other.confidence)
             and (self.isleak == other.isleak)
+            and (self.key_index == self.key_index)
         ):
             return True
         else:
@@ -610,10 +614,12 @@ class NSLeak(object):
                 source = "H_addr"
             else:
                 source = "unknown"
-            return str.format(
-                "result='leak' source='%s' kuiper='%f' significance='%f' confidence='%f'"
-                % (source, self.teststat, self.limit, self.confidence)
+            string = (
+                f"result='leak' source='{source}' kuiper='{self.teststat:.4f}' "
+                f"significance='{self.limit:.4f}' confidence='{self.confidence:.4f}' "
+                f"key='{self.key.decode()}'"
             )
+            return string
 
 
 """
