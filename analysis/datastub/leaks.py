@@ -623,22 +623,20 @@ class NSLeak(object):
 
     def __str__(self):
         if self.nstype == NSPType.Noleak:
-            return str.format("result='none'")
-        else:
-            if self.nstype == NSPType.Type1a:
-                source = "H_pos(a)"
-            elif self.nstype == NSPType.Type1b:
-                source = "H_pos(b)"
-            elif self.nstype == NSPType.Type2:
-                source = "H_addr"
-            else:
-                source = "unknown"
-            string = (
-                f"result='leak' source='{source}' kuiper='{self.teststat:.4f}' "
-                f"significance='{self.limit:.4f}' confidence='{self.confidence:.4f}' "
-                f"key='{self.key.decode()}'"
-            )
+            assert False
+
+        result = "leak" if self.isleak else "none"
+        string = f"result='{result}' source='H_{str(self.nstype)}'"
+
+        if not self.isleak:
             return string
+
+        string += (
+            f" kuiper='{self.teststat:.4f}' "
+            f"significance='{self.limit:.4f}' confidence='{self.confidence:.4f}' "
+            f"key='{self.key.decode()}'"
+        )
+        return string
 
 
 """
