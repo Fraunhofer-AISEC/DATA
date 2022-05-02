@@ -466,6 +466,191 @@ def extract_leakdiff_to_array(A, LeaksOnly=False):
 *************************************************************************
 """
 
+def generic_leakage_test_gather_information(leak):
+    num = {}
+    num_uniq = {}
+    dic = {}
+
+    for e in leak.evidence:
+        if len(e.entries) == 0:
+            continue
+        if e.source != EvidenceSource.Generic.value:
+            continue
+
+        # all entries
+        selentries = e.entries
+
+        # Type1a/b
+        cn = len(selentries)
+        cnu = len(set(selentries))
+        if cn in num.keys():
+            num[cn] += 1
+        else:
+            num[cn] = 1
+        if cnu in num_uniq.keys():
+            num_uniq[cnu] += 1
+        else:
+            num_uniq[cnu] = 1
+
+        # Type2
+        counts = Counter(selentries)
+        for c in counts.keys():
+            if c in dic:
+                dic[c] += counts[c]
+            else:
+                dic[c] = counts[c]
+    return (num, num_uniq, dic)
+
+
+def generic_leakage_test1a(msgleak, fl, key_index, key, fnum, rnum):
+    cfl = NSLeak(NSPType.Type1a, key_index, key)
+    # sanity check
+    cont = False
+    if len(fnum) == 0:
+        cont = True
+    if len(rnum) == 0:
+        cont = True
+
+    # test
+    if not cont:
+        # solve entry mismatches
+        fset = set(fnum.keys())
+        rset = set(rnum.keys())
+        if fset != rset:
+            for s in list(fset - rset):
+                rnum[s] = 0
+            for s in list(rset - fset):
+                fnum[s] = 0
+
+        # compile histograms
+        fhist = numpy.array(
+            [fnum[j] for j in sorted(fnum.keys())], dtype=numpy.float32
+        )
+        rhist = numpy.array(
+            [rnum[j] for j in sorted(rnum.keys())], dtype=numpy.float32
+        )
+        fhist_len = numpy.int32(numpy.sum(fhist))
+        rhist_len = numpy.int32(numpy.sum(rhist))
+
+        # sanity check
+        cont = False
+        if fhist_len < 30:
+            cont = True
+        if rhist_len < 30:
+            cont = True
+
+        # stat test
+        if not cont:
+            (D, L) = kuipertest.kp_histogram(
+                fhist, rhist, fhist_len, rhist_len, 0.9999
+            )
+            assert not (numpy.isnan(D) or numpy.isnan(L))
+            R = D > L
+            cfl = NSLeak(NSPType.Type1a, key_index, key, None, D, L, 0.9999, R)
+    fl.status.nsleak += [cfl]
+    msgleak += "    [Test1a] -- %s\n" % str(cfl)
+    return (msgleak, fl)
+
+
+def generic_leakage_test1b(msgleak, fl, key_index, key, fnum_uniq, rnum_uniq):
+    cfl = NSLeak(NSPType.Type1b, key_index, key)
+    # sanity check
+    cont = False
+    if len(fnum_uniq) == 0:
+        cont = True
+    if len(rnum_uniq) == 0:
+        cont = True
+
+    # test
+    if not cont:
+        # solve entry mismatches
+        fset = set(fnum_uniq.keys())
+        rset = set(rnum_uniq.keys())
+        if fset != rset:
+            for s in list(fset - rset):
+                rnum_uniq[s] = 0
+            for s in list(rset - fset):
+                fnum_uniq[s] = 0
+
+        # compile histograms
+        fhist = numpy.array(
+            [fnum_uniq[j] for j in sorted(fnum_uniq.keys())], dtype=numpy.float32
+        )
+        rhist = numpy.array(
+            [rnum_uniq[j] for j in sorted(rnum_uniq.keys())], dtype=numpy.float32
+        )
+        fhist_len = numpy.int32(numpy.sum(fhist))
+        rhist_len = numpy.int32(numpy.sum(rhist))
+
+        # sanity check
+        cont = False
+        if fhist_len < 30:
+            cont = True
+        if rhist_len < 30:
+            cont = True
+
+        # stat test
+        if not cont:
+            (D, L) = kuipertest.kp_histogram(
+                fhist, rhist, fhist_len, rhist_len, 0.9999
+            )
+            assert not (numpy.isnan(D) or numpy.isnan(L))
+            R = D > L
+            cfl = NSLeak(NSPType.Type1b, key_index, key, None, D, L, 0.9999, R)
+    fl.status.nsleak += [cfl]
+    msgleak += "    [Test1b] -- %s\n" % str(cfl)
+    return (msgleak, fl)
+
+
+def generic_leakage_test2(msgleak, fl, key_index, key, fdic, rdic):
+    cfl = NSLeak(NSPType.Type2, key_index, key)
+    # sanity check
+    cont = False
+    if len(fdic.keys()) == 0:
+        cont = True
+    if len(rdic.keys()) == 0:
+        cont = True
+
+    # test
+    if not cont:
+        # solve entry mismatches
+        fset = set(fdic.keys())
+        rset = set(rdic.keys())
+        if fset != rset:
+            for s in list(fset - rset):
+                rdic[s] = 0
+            for s in list(rset - fset):
+                fdic[s] = 0
+
+        # compile histograms
+        fhist = numpy.array(
+            [fdic[j] for j in sorted(fdic.keys())], dtype=numpy.float32
+        )
+        rhist = numpy.array(
+            [rdic[j] for j in sorted(rdic.keys())], dtype=numpy.float32
+        )
+        fhist_len = numpy.int32(numpy.sum(fhist))
+        rhist_len = numpy.int32(numpy.sum(rhist))
+
+        # sanity check
+        cont = False
+        if fhist_len < 30:
+            cont = True
+        if rhist_len < 30:
+            cont = True
+
+        # stat test
+        if not cont:
+            (D, L) = kuipertest.kp_histogram(
+                fhist, rhist, fhist_len, rhist_len, 0.9999
+            )
+            assert not (numpy.isnan(D) or numpy.isnan(L))
+            R = D > L
+            cfl = NSLeak(NSPType.Type2, key_index, key, None, D, L, 0.9999, R)
+    fl.status.nsleak += [cfl]
+    msgleak += "    [Test2]  -- %s\n" % str(cfl)
+    return (msgleak, fl)
+
 
 def generic_leakage_test(fixed, random):
     fixedleaks = extract_leakdiff_to_array(fixed)
@@ -522,73 +707,8 @@ def generic_leakage_test(fixed, random):
             debug(0, msgwarning.rstrip())
             continue
 
-        # init
-        fnum = {}
-        fnum_uniq = {}
-        rnum = {}
-        rnum_uniq = {}
-        fdic = {}
-        rdic = {}
-
-        # gather information (fixed)
-        for e in fl.evidence:
-            if len(e.entries) == 0:
-                continue
-            if e.source != EvidenceSource.Generic.value:
-                continue
-
-            # all entries
-            selentries = e.entries
-
-            # Type1a/b
-            cn = len(selentries)
-            cnu = len(set(selentries))
-            if cn in fnum.keys():
-                fnum[cn] += 1
-            else:
-                fnum[cn] = 1
-            if cnu in fnum_uniq.keys():
-                fnum_uniq[cnu] += 1
-            else:
-                fnum_uniq[cnu] = 1
-
-            # Type2
-            counts = Counter(selentries)
-            for c in counts.keys():
-                if c in fdic:
-                    fdic[c] += counts[c]
-                else:
-                    fdic[c] = counts[c]
-
-        # gather information (random)
-        for e in rl.evidence:
-            if len(e.entries) == 0:
-                continue
-            if e.source != EvidenceSource.Generic.value:
-                continue
-
-            # all entries
-            selentries = e.entries
-
-            # Type1a/b
-            cn = len(selentries)
-            cnu = len(set(selentries))
-            if cn in rnum.keys():
-                rnum[cn] += 1
-            else:
-                rnum[cn] = 1
-            if cnu in rnum_uniq.keys():
-                rnum_uniq[cnu] += 1
-            else:
-                rnum_uniq[cnu] = 1
-
-            # Type2
-            counts = Counter(selentries)
-            for c in counts.keys():
-                if c in rdic:
-                    rdic[c] += counts[c]
-                else:
-                    rdic[c] = counts[c]
+        (fnum, fnum_uniq, fdic) = generic_leakage_test_gather_information(fl)
+        (rnum, rnum_uniq, rdic) = generic_leakage_test_gather_information(rl)
 
         # sanity check
         if (
@@ -599,158 +719,14 @@ def generic_leakage_test(fixed, random):
         ):
             continue
 
-        ######
         # Test1a: number of addresses
-        ######
+        (msgleak, fl) = generic_leakage_test1a(msgleak, fl, key_index, key, fnum, rnum)
 
-        cfl = NSLeak(NSPType.Type1a, key_index, key)
-        # sanity check
-        cont = False
-        if len(fnum) == 0:
-            cont = True
-        if len(rnum) == 0:
-            cont = True
-
-        # test
-        if not cont:
-            # solve entry mismatches
-            fset = set(fnum.keys())
-            rset = set(rnum.keys())
-            if fset != rset:
-                for s in list(fset - rset):
-                    rnum[s] = 0
-                for s in list(rset - fset):
-                    fnum[s] = 0
-
-            # compile histograms
-            fhist = numpy.array(
-                [fnum[j] for j in sorted(fnum.keys())], dtype=numpy.float32
-            )
-            rhist = numpy.array(
-                [rnum[j] for j in sorted(rnum.keys())], dtype=numpy.float32
-            )
-            fhist_len = numpy.int32(numpy.sum(fhist))
-            rhist_len = numpy.int32(numpy.sum(rhist))
-
-            # sanity check
-            cont = False
-            if fhist_len < 30:
-                cont = True
-            if rhist_len < 30:
-                cont = True
-
-            # stat test
-            if not cont:
-                (D, L) = kuipertest.kp_histogram(
-                    fhist, rhist, fhist_len, rhist_len, 0.9999
-                )
-                assert not (numpy.isnan(D) or numpy.isnan(L))
-                R = D > L
-                cfl = NSLeak(NSPType.Type1a, key_index, key, None, D, L, 0.9999, R)
-        fl.status.nsleak += [cfl]
-        msgleak += "    [Test1a] -- %s\n" % str(cfl)
-
-        ######
         # Test1b: number of unique addresses
-        ######
+        (msgleak, fl) = generic_leakage_test1b(msgleak, fl, key_index, key, fnum_uniq, rnum_uniq)
 
-        cfl = NSLeak(NSPType.Type1b, key_index, key)
-        # sanity check
-        cont = False
-        if len(fnum_uniq) == 0:
-            cont = True
-        if len(rnum_uniq) == 0:
-            cont = True
-
-        # test
-        if not cont:
-            # solve entry mismatches
-            fset = set(fnum_uniq.keys())
-            rset = set(rnum_uniq.keys())
-            if fset != rset:
-                for s in list(fset - rset):
-                    rnum_uniq[s] = 0
-                for s in list(rset - fset):
-                    fnum_uniq[s] = 0
-
-            # compile histograms
-            fhist = numpy.array(
-                [fnum_uniq[j] for j in sorted(fnum_uniq.keys())], dtype=numpy.float32
-            )
-            rhist = numpy.array(
-                [rnum_uniq[j] for j in sorted(rnum_uniq.keys())], dtype=numpy.float32
-            )
-            fhist_len = numpy.int32(numpy.sum(fhist))
-            rhist_len = numpy.int32(numpy.sum(rhist))
-
-            # sanity check
-            cont = False
-            if fhist_len < 30:
-                cont = True
-            if rhist_len < 30:
-                cont = True
-
-            # stat test
-            if not cont:
-                (D, L) = kuipertest.kp_histogram(
-                    fhist, rhist, fhist_len, rhist_len, 0.9999
-                )
-                assert not (numpy.isnan(D) or numpy.isnan(L))
-                R = D > L
-                cfl = NSLeak(NSPType.Type1b, key_index, key, None, D, L, 0.9999, R)
-        fl.status.nsleak += [cfl]
-        msgleak += "    [Test1b] -- %s\n" % str(cfl)
-
-        ######
         # Test2: number of accesses per address
-        ######
-
-        cfl = NSLeak(NSPType.Type2, key_index, key)
-        # sanity check
-        cont = False
-        if len(fdic.keys()) == 0:
-            cont = True
-        if len(rdic.keys()) == 0:
-            cont = True
-
-        # test
-        if not cont:
-            # solve entry mismatches
-            fset = set(fdic.keys())
-            rset = set(rdic.keys())
-            if fset != rset:
-                for s in list(fset - rset):
-                    rdic[s] = 0
-                for s in list(rset - fset):
-                    fdic[s] = 0
-
-            # compile histograms
-            fhist = numpy.array(
-                [fdic[j] for j in sorted(fdic.keys())], dtype=numpy.float32
-            )
-            rhist = numpy.array(
-                [rdic[j] for j in sorted(rdic.keys())], dtype=numpy.float32
-            )
-            fhist_len = numpy.int32(numpy.sum(fhist))
-            rhist_len = numpy.int32(numpy.sum(rhist))
-
-            # sanity check
-            cont = False
-            if fhist_len < 30:
-                cont = True
-            if rhist_len < 30:
-                cont = True
-
-            # stat test
-            if not cont:
-                (D, L) = kuipertest.kp_histogram(
-                    fhist, rhist, fhist_len, rhist_len, 0.9999
-                )
-                assert not (numpy.isnan(D) or numpy.isnan(L))
-                R = D > L
-                cfl = NSLeak(NSPType.Type2, key_index, key, None, D, L, 0.9999, R)
-        fl.status.nsleak += [cfl]
-        msgleak += "    [Test2]  -- %s\n" % str(cfl)
+        (msgleak, fl) = generic_leakage_test2(msgleak, fl, key_index, key, fdic, rdic)
 
         debug(1, msgleak.rstrip())
 
