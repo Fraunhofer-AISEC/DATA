@@ -184,9 +184,10 @@ class XmlLeakPrinter:
             self.startNode(LEAK)
             self.doprint("", obj.ip, None)
 
-            self.startNode("entries")
-            obj.entries.doprint(self)
-            self.endNode("entries")
+            if len(obj.entries) > 0:
+                self.startNode("entries")
+                obj.entries.doprint(self)
+                self.endNode("entries")
 
             if len(obj.evidence) > 0:
                 self.startNode("evidences")
