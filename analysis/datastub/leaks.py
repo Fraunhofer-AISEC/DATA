@@ -541,6 +541,21 @@ class NSPType(Enum):
             return self.value < other.value
         return NotImplemented
 
+    def __str__(self):
+        if self == NSPType.Noleak:
+            string = "none"
+        elif self == NSPType.Type1a:
+            string = "pos(a)"
+        elif self == NSPType.Type1b:
+            string = "pos(b)"
+        elif self == NSPType.Type2:
+            string = "addr"
+        elif self == NSPType.Type3:
+            string = "pos"
+        else:
+            assert False
+        return string
+
 
 """
 *************************************************************************
