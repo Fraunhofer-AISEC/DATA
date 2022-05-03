@@ -588,19 +588,11 @@ def generic_leakage_test(fixed, random):
     # iterate over leaks
     debug(0, "Got %d trace differences.", (len(fixedleaks)))
     sys.stdout.flush()
-    for i in range(0, len(fixedleaks)):
-        fl = fixedleaks[i]
-        rl = randomleaks[i]
+    for (idx, (fl, rl)) in enumerate(zip(fixedleaks, randomleaks)):
+        msg = {"warning": "", "leak": ""}
         assert fl.ip == rl.ip
-        msgwarning = ""
-        msgleak = ""
-        cursym = SymbolInfo.lookup(fl.ip)
-        if (cursym is not None) and (len(cursym.name) > 0):
-            cursym = cursym.name[0]
-        else:
-            cursym = None
 
-        # Parse key_index and key
+        # parse key_index and key
         key_index = set(e.key_index for e in fl.evidence)
         key = set(e.key for e in fl.evidence)
         ## Check if `fl` only contains fixed traces
@@ -611,54 +603,46 @@ def generic_leakage_test(fixed, random):
 
         # always test
         leaktype = "dataleak" if isinstance(fl, DataLeak) else "cfleak"
-        msgwarning += "Testing %s@%x...\n" % (leaktype, fl.ip)
-        msgleak += "Testing %s@%x...\n" % (leaktype, fl.ip)
+        msg_start = f"Testing {leaktype}@{fl.ip:x}...\n"
+        msg["warning"] += msg_start
+        msg["leak"] += msg_start
+
+        # set is_generic_tested to True
         fl.status.nsperformed = True
-        rl.status.nsperformed = True
 
         # sanity check
-        cont = False
-        if len(fl.evidence) == 0:
-            msgwarning += "    warning: no evidences for fixed\n"
-            cont = True
-        if len(rl.evidence) == 0:
-            msgwarning += "    warning: no evidences for random\n"
-            cont = True
-        if cont:
-            debug(0, msgwarning.rstrip())
+        if _glt_sanity_check_abort([len(fl.evidence), len(rl.evidence)]):
+            msg["warning"] += f"    warning: {len(fl.evidence)} evidences for fixed\n"
+            msg["warning"] += f"    warning: {len(fl.evidence)} evidences for random\n"
+            debug(0, msg["warning"])
             continue
 
         (fnum, fnum_uniq, fdic) = _glt_gather_information(fl)
         (rnum, rnum_uniq, rdic) = _glt_gather_information(rl)
 
-        # sanity check
-        if (
-            len(fnum) == 0
-            or len(rnum) == 0
-            or len(fnum_uniq) == 0
-            or len(rnum_uniq) == 0
-        ):
-            continue
-
         # Test1a: number of addresses
-        (msgleak, fl) = generic_leakage_test1a(msgleak, fl, key_index, key, fnum, rnum)
+        (msg["leak"], fl) = generic_leakage_test1a(
+            msg["leak"], fl, key_index, key, fnum, rnum
+        )
 
         # Test1b: number of unique addresses
-        (msgleak, fl) = generic_leakage_test1b(
-            msgleak, fl, key_index, key, fnum_uniq, rnum_uniq
+        (msg["leak"], fl) = generic_leakage_test1b(
+            msg["leak"], fl, key_index, key, fnum_uniq, rnum_uniq
         )
 
         # Test2: number of accesses per address
-        (msgleak, fl) = generic_leakage_test2(msgleak, fl, key_index, key, fdic, rdic)
+        (msg["leak"], fl) = generic_leakage_test2(
+            msg["leak"], fl, key_index, key, fdic, rdic
+        )
 
-        debug(1, msgleak.rstrip())
+        debug(1, msg["leak"])
 
         # progress
         if len(fixedleaks) > 100:
-            if (i % int(len(fixedleaks) / 10)) == 0:
-                debug(0, "[Progress] %6.2f%%", ((i * 100.0) / len(fixedleaks)))
+            if (idx % int(len(fixedleaks) / 10)) == 0:
+                debug(0, "[Progress] %6.2f%%", ((idx * 100.0) / len(fixedleaks)))
         else:
-            debug(0, "[Progress] Finished %d", (i + 1))
+            debug(0, "[Progress] Finished %d", (idx + 1))
         sys.stdout.flush()
     debug(0, "[Progress] 100.00%%")
     sys.stdout.flush()
