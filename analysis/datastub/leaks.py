@@ -602,6 +602,8 @@ class NSLeak(object):
             return self.teststat < other.teststat
 
     def __eq__(self, other):
+        if self.isleak is False and other.isleak is False:
+            return self.nstype == other.nstype
         if (
             (self.nstype == other.nstype)
             and (self.address == other.address)

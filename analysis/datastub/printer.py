@@ -227,15 +227,24 @@ class XmlLeakPrinter:
         elif isinstance(obj, EvidenceEntry):
             self.doprint_line(obj.__str_printer__())
         elif isinstance(obj, LeakStatus):
-            if len(obj.nsleak) > 0 or len(obj.spleak) > 0:
-                self.startNode("result " + str(obj))
-                for n in sorted(obj.nsleak):
-                    self.startEndNode("generic", str(n))
-                for n in sorted(list(obj.spleak)):
-                    self.startEndNode("specific", str(n))
-                self.endNode("result")
-            else:
+            if len(obj.nsleak) == 0 and len(obj.spleak) and 0:
                 self.startEndNode("result", str(obj))
+                return
+
+            self.startNode(f"result {str(obj)}")
+
+            # Print NSLeak
+            status_leaks = Counter(sorted(obj.nsleak))
+            for sl_key in status_leaks.keys():
+                self.startEndNode(
+                    "generic", f"{str(sl_key)} count='{status_leaks[sl_key]}'"
+                )
+            # Print SPLeak
+            for n in sorted(list(obj.spleak)):
+                self.startEndNode("specific", str(n))
+
+            self.endNode("result")
+
         elif isinstance(obj, LibHierarchy):
             self.startNode("LibHierarchy")
             for k in sorted_keys(obj.entries):
