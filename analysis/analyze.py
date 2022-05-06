@@ -41,7 +41,7 @@ import kuipertest
 import rdctest
 import datastub
 from datastub.SymbolInfo import SymbolInfo
-from datastub.utils import debug, debuglevel, set_debuglevel, sorted_keys
+from datastub.utils import debug, debuglevel, set_debuglevel, sorted_keys, progress
 from datastub.printer import XmlLeakPrinter, BinLeakPrinter
 from datastub.export import storepickle, loadpickle, export_leaks
 from datastub.leaks import (
@@ -636,16 +636,8 @@ def generic_leakage_test(fixed, random):
         )
 
         debug(1, msg["leak"])
-
-        # progress
-        if len(fixedleaks) > 100:
-            if (idx % int(len(fixedleaks) / 10)) == 0:
-                debug(0, "[Progress] %6.2f%%", ((idx * 100.0) / len(fixedleaks)))
-        else:
-            debug(0, "[Progress] Finished %d", (idx + 1))
+        progress(idx, len(fixedleaks))
         sys.stdout.flush()
-    debug(0, "[Progress] 100.00%%")
-    sys.stdout.flush()
 
 
 """
