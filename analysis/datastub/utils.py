@@ -48,3 +48,13 @@ def debug(level, fstr, values=()):
 
 def sorted_keys(mymap):
     return sorted(mymap.keys())
+
+
+def progress(idx, number):
+    percentage = (idx + 1) / number * 100.0
+    msg = f"[Progress] {percentage:6.2f}%%"
+    if number > 10:
+        if (idx % int(number / 10)) == 0:
+            debug(0, msg)
+    else:
+        debug(0, msg)
