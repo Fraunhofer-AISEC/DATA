@@ -1086,7 +1086,7 @@ resfilter ... filter results by given strings, semicolon-separated
 """
 
 
-def collapse_cfleaks(leaks, collapse_cfleaks, granularity, resfilter=""):
+def collapse_leaks(leaks, collapse_cfleaks, granularity, resfilter=""):
     mask = -1
     filterarr = []
     if granularity != 1:
@@ -1345,7 +1345,7 @@ def show(picklefile, syms, xml, leakout, debug):
     if syms is not None:
         SymbolInfo.open(syms)
     assert loadleaksglob(picklefile)
-    leaks = collapse_cfleaks(leaks, True, 1, "")
+    leaks = collapse_leaks(leaks, True, 1, "")
     if xml is not None:
         print_leaks(leaks, XmlLeakPrinter(xml), True)
     if leakout is not None:
