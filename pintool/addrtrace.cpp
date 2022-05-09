@@ -282,7 +282,7 @@ std::unordered_map<uint64_t, uint64_t>
 /* Multithreading */
 
 /* Global lock to protect trace buffer */
-// PIN_MUTEX lock;
+PIN_MUTEX lock;
 
 typedef struct {
     char const *type;
@@ -1032,7 +1032,7 @@ AbstractLeakContainer *leaks = NULL;
 /***********************************************************************/
 
 void init() {
-    // ASSERT(PIN_MutexInit(&lock), "[pintool] Error: Mutex init failed");
+    ASSERT(PIN_MutexInit(&lock), "[pintool] Error: Mutex init failed");
 }
 
 /**
@@ -1083,7 +1083,7 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
     ASSERT(threadid == 0,
            "[pintool] Error: Multithreading detected but not supported!");
     DEBUG(1) printf("[pintool] Thread begin %d\n", threadid);
-    // PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
 
     std::string to_hash_stack = "STACKSSPACE";
     SHA1 hash_stack;
@@ -1106,7 +1106,7 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
     }
     ASSERT(thread_state.size() > threadid,
            "[pintool] Error: thread_state corrupted");
-    // PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1117,9 +1117,9 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
  * @param v Unused
  */
 VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v) {
-    // PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     DEBUG(1) printf("[pintool] Thread end %d code %d\n", threadid, code);
-    // PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /***********************************************************************/
@@ -1386,7 +1386,7 @@ uint32_t dofree(ADDRINT addr) {
 VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
     if (!Record)
         return;
-    // PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     if (thread_state[threadid].realloc_state.size() == 0) {
         DEBUG(1)
         std::cout << "[pintool] Malloc called with " << std::hex << size
@@ -1406,7 +1406,7 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
         std::cout << "[pintool] Malloc ignored due to realloc_pending (size= "
                   << std::hex << size << ") at " << ip << std::endl;
     }
-    // PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1417,7 +1417,7 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
 VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     if (!Record)
         return;
-    // PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "[pintool] Malloc returned " << std::hex << addr << std::endl;
     ASSERT(thread_state[threadid].malloc_state.size() > 0,
@@ -1426,7 +1426,7 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     thread_state[threadid].malloc_state.pop_back();
     doalloc((ADDRINT)addr, state.size, 0, state.callsite, state.type,
             state.callstack, 0);
-    // PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1439,7 +1439,7 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
                          ADDRINT size) {
     if (!Record)
         return;
-    // PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "[pintool] Realloc called with " << std::hex << addr << " "
               << size << " at " << ip << std::endl;
@@ -1454,7 +1454,7 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
         .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
     };
     thread_state[threadid].realloc_state.push_back(state);
-    // PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1465,7 +1465,7 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
 VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     if (!Record)
         return;
-    // PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "[pintool] Realloc returned " << std::hex << addr << " at "
               << ip << std::endl;
@@ -1480,7 +1480,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     }
     doalloc((ADDRINT)addr, state.size, objid, state.callsite, state.type,
             state.callstack, state.old);
-    // PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1493,7 +1493,7 @@ VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
                         ADDRINT size, ADDRINT ret) {
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     if (thread_state[threadid].calloc_state.size() == 0) {
         DEBUG(1)
         std::cout << "Calloc called with " << std::hex << nelem << " " << size
@@ -1510,7 +1510,7 @@ VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
 
         thread_state[threadid].calloc_state.push_back(state);
     }
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1519,19 +1519,19 @@ VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
  * @param addr The allocated heap pointer
  */
 VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
-    //  PIN_MutexLock(&lock);
     DEBUG(1) std::cout << "Calloc returned " << std::hex << addr << std::endl;
     if (!Record) {
         DEBUG(1) std::cout << "ignoring" << std::endl;
         return;
     }
+    PIN_MutexLock(&lock);
     ASSERT(thread_state[threadid].calloc_state.size() != 0,
            "[Error] Calloc returned but not called");
     alloc_state_t state = thread_state[threadid].calloc_state.back();
     thread_state[threadid].calloc_state.pop_back();
     doalloc(addr, state.size, 0, state.callsite, state.type, state.callstack,
             0);
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1542,12 +1542,12 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
 VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "[pintool] Free called with " << std::hex << addr << " at "
               << ip << std::endl;
     dofree(addr);
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1558,12 +1558,12 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
 VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len) {
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "munmap called with " << std::hex << addr << "*" << len
               << std::endl;
     dofree(addr);
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 /**
  * Record mmap
@@ -1574,7 +1574,7 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
                       ADDRINT ret) {
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     if (thread_state[threadid].mremap_state.size() == 0) {
         DEBUG(1)
         std::cout << "mmap called with " << std::hex << size << std::endl;
@@ -1590,7 +1590,7 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
 
         thread_state[threadid].mmap_state.push_back(state);
     }
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1599,7 +1599,7 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
  * @param addr The allocated heap pointer
  */
 VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
 
     DEBUG(1) std::cout << "mmap returned " << std::hex << addr << std::endl;
     ASSERT(thread_state[threadid].mmap_state.size() != 0,
@@ -1611,7 +1611,7 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     doalloc(addr, state.size, 0, state.callsite, state.type, state.callstack,
             0);
 
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1624,7 +1624,7 @@ VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
                         ADDRINT old_size, ADDRINT new_size, ADDRINT ret) {
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "mremap called with " << std::hex << addr << " " << new_size
               << std::endl;
@@ -1641,7 +1641,7 @@ VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
     };
     thread_state[threadid].mremap_state.push_back(state);
 
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1652,7 +1652,7 @@ VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
 VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     DEBUG(1) std::cout << "mremap returned " << std::hex << addr << std::endl;
     ASSERT(thread_state[threadid].mremap_state.size() != 0,
            "[Error] mremap returned but not called");
@@ -1666,7 +1666,7 @@ VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     }
     doalloc(addr, state.size, objid, state.callsite, state.type,
             state.callstack, 0);
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 std::ofstream outFile;
@@ -1747,7 +1747,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
     if (!Record)
         return;
     std::cout << "ip in memread is   " << (uint64_t)ip << " " << std::endl;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = READ;
     entry.ip = ip; // getLogicalAddress(ip);
@@ -1761,7 +1761,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
     } else {
         record_entry(entry);
     }
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1775,7 +1775,7 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
                     bool fast_recording, const CONTEXT *ctxt) {
     if (!Record)
         return;
-    // PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = WRITE;
     ADDRINT target =
@@ -1792,7 +1792,7 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     } else {
         record_entry(entry);
     }
-    // PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1829,7 +1829,7 @@ VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
  */
 VOID RecordBranch(THREADID threadid, ADDRINT bbl, ADDRINT bp,
                   const CONTEXT *ctxt, bool fast_recording) {
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     ADDRINT target = (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR);
     DEBUG(3)
     std::cout << "Branch " << std::hex << bp << " to " << target << std::endl;
@@ -1845,7 +1845,7 @@ VOID RecordBranch(THREADID threadid, ADDRINT bbl, ADDRINT bp,
         uint64_t t = (uint64_t)ld;
         leaks->cfleak_consume(b, t);
     }
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 #if 0
@@ -1918,7 +1918,7 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
     }
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     if (indirect) {
         DEBUG(2) std::cout << "Icall to  " << std::hex << target << std::endl;
     }
@@ -1934,7 +1934,7 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
         uint64_t t = (uint64_t)ld;
         leaks->cfleak_consume(i, t);
     }
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1977,7 +1977,7 @@ VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins,
         return;
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR) : 0;
-    //  PIN_MutexLock(&lock);
+    PIN_MutexLock(&lock);
     if (KnobFunc.Value()) {
         RecordFunctionExit_unlocked(threadid, ins, target, ctxt);
     }
@@ -1990,7 +1990,7 @@ VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins,
         uint64_t t = (uint64_t)ld;
         leaks->cfleak_consume(i, t);
     }
-    //  PIN_MutexUnlock(&lock);
+    PIN_MutexUnlock(&lock);
 }
 
 /***********************************************************************/
