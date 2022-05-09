@@ -822,13 +822,13 @@ class Leak:
         self.evidence = []
         self.meta = None
 
-    def clone_collapsed(self, mask, collapse_cfleaks=False):
+    def clone_collapsed(self, mask, do_collapse=False):
         clone = self.__class__(self.ip & mask)
         clone.status = copy.deepcopy(self.status)
         for e in self.entries:
             c = copy.copy(e)
             c.quantize(mask)
-            if collapse_cfleaks:
+            if do_collapse:
                 c.collapse()
             clone.append(c)
         return clone
