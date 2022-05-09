@@ -1026,11 +1026,8 @@ function analyze_phase3 {
     if [[ "${DO_PARALLEL}" -eq "1" ]]; then
       MP="True"
     fi
-    execute "${ANALYZE}" specific ${PHASE3_RNDPIC} "${SPLEAKCB}" ${PHASE3_KEYDIR} --pickle "${RESPICFILE_PHASE3_LM}" --syms ${EXTSYMFILE} --debug ${DEBUG} --leaksonly ${LEAKSONLY} --multiprocessing ${MP}
+    execute "${ANALYZE}" specific ${PHASE3_RNDPIC} "${SPLEAKCB}" ${PHASE3_KEYDIR} --pickle "${RESPICFILE_PHASE3_LM}" --syms ${EXTSYMFILE} --xml "${RESXMLFILE_PHASE3_LM}" --debug ${DEBUG} --leaksonly ${LEAKSONLY} --multiprocessing ${MP}
     log_info "Phase3: Statistical tests completed."
-  fi
-  if ! [[ -f ${RESXMLFILE_PHASE3_LM} ]]; then
-    execute "${ANALYZE}" show "${RESPICFILE_PHASE3_LM}" --syms ${EXTSYMFILE} --xml "${RESXMLFILE_PHASE3_LM}" --debug ${DEBUG}
   fi
   getelapsedtime
   TDR=$(printf "%.2f" "$(subfloat "${CUR_TIME_REAL}" "${TSR}")")
