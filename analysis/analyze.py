@@ -37,6 +37,7 @@ import types
 import fnmatch
 import natsort
 from collections import Counter, defaultdict
+from itertools import chain
 import kuipertest
 import rdctest
 import datastub
@@ -1077,6 +1078,7 @@ def collapse_leaks_recursive(
             child, collapsed, callstack, collapse_cfleaks, mask, filterarr
         )
         callstack.doreturn_context()
+
     return collapsed
 
 
@@ -1153,6 +1155,41 @@ def strip_evidences(leaks):
     for k in leaks.children:
         child = leaks.children[k]
         strip_evidences(child)
+
+
+"""
+Remove evidences from leaks depending on their source
+"""
+
+
+def filter_evidences(leaks, source):
+    assert source in [EvidenceSource.Generic.value, EvidenceSource.Specific.value]
+
+    for leak in chain(leaks.dataleaks, leaks.cfleaks):
+        leak.evidence = [e for e in leak.evidence if e.source == source]
+
+    for k in leaks.children:
+        child = leaks.children[k]
+        filter_evidences(child, source)
+
+
+"""
+Remove leak results depending on their source
+"""
+
+
+def filter_leak_results(leaks, source):
+    assert source in [EvidenceSource.Generic.value, EvidenceSource.Specific.value]
+
+    for leak in chain(leaks.dataleaks, leaks.cfleaks):
+        if source == EvidenceSource.Specific.value:
+            leak.status.nsleak = list()
+        else:
+            leak.status.spleak = set()
+
+    for k in leaks.children:
+        child = leaks.children[k]
+        filter_leak_results(child, source)
 
 
 """
@@ -1455,6 +1492,8 @@ def specific(
     keys = loadkeys(keydir)
     leaks = loadpickle(randompickle)
     specific_leakage_test(leaks, callback, keys, leaksonly, multiprocessing)
+    filter_evidences(leaks, EvidenceSource.Specific.value)
+    filter_leak_results(leaks, EvidenceSource.Specific.value)
     if pickle is not None:
         storepickle(pickle, leaks)
     if xml is not None:
