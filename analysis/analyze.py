@@ -1050,29 +1050,26 @@ mask ... bitmask to apply to all addresses
 """
 
 
+def collapse_leak(leak, collapsed, callstack, do_collapse, mask, filterarr):
+    debug(1, f"Collapse  {leak.name}  {leak.ip:x}")
+    if len(filterarr) > 0 and not match_filter(leak, filterarr):
+        debug(1, f"Filtering {leak.name}  {leak.ip:x}")
+        return
+    n = leak.clone_collapsed(mask, do_collapse)
+    if len(n.entries) <= 1 and len(n.evidence) <= 1:
+        debug(1, f"Ignoring  {leak.name}  {n.ip:x}")
+    else:
+        collapsed.report_leak(callstack, n)
+
+
 def collapse_leaks_recursive(
     leaks, collapsed, callstack, collapse_cfleaks, mask, filterarr
 ):
     for leak in leaks.dataleaks:
-        debug(1, "Collapse dleak %x", (leak.ip))
-        if len(filterarr) > 0 and not match_filter(leak, filterarr):
-            debug(1, "Filtering dleak %x", (leak.ip))
-            continue
-        n = leak.clone_collapsed(mask)
-        if len(n.entries) <= 1:
-            debug(1, "Ignoring dleak %x", (n.ip))
-        else:
-            collapsed.report_leak(callstack, n)
+        collapse_leak(leak, collapsed, callstack, False, mask, filterarr)
     for leak in leaks.cfleaks:
-        debug(1, "Collapse dleak %x", (leak.ip))
-        if len(filterarr) > 0 and not match_filter(leak, filterarr):
-            debug(1, "Filtering cfleak %x", (leak.ip))
-            continue
-        n = leak.clone_collapsed(mask, collapse_cfleaks)
-        if len(n.entries) <= 1:
-            debug(1, "Ignoring cfleak %x", (n.ip))
-        else:
-            collapsed.report_leak(callstack, n)
+        collapse_leak(leak, collapsed, callstack, collapse_cfleaks, mask, filterarr)
+
     for k in leaks.children:
         child = leaks.children[k]
         callstack.docall_context(child.ctxt)
