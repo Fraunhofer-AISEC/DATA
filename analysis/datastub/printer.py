@@ -205,7 +205,7 @@ class XmlLeakPrinter:
                     obj_print = MergeMap(EvidenceEntry)
                     obj_print.merge(evidence)
 
-                    node_plain = "phase2"
+                    node_plain = "phase2" if evidence[0].source == 0 else "phase3"
                     if idx == 0:
                         node = f"{node_plain} origin='random'"
                     else:
