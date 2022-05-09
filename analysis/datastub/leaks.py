@@ -718,26 +718,21 @@ class SPLeak(object):
 
     def __str__(self):
         if self.sptype == NSPType.Noleak:
-            return str.format("result='none' leakagemodel='%s'" % (self.target))
-        else:
-            if self.sptype == NSPType.Type2:
-                source = "M_addr"
-            elif self.sptype == NSPType.Type3:
-                source = "M_pos"
-            else:
-                source = "unknown"
-            return str.format(
-                "result='leak' source='%s' leakagemodel='%s' property='%s' address='%s' rdc='%s' significance='%s' confidence='%f'"
-                % (
-                    source,
-                    self.target,
-                    self.property,
-                    (("%x" % self.address) if self.address is not None else "-"),
-                    (("%.4f" % self.rdc) if self.rdc is not None else "-"),
-                    (("%.4f" % self.rdc_limit) if self.rdc_limit is not None else "-"),
-                    self.confidence,
-                )
-            )
+            assert False
+
+        result = "leak" if self.isleak else "none"
+        string = f"result='{result}' source='M_{str(self.sptype)}' leakagemodel='{self.target}'"
+
+        if not self.isleak:
+            return string
+
+        string += (
+            f" property='{self.property}'"
+            f" address='{self.address:x}'"
+            f" rdc='{self.rdc:.4f}' significance='{self.rdc_limit:.4f}'"
+            f" confidence='{self.confidence:.4f}'"
+        )
+        return string
 
 
 """
