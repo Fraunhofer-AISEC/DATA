@@ -1179,20 +1179,19 @@ VOID test_mem_heap(entry_t *pentry) {
 void calculate_sha1_hash(memobj_t *obj) {
     std::stringstream to_hash(obj->type, ios_base::app | ios_base::out);
     to_hash << obj->size << obj->callsite << obj->callstack;
-    std::cout << to_hash.str() << std::endl;
+
     SHA1 hash;
-    hash.update(to_hash.str());
-    obj->hash = hash.final();
-    std::cout << "hash of heap is " << obj->hash << std::endl;
     if (hashmap.count(to_hash.str())) {
         hash.update(hashmap[to_hash.str()].back());
-        hashmap[to_hash.str()].push_back(hash.final());
-        obj->hash = hashmap[to_hash.str()].back();
-        for (auto &i : hashmap[to_hash.str()]) {
-            std::cout << "Val for the colliding key is " << i << std::endl;
-        }
     } else {
-        hashmap[to_hash.str()].push_back(obj->hash);
+        hash.update(to_hash.str());
+    }
+    obj->hash = hash.final();
+    hashmap[to_hash.str()].push_back(obj->hash);
+
+    std::cout << "HashMap for    " << to_hash.str() << std::endl;
+    for (auto &i : hashmap[to_hash.str()]) {
+        std::cout << "HashMap Value: " << i << std::endl;
     }
 }
 
