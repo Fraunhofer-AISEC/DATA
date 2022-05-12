@@ -1203,14 +1203,12 @@ ADDRINT get_callsite_offset(ADDRINT callsite) {
  */
 void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
              char const *type, std::string callstack, ADDRINT old_ptr) {
-    bool insert = true;
-    memobj_t obj;
-    if (objid) {
-        obj.id = objid;
-    } else {
-        obj.id = nextheapid++;
-    }
+    DEBUG(0)
+    std::cout << "doalloc " << std::hex << addr << " " << size << " type "
+              << type << std::endl;
 
+    memobj_t obj;
+    obj.id = (objid) ? objid : nextheapid++;
     obj.base = addr;
     obj.size = size;
     obj.used = true;
@@ -1219,85 +1217,61 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     obj.callstack = callstack;
     calculate_sha1_hash(&obj);
 
-    if (!old_ptr) {
-        allocmap[addr].push_back(obj.hash.substr(32, 8));
-    }
-    if (old_ptr) {
-        if (allocmap.count(old_ptr)) {
-            auto val = allocmap[old_ptr];
-            allocmap.erase(old_ptr);
-            for (auto i : val) {
-                allocmap[addr].push_back(i);
-            }
-            allocmap[addr].push_back(obj.hash.substr(32, 8));
-        } else {
-            ASSERT(false, "[Error] doalloc has a valid old_ptr, but no elements!");
+    if (old_ptr && old_ptr != addr) {
+        if (!allocmap.count(old_ptr)) {
+            ASSERT(false,
+                   "[Error] doalloc has a valid old_ptr, but no elements!");
         }
+        for (auto item : allocmap[old_ptr]) {
+            allocmap[addr].push_back(item);
+        }
+        allocmap.erase(old_ptr);
     }
+    allocmap[addr].push_back(obj.hash.substr(32, 8));
 
-    DEBUG(0)
-    std::cout << "doalloc " << std::hex << addr << " " << size << std::endl;
     /* Keep heap vector sorted */
     HEAPVEC::iterator prev = heap.begin();
     HEAPVEC::iterator found = heap.end();
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        if (it->used) {
-
-            if (abs(int(obj.base - it->base)) == 16) {
-                /* duplicate found, don't insert current object*/
-                std::cout << "duplicate found " << std::endl;
+        if (it->used && it->base >= obj.base) {
+            /* insert before*/
+            if (obj.base + obj.size > it->base) {
                 DEBUG(0) printheap();
-                *it = obj;
-                DEBUG(0) printheap();
-
-                insert = false;
-                break;
+                ASSERT(false, "[Error] Corrupted heap?!");
             }
-            if (it->base >= obj.base) {
-                /* insert before*/
-                DEBUG(0) std::cout << "obj.type " << obj.type << std::endl;
-                if (obj.base + obj.size > it->base) {
-                    DEBUG(0) printheap();
-                    ASSERT(false, "[Error] Corrupted heap?!");
-                }
-                found = it;
-                break;
-            }
+            found = it;
+            break;
         }
         prev = it;
     }
-    if (insert) {
-        if (found == heap.end()) {
-            /* no match found, append to the end */
-            heap.push_back(obj);
-        } else {
-            if (prev == heap.begin() || prev->used) {
-                /* We cannot reuse prev, insert at 'prev' */
-                if (prev != found && prev->used &&
-                    prev->base + prev->size > obj.base) {
-                    /* malloc/calloc/realloc has internally called mmap/mremap,
-                     * don't assert mark the previous object if it was of type
-                     * mmap/mremap and if the base address difference is 16 */
-                    if (prev != found && prev->used &&
-                        (abs(int(obj.base - prev->base) == 16)) &&
-                        ((strcmp(prev->type, "mmap") == 0) ||
-                         (strcmp(prev->type, "mremap") == 0))) {
-                        /* erase the entry to avoid duplication? but freeing is
-                         * a problem*/
-                        std::cout << "type is" << prev->type << std::endl;
-                        /*heap.erase(prev);
-                          --found;*/
-                    } else {
-                        DEBUG(2) printheap();
-                        ASSERT(false, "[Error] Corrupted heap?!");
-                    }
-                }
-                heap.insert(found, obj);
+
+    if (found == heap.end()) {
+        /* no match found, append to the end */
+        heap.push_back(obj);
+    } else if (prev == heap.begin() || prev->used) {
+        /* We cannot reuse prev, insert at 'prev' */
+        if (prev != found && prev->used &&
+            prev->base + prev->size > obj.base) {
+            /* malloc/calloc/realloc has internally called mmap/mremap,
+             * don't assert mark the previous object if it was of type
+             * mmap/mremap */
+            if (prev != found && prev->used &&
+                ((strcmp(prev->type, "mmap") == 0) ||
+                 (strcmp(prev->type, "mremap") == 0))) {
+                /* erase the entry to avoid duplication? but freeing is
+                 * a problem*/
+                std::cout << "type is" << prev->type << std::endl;
+                /*heap.erase(prev);
+                  --found;*/
             } else {
-                /* prev is unused, reuse it */
-                *prev = obj;
+                DEBUG(2) printheap();
+                ASSERT(false, "[Error] Corrupted heap?!");
             }
         }
+        heap.insert(found, obj);
+    } else {
+        /* prev is unused, reuse it */
+        *prev = obj;
     }
     /* print the current obj into the heapfile */
     heapfile << setw(15) << obj.type << " " << setw(15) << obj.size << " "
