@@ -228,7 +228,6 @@ typedef struct {
 } memobj_t;
 
 uint32_t nextheapid = 1;
-memobj_t *heapcache;
 typedef std::vector<memobj_t> HEAPVEC;
 HEAPVEC heap;
 
@@ -1134,45 +1133,6 @@ void printheap() {
     }
 }
 
-memobj_t *lookup_heap(VOID *addr) {
-    uintptr_t paddr = (uintptr_t)addr;
-    if (heapcache) {
-        ASSERT(heapcache->used, "[pintool] Error: Heapcache corrupt");
-        if (paddr >= heapcache->base &&
-            paddr < heapcache->base + heapcache->size) {
-            return heapcache;
-        }
-    }
-
-    for (HEAPVEC::reverse_iterator it = heap.rbegin(); it != heap.rend();
-         ++it) {
-        if (!it->used) {
-            continue;
-        }
-        if (paddr >= it->base) {
-            if (paddr < it->base + it->size) {
-                return heapcache = &(*it);
-            } else {
-                break;
-            }
-        }
-    }
-    return NULL;
-}
-
-VOID test_mem_heap(entry_t *pentry) {
-    memobj_t *obj = lookup_heap(pentry->data);
-    if (obj) {
-        uint64_t pdata = (uint64_t)pentry->data;
-        pdata -= obj->base;
-        ASSERT((pdata & 0xFFFFFFFF00000000ULL) == 0,
-               "[pintool] Error: Heap object too big");
-        pdata |= (uint64_t)obj->id << 32ULL;
-        pentry->data = (void *)pdata;
-        pentry->type |= MASK_HEAP;
-    }
-}
-
 /**
  * calculate sha1-hash and use the 4 bytes of the hash as the memory Index
  */
@@ -1243,7 +1203,6 @@ ADDRINT get_callsite_offset(ADDRINT callsite) {
  */
 void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
              char const *type, std::string callstack, ADDRINT old_ptr) {
-    heapcache = NULL;
     bool insert = true;
     memobj_t obj;
     if (objid) {
@@ -1352,7 +1311,6 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
  * This function is not thread-safe. Lock first.
  */
 uint32_t dofree(ADDRINT addr) {
-    heapcache = NULL;
     DEBUG(0) std::cout << "Dofree " << std::hex << addr << std::endl;
     if (!addr) {
         return 0;
@@ -1751,7 +1709,6 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
     entry.type = READ;
     entry.ip = ip; // getLogicalAddress(ip);
     entry.data = getLogicalAddress(addr);
-    test_mem_heap(&entry);
     DEBUG(3)
     printf("Read %llx to %llx\n", (long long unsigned int)entry.ip,
            (long long unsigned int)entry.data);
@@ -1782,7 +1739,6 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     std::cout << " TOP from WRITE is " << target << std::endl;
     entry.ip = ip; // getLogicalAddress(ip);
     entry.data = getLogicalAddress(addr);
-    test_mem_heap(&entry);
     DEBUG(3)
     printf("Write %llx to %llx\n", (long long unsigned int)entry.ip,
            (long long unsigned int)entry.data);
