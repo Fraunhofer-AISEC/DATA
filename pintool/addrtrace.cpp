@@ -1277,21 +1277,16 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
  * This function is not thread-safe. Lock first.
  */
 uint32_t dofree(ADDRINT addr) {
-    DEBUG(0) std::cout << "Dofree " << std::hex << addr << std::endl;
+    DEBUG(0) std::cout << "dofree " << std::hex << addr << std::endl;
     if (!addr) {
         return 0;
     }
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        if (abs(int(it->base - addr)) == 16) {
-            /* A duplicate was found earlier and freed already
-             * Don't do anything */
-            std::cout << " duplicate in free" << std::endl;
-            return 1;
+        if (it->base != addr) {
+            continue;
         }
-        if (it->base == addr) {
-            heap.erase(it);
-            return it->id;
-        }
+        heap.erase(it);
+        return it->id;
     }
     std::cout << "[Error] Invalid free!" << std::endl;
     DEBUG(0) printheap();
