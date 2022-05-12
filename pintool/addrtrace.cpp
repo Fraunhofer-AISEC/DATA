@@ -1225,47 +1225,28 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     allocmap[addr].push_back(obj.hash.substr(32, 8));
 
     /* Keep heap vector sorted */
-    HEAPVEC::iterator prev = heap.begin();
-    HEAPVEC::iterator found = heap.end();
+    HEAPVEC::iterator below = heap.begin();
+    HEAPVEC::iterator above = heap.end();
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
         if (it->base >= obj.base) {
-            /* insert before*/
-            if (obj.base + obj.size > it->base) {
-                DEBUG(0) printheap();
-                ASSERT(false, "[Error] Corrupted heap?!");
-            }
-            found = it;
+            above = it;
             break;
         }
-        prev = it;
+        below = it;
     }
 
-    if (found == heap.end()) {
-        /* no match found, append to the end */
+    if (above == heap.end()) {
+        /* No inbetween slot found, thus append to the end */
         heap.push_back(obj);
+    } else if (obj.base >= below->base + below->size) {
+        /* Valid inbetween slot found, thus insert before 'above' */
+        heap.insert(above, obj);
     } else {
-        /* We cannot reuse prev, insert at 'prev' */
-        if (prev != found &&
-            prev->base + prev->size > obj.base) {
-            /* malloc/calloc/realloc has internally called mmap/mremap,
-             * don't assert mark the previous object if it was of type
-             * mmap/mremap */
-            if (prev != found &&
-                ((strcmp(prev->type, "mmap") == 0) ||
-                 (strcmp(prev->type, "mremap") == 0))) {
-                /* erase the entry to avoid duplication? but freeing is
-                 * a problem*/
-                std::cout << "type is" << prev->type << std::endl;
-                /*heap.erase(prev);
-                  --found;*/
-            } else {
-                DEBUG(2) printheap();
-                ASSERT(false, "[Error] Corrupted heap?!");
-            }
-        }
-        heap.insert(found, obj);
+        /* Invalid inbetween slot found, thus quit */
+        DEBUG(0) printheap();
+        ASSERT(false, "[Error] Corrupted heap?!");
     }
-    /* print the current obj into the heapfile */
+    /* Print the current obj into the heapfile */
     heapfile << setw(15) << obj.type << " " << setw(15) << obj.size << " "
              << setw(15) << obj.callsite << " " << setw(15) << obj.callstack
              << " " << setw(15) << obj.hash.substr(32, 8) << ":" << obj.size
