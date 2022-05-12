@@ -224,7 +224,6 @@ typedef struct {
     ADDRINT callsite;
     std::string callstack;
     std::string hash;
-    bool used;
 } memobj_t;
 
 uint32_t nextheapid = 1;
@@ -367,9 +366,6 @@ void *getLogicalAddress(void *virt_addr) {
     // Is the Virtual Address in the Heap object address space?
     uint64_t *log_addr = static_cast<uint64_t *>(virt_addr);
     for (auto i : heap) {
-        if (!i.used) {
-            continue;
-        }
         if ((uint64_t)virt_addr < i.base ||
             (uint64_t)virt_addr >= (i.base + i.size)) {
             continue;
@@ -1129,7 +1125,7 @@ void printheap() {
     std::cout << "[pintool] Heap:" << std::endl;
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
         std::cout << std::hex << it->id << ":" << it->base << "-" << it->size
-                  << " used:" << it->used << std::endl;
+                  << std::endl;
     }
 }
 
@@ -1211,7 +1207,6 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     obj.id = (objid) ? objid : nextheapid++;
     obj.base = addr;
     obj.size = size;
-    obj.used = true;
     obj.callsite = callsite;
     obj.type = type;
     obj.callstack = callstack;
@@ -1233,7 +1228,7 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     HEAPVEC::iterator prev = heap.begin();
     HEAPVEC::iterator found = heap.end();
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        if (it->used && it->base >= obj.base) {
+        if (it->base >= obj.base) {
             /* insert before*/
             if (obj.base + obj.size > it->base) {
                 DEBUG(0) printheap();
@@ -1248,14 +1243,14 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     if (found == heap.end()) {
         /* no match found, append to the end */
         heap.push_back(obj);
-    } else if (prev == heap.begin() || prev->used) {
+    } else {
         /* We cannot reuse prev, insert at 'prev' */
-        if (prev != found && prev->used &&
+        if (prev != found &&
             prev->base + prev->size > obj.base) {
             /* malloc/calloc/realloc has internally called mmap/mremap,
              * don't assert mark the previous object if it was of type
              * mmap/mremap */
-            if (prev != found && prev->used &&
+            if (prev != found &&
                 ((strcmp(prev->type, "mmap") == 0) ||
                  (strcmp(prev->type, "mremap") == 0))) {
                 /* erase the entry to avoid duplication? but freeing is
@@ -1269,9 +1264,6 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
             }
         }
         heap.insert(found, obj);
-    } else {
-        /* prev is unused, reuse it */
-        *prev = obj;
     }
     /* print the current obj into the heapfile */
     heapfile << setw(15) << obj.type << " " << setw(15) << obj.size << " "
@@ -1296,11 +1288,8 @@ uint32_t dofree(ADDRINT addr) {
             std::cout << " duplicate in free" << std::endl;
             return 1;
         }
-        if (!it->used) {
-            continue;
-        }
         if (it->base == addr) {
-            it->used = false;
+            heap.erase(it);
             return it->id;
         }
     }
