@@ -578,7 +578,7 @@ def generic_leakage_test(fixed, random):
     debug(1, "")
 
     # iterate over leaks
-    debug(0, "Got %d trace differences.", (len(fixedleaks)))
+    debug(1, "Got %d trace differences.", (len(fixedleaks)))
     sys.stdout.flush()
     for (idx, (fl, rl)) in enumerate(zip(fixedleaks, randomleaks)):
         msg = {"warning": "", "leak": ""}
@@ -606,7 +606,7 @@ def generic_leakage_test(fixed, random):
         if _glt_sanity_check_abort([len(fl.evidence), len(rl.evidence)]):
             msg["warning"] += f"    warning: {len(fl.evidence)} evidences for fixed\n"
             msg["warning"] += f"    warning: {len(fl.evidence)} evidences for random\n"
-            debug(0, msg["warning"])
+            debug(1, msg["warning"])
             continue
 
         (fnum, fnum_uniq, fdic) = _glt_gather_information(fl)
@@ -723,7 +723,7 @@ def specific_leakage_test(random, callback, keys, LeaksOnly=True, mp=False):
 
     # process leaks
     randomleaks = extract_leakdiff_to_array(random, LeaksOnly=LeaksOnly)
-    debug(0, "Got %d leaks.", (len(randomleaks)))
+    debug(1, "Got %d leaks.", (len(randomleaks)))
     sys.stdout.flush()
 
     # convert keys with callback
@@ -769,7 +769,7 @@ def specific_leakage_test(random, callback, keys, LeaksOnly=True, mp=False):
 
         # sanity check
         if len(rl.evidence) == 0:
-            debug(0, "Warning: no evidences")
+            debug(1, "Warning: no evidences")
             continue
 
         # gather information -- leaks
@@ -836,7 +836,7 @@ def specific_leakage_test(random, callback, keys, LeaksOnly=True, mp=False):
         assert len(X_labels) == X.shape[1]
 
         if X.shape[0] != len(keys):
-            debug(0, "Warning: callback returned wrong matrix!")
+            debug(1, "Warning: callback returned wrong matrix!")
             continue
 
         ######
@@ -904,9 +904,9 @@ def specific_leakage_test(random, callback, keys, LeaksOnly=True, mp=False):
             # Print progress
             if len(randomleaks) > 100:
                 if (rli % int(len(randomleaks) / 10)) == 0:
-                    debug(0, "[Progress] %6.2f%%", ((rli * 100.0) / len(randomleaks)))
+                    debug(1, "[Progress] %6.2f%%", ((rli * 100.0) / len(randomleaks)))
             else:
-                debug(0, "[Progress] %d/%d", (rli + 1, len(randomleaks)))
+                debug(1, "[Progress] %d/%d", (rli + 1, len(randomleaks)))
             sys.stdout.flush()
     if mp:
         pool_size = multiprocessing.cpu_count()
@@ -968,7 +968,7 @@ Precompute RDC limits using multiprocessing.
 
 def get_rdc_single(N, alpha):
     limit = rdctest.RDC.rdc_sigthres(N, alpha)
-    debug(0, "RDC_limit=%f for N=%d, alpha=%f", (limit, N, alpha))
+    debug(1, "RDC_limit=%f for N=%d, alpha=%f", (limit, N, alpha))
 
 
 """
@@ -1091,7 +1091,7 @@ def collapse_leaks(leaks, collapse_cfleaks, granularity, resfilter=""):
     if len(resfilter) > 0:
         filterarr = resfilter.replace('"', "").replace("'", "").split(";")
         for f in filterarr:
-            debug(0, "Filtering results for: " + f)
+            debug(1, "Filtering results for: " + f)
     if mask == -1 and not collapse_cfleaks:
         # Nothing to collapse
         return leaks
