@@ -329,9 +329,9 @@ ADDRINT execute_commands(const std::string command, short pos,
     command_string << "cat /proc/" << pid << "/maps | grep " << command
                    << " | awk '{print $1}' | cut -f" << pos << " -d-"
                    << opt_command;
-    std::cout << command_string.str() << " command is " << std::endl;
+    DEBUG(1) std::cout << command_string.str() << " command is " << std::endl;
     const std::string to_pass(command_string.str());
-    std::cout << to_pass.c_str() << std::endl;
+    DEBUG(1) std::cout << to_pass.c_str() << std::endl;
 
     FILE *fp;
     char buffer[64];
@@ -346,11 +346,12 @@ ADDRINT execute_commands(const std::string command, short pos,
             pclose(fp);
         }
     }
-    std::cout << " buf is " << buffer << std::endl;
+    DEBUG(1) std::cout << " buf is " << buffer << std::endl;
     std::string tmp = "0x" + (std::string)buffer;
-    std::cout << " tmp is " << tmp << std::endl;
-    std::cout << " func is " << std::hex << strtol(tmp.c_str(), NULL, 0)
-              << std::endl;
+    DEBUG(1) std::cout << " tmp is " << tmp << std::endl;
+    DEBUG(1)
+        std::cout << " func is " << std::hex << strtol(tmp.c_str(), NULL, 0)
+                  << std::endl;
 
     return ((ADDRINT)strtol(tmp.c_str(), NULL, 0));
 }
@@ -1145,9 +1146,9 @@ void calculate_sha1_hash(memobj_t *obj) {
     obj->hash = hash.final();
     hashmap[to_hash.str()].push_back(obj->hash);
 
-    std::cout << "HashMap for    " << to_hash.str() << std::endl;
+    DEBUG(1) std::cout << "HashMap for    " << to_hash.str() << std::endl;
     for (auto &i : hashmap[to_hash.str()]) {
-        std::cout << "HashMap Value: " << i << std::endl;
+        DEBUG(1) std::cout << "HashMap Value: " << i << std::endl;
     }
 }
 
@@ -1164,6 +1165,9 @@ std::string getcallstack(THREADID threadid) {
     std::vector<string> out;
     CALLSTACK::IPVEC ipvec;
     cs.emit_stack(cs.depth(), out, ipvec);
+    DEBUG(1) for (uint32_t i = 0; i < out.size(); i++) {
+        std::cout << out[i] << std::endl;
+    }
     std::stringstream unique_cs(ios_base::app | ios_base::out);
 
     for (auto i : ipvec) {
@@ -1175,8 +1179,10 @@ std::string getcallstack(THREADID threadid) {
         for (auto j : imgvec) {
             if (name == (j.name)) {
                 unique_cs << i.ipaddr - j.baseaddr;
-                std::cout << name << " " << j.baseaddr << " " << unique_cs.str()
-                          << " " << i.ipaddr << std::endl;
+                DEBUG(1)
+                    std::cout << name << " " << j.baseaddr << " "
+                              << unique_cs.str() << " " << i.ipaddr
+                              << std::endl;
             }
         }
     }
@@ -1199,7 +1205,7 @@ ADDRINT get_callsite_offset(ADDRINT callsite) {
  */
 void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
              char const *type, std::string callstack, ADDRINT old_ptr) {
-    DEBUG(0)
+    DEBUG(1)
     std::cout << "doalloc " << std::hex << addr << " " << size << " type "
               << type << std::endl;
 
@@ -1238,12 +1244,12 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     if (above == heap.end()) {
         /* No inbetween slot found, thus append to the end */
         heap.push_back(obj);
-    } else if (obj.base >= below->base + below->size) {
+    } else if (below == heap.begin() || obj.base >= below->base + below->size) {
         /* Valid inbetween slot found, thus insert before 'above' */
         heap.insert(above, obj);
     } else {
         /* Invalid inbetween slot found, thus quit */
-        DEBUG(0) printheap();
+        printheap();
         ASSERT(false, "[Error] Corrupted heap?!");
     }
     /* Print the current obj into the heapfile */
@@ -1258,7 +1264,7 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
  * This function is not thread-safe. Lock first.
  */
 uint32_t dofree(ADDRINT addr) {
-    DEBUG(0) std::cout << "dofree " << std::hex << addr << std::endl;
+    DEBUG(1) std::cout << "dofree " << std::hex << addr << std::endl;
     if (!addr) {
         return 0;
     }
@@ -1269,8 +1275,8 @@ uint32_t dofree(ADDRINT addr) {
         heap.erase(it);
         return it->id;
     }
-    std::cout << "[Error] Invalid free!" << std::endl;
-    DEBUG(0) printheap();
+    printheap();
+    ASSERT(false, "[Error] Invalid free!");
     return 0;
 }
 
@@ -1642,8 +1648,9 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
                    const CONTEXT *ctxt) {
     if (!Record)
         return;
-    std::cout << "ip in memread is   " << (uint64_t)ip << " " << std::endl;
-    //  PIN_MutexLock(&lock);
+    DEBUG(1)
+        std::cout << "ip in memread is   " << (uint64_t)ip << " " << std::endl;
+    // PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = READ;
     entry.ip = ip; // getLogicalAddress(ip);
@@ -1675,7 +1682,7 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     entry.type = WRITE;
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_STACK_PTR) : 0;
-    std::cout << " TOP from WRITE is " << target << std::endl;
+    DEBUG(1) std::cout << " TOP from WRITE is " << target << std::endl;
     entry.ip = ip; // getLogicalAddress(ip);
     entry.data = getLogicalAddress(addr);
     DEBUG(3)
@@ -1845,8 +1852,9 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
         return;
     entry_t entry;
     entry.type = FUNC_EXIT;
-    std::cout << " TOP from func EXIT is "
-              << PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
+    DEBUG(1)
+        std::cout << " TOP from func EXIT is "
+                  << PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
     entry.ip = (void *)ins; // getLogicalAddress((void *)((uintptr_t)ins));
     entry.data = getLogicalAddress((void *)((uintptr_t)target));
     DEBUG(2)
@@ -2167,7 +2175,7 @@ VOID instrumentCallBranch(INS bbl, INS bp, bool fast_recording) {
     } else if (INS_IsBranch(bp)) {
         if (KnobBbl.Value()) {
             if (INS_Opcode(bp) == XED_ICLASS_XEND) {
-                std::cout << "Ignoring XEND" << std::endl;
+                DEBUG(1) std::cout << "Ignoring XEND" << std::endl;
             } else {
                 /* unconditional jumps */
                 INS_InsertCall(bp, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordBranch),

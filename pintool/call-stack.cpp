@@ -332,10 +332,6 @@ void CallStack::emit_stack(UINT32 depth, vector<string> &out,
         }
     }
     out.push_back("\n");
-
-    for (uint32_t i = 0; i < out.size(); i++) {
-        std::cout << out[i] << std::endl;
-    }
 }
 
 void CallStack::get_targets(list<ADDRINT> &out) {
