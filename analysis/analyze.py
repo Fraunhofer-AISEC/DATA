@@ -585,8 +585,8 @@ def generic_leakage_test(fixed, random):
         assert fl.ip == rl.ip
 
         # parse key_index and key
-        key_index = set(e.key_index for e in fl.evidence)
-        key = set(e.key for e in fl.evidence)
+        key_index = set(e.key.index for e in fl.evidence)
+        key = set(e.key.value for e in fl.evidence)
         ## Check if `fl` only contains fixed traces
         if len(key_index) != 1 or len(key) != 1:
             assert False

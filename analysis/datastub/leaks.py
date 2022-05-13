@@ -327,6 +327,26 @@ class MergeMap:
 """
 
 
+class Key:
+    def __init__(self, index, value):
+        self.index = index
+        self.value = value
+
+    def __str__(self):
+        label = "key"
+        value = self.value.decode()
+        if "\n" in value:
+            label = "key_index"
+            value = self.index
+        string = f"{label}='{value}'"
+        return string
+
+
+"""
+*************************************************************************
+"""
+
+
 class DataLeakEntry:
     def __init__(self, addr):
         self.addr = addr
@@ -573,8 +593,7 @@ class NSLeak(object):
         self.confidence = conf
         self.isleak = isleak
 
-        self.key_index = key_index
-        self.key = key
+        self.key = Key(key_index, key)
 
     def normalized(self):
         if not self.isleak or self.nstype == NSPType.Noleak:
@@ -599,7 +618,7 @@ class NSLeak(object):
             (self.nstype in [NSPType.Type1a, NSPType.Type1b])
             and (other.nstype in [NSPType.Type1a, NSPType.Type1b])
         ) or ((self.nstype in [NSPType.Type2]) and (other.nstype in [NSPType.Type2])):
-            return self.teststat < other.teststat
+            return self.key.index < other.key.index
 
     def __eq__(self, other):
         if self.isleak is False and other.isleak is False:
@@ -611,7 +630,7 @@ class NSLeak(object):
             and (self.limit == other.limit)
             and (self.confidence == other.confidence)
             and (self.isleak == other.isleak)
-            and (self.key_index == self.key_index)
+            and (self.key.index == self.key.index)
         ):
             return True
         else:
@@ -638,7 +657,7 @@ class NSLeak(object):
         string += (
             f" kuiper='{self.teststat:.4f}' "
             f"significance='{self.limit:.4f}' confidence='{self.confidence:.4f}' "
-            f"key='{self.key.decode()}'"
+            f"{str(self.key)}"
         )
         return string
 
@@ -753,17 +772,16 @@ class EvidenceEntry:
     # count:    If EEs are merged, duplicates are collapsed and count is increased.
     def __init__(self, entries, key, source, origin, key_index):
         self.entries = entries
-        self.key = key
+        self.key = Key(key_index, key)
         self.source = source
         self.origin = origin
-        self.key_index = key_index
         self.count = 1
 
     def element(self):
         entry = -1
         if len(self.entries) != 0:
             entry = self.entries[0]
-        return (self.key_index, entry)
+        return (self.key.index, entry)
 
     def __hash__(self):
         return hash(self.element())

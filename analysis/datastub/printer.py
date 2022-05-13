@@ -192,7 +192,7 @@ class XmlLeakPrinter:
             if len(obj.evidence) > 0:
                 self.startNode("evidences")
 
-                key_indxs = [e.key_index for e in obj.evidence]
+                key_indxs = [e.key.index for e in obj.evidence]
                 evidences = [[] for _ in range(max(key_indxs) + 1)]
                 for (idx, key_indx) in enumerate(key_indxs):
                     evidences[key_indx].append(obj.evidence[idx])
@@ -209,8 +209,8 @@ class XmlLeakPrinter:
                     if idx == 0:
                         node = f"{node_plain} origin='random'"
                     else:
-                        key = evidence[0].key.decode()
-                        node = f"{node_plain} origin='fixed' key='{key}'"
+                        node = f"{node_plain} origin='fixed' {str(evidence[0].key)}"
+
                     self.startNode(node)
                     obj_print.doprint(self)
                     self.endNode(node_plain)
