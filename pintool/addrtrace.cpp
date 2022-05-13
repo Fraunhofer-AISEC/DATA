@@ -350,8 +350,8 @@ ADDRINT execute_commands(const std::string command, short pos,
     std::string tmp = "0x" + (std::string)buffer;
     DEBUG(1) std::cout << " tmp is " << tmp << std::endl;
     DEBUG(1)
-        std::cout << " func is " << std::hex << strtol(tmp.c_str(), NULL, 0)
-                  << std::endl;
+    std::cout << " func is " << std::hex << strtol(tmp.c_str(), NULL, 0)
+              << std::endl;
 
     return ((ADDRINT)strtol(tmp.c_str(), NULL, 0));
 }
@@ -1180,9 +1180,8 @@ std::string getcallstack(THREADID threadid) {
             if (name == (j.name)) {
                 unique_cs << i.ipaddr - j.baseaddr;
                 DEBUG(1)
-                    std::cout << name << " " << j.baseaddr << " "
-                              << unique_cs.str() << " " << i.ipaddr
-                              << std::endl;
+                std::cout << name << " " << j.baseaddr << " " << unique_cs.str()
+                          << " " << i.ipaddr << std::endl;
             }
         }
     }
@@ -1649,7 +1648,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
     if (!Record)
         return;
     DEBUG(1)
-        std::cout << "ip in memread is   " << (uint64_t)ip << " " << std::endl;
+    std::cout << "ip in memread is   " << (uint64_t)ip << " " << std::endl;
     PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = READ;
@@ -1853,8 +1852,8 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
     entry_t entry;
     entry.type = FUNC_EXIT;
     DEBUG(1)
-        std::cout << " TOP from func EXIT is "
-                  << PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
+    std::cout << " TOP from func EXIT is "
+              << PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
     entry.ip = (void *)ins; // getLogicalAddress((void *)((uintptr_t)ins));
     entry.data = getLogicalAddress((void *)((uintptr_t)target));
     DEBUG(2)
@@ -1949,7 +1948,9 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         if (imgfile.is_open()) {
             for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
                  sym = SYM_Next(sym)) {
-                imgfile << std::hex << SYM_Address(sym) << ":" + SYM_Name(sym)
+                imgfile << std::hex << SYM_Address(sym)
+                        << ":" + PIN_UndecorateSymbolName(
+                                     SYM_Name(sym), UNDECORATION_NAME_ONLY)
                         << std::endl;
             }
         }

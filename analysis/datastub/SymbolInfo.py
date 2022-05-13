@@ -38,10 +38,10 @@ from datastub.utils import debug
 
 def readelfsyms(fname, image):
     try:
-        command = "objdump -f %s" % (fname)
+        command = "objdump -f --demangle %s" % (fname)
         output = subprocess.check_output(command.split(" ")).decode("utf-8")
         image.dynamic = output.find("DYNAMIC") >= 0
-        command = "nm -nS --defined-only %s" % (fname)
+        command = "nm -nS --demangle --defined-only %s" % (fname)
         output = subprocess.check_output(command.split(" ")).decode("utf-8")
         lines = output.splitlines()
     except OSError:
@@ -141,14 +141,16 @@ class SymbolInfo:
                     (lower, Symbol(lower, upper - lower, "", img, "", True))
                 )
             else:
-                data = line.split(":")
-                if len(data) == 2:
-                    [addr, symbol] = data
-                    size = "0"
-                    stype = "t"
-                else:
-                    assert len(data) == 4
-                    [addr, size, symbol, stype] = data
+                [addr, symbol] = line.split(":", 1)
+                size = "0"
+                stype = "t"
+                if any([":" in string for string in symbol.split("::")]):
+                    [size, symbol] = symbol.split(":", 1)
+                    [symbol, stype] = symbol.rsplit(":", 1)
+                    # assert not any([":" in string for string in symbol.split("::")])
+                symbol = symbol.replace("<", "&lt")
+                symbol = symbol.replace(">", "&gt")
+                symbol = symbol.replace("&", "&amp")
                 addr = int(addr, 16)
                 size = int(size, 16)
                 self.insert_update_symbol(Symbol(addr, size, symbol, img, stype))
