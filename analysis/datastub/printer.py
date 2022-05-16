@@ -26,7 +26,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import struct
 from collections import Counter
-from copy import deepcopy
 
 from datastub.utils import debug
 from datastub.SymbolInfo import SymbolInfo
@@ -42,7 +41,6 @@ from datastub.leaks import (
     LeakStatus,
     LibHierarchy,
     Library,
-    MergeMap,
     FunctionLeak,
     Type,
 )
@@ -198,12 +196,11 @@ class XmlLeakPrinter:
                     evidences[key_indx].append(obj.evidence[idx])
 
                 for (idx, evidence) in enumerate(evidences):
-                    if len(evidence) == 0:
+                    entries = Counter(
+                        [entry for ee in evidence for entry in ee.entries]
+                    )
+                    if len(entries) == 0:
                         continue
-                    evidence = deepcopy(evidence)
-
-                    obj_print = MergeMap(EvidenceEntry)
-                    obj_print.merge(evidence)
 
                     node_plain = "phase2" if evidence[0].source == 0 else "phase3"
                     if idx == 0:
@@ -212,7 +209,8 @@ class XmlLeakPrinter:
                         node = f"{node_plain} origin='fixed' {str(evidence[0].key)}"
 
                     self.startNode(node)
-                    obj_print.doprint(self)
+                    for (key, value) in entries.items():
+                        self.doprint_line(f"{format(key, 'x')}: {value}")
                     self.endNode(node_plain)
 
                 self.endNode("evidences")
