@@ -1013,11 +1013,9 @@ def merge_leaks_recursive(B, callstack):
     if debuglevel(3):
         callstack.doprint_reverse()
     for leak in B.dataleaks:
-        c = copy.deepcopy(leak)
-        leaks.report_leak(callstack, c)
+        leaks.report_leak(callstack, leak)
     for leak in B.cfleaks:
-        c = copy.deepcopy(leak)
-        leaks.report_leak(callstack, c)
+        leaks.report_leak(callstack, leak)
     for k in B.children:
         child = B.children[k]
         callstack.docall_context(child.ctxt)
