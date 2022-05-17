@@ -357,45 +357,42 @@ ADDRINT execute_commands(const std::string command, short pos,
     return ((ADDRINT)strtol(tmp.c_str(), NULL, 0));
 }
 
-void *getLogicalAddress(void *ip) {
-    // std::cout << "Converting Virtual IP:     " << (uint64_t)ip  <<std::endl;
-    uint64_t *la = static_cast<uint64_t *>(ip);
-    if (ip == nullptr) {
+void *getLogicalAddress(void *virt_addr) {
+    DEBUG(1)
+    std::cout << "Converting VirtualAddr 0x" << virt_addr << std::endl;
+
+    if (virt_addr == nullptr) {
         std::cout << " ERROR: dereferenced a nullptr " << std::endl;
-        // assert
         return nullptr;
     }
 
-    // is the Virtual Address in the Heap object address space?
+    // Is the Virtual Address in the Heap object address space?
+    uint64_t *log_addr = static_cast<uint64_t *>(virt_addr);
     for (auto i : heap) {
-        if ((uint64_t)ip >= i.base && (uint64_t)ip <= (i.base + i.size)) {
+        if ((uint64_t)virt_addr >= i.base &&
+            (uint64_t)virt_addr <= (i.base + i.size)) {
             logaddrfile << setw(25) << "HEAP"
-                        << " " << setw(25) << (uint64_t)ip << " ";
-            la = (uint64_t *)(getIndex(i.hash.substr(32, 8)) |
-                              ((uint64_t)ip - i.base));
-            std::cout << " heap hash " << (uint64_t)la << std::endl;
-            logaddrfile << setw(25) << la << " " << std::endl;
+                        << " " << setw(25) << (uint64_t)virt_addr << " ";
+            log_addr = (uint64_t *)(getIndex(i.hash.substr(32, 8)) |
+                                    ((uint64_t)virt_addr - i.base));
+            logaddrfile << setw(25) << log_addr << " " << std::endl;
+            std::cout << " heap hash " << log_addr << std::endl;
 
-            return la;
+            return log_addr;
         }
     }
 
-    // is the Virtual Address in the Heap address space
+    // Is the Virtual Address in the Heap address space,
     // but does not belong to any heap object already tracked?
-    if ((uint64_t)ip >= heapBaseAddr && (uint64_t)ip <= heapEndAddr) {
-        std::cout << "ERROR: Heap corruption?" << std::endl;
-        std::cout << "Questionable Address 0x" << std::hex << ip << std::endl;
-        return ip;
+    if ((uint64_t)virt_addr >= heapBaseAddr &&
+        (uint64_t)virt_addr <= heapEndAddr) {
+        std::cout << "Questionable VirtAddr within heap " << virt_addr
+                  << std::endl;
+        ASSERT(false, "[pintool] Error: Heap corruption");
     }
-
-    DEBUG(1) std::cout << "Not classified IP " << (uint64_t)ip << std::endl;
-    /* for (auto i : funcvec) {
-                    if ((uint64_t)ip >= i.baseaddr && (uint64_t)ip <= i.endaddr)
-       { std::cout<< "Missed IP is " << (uint64_t)ip << "Image name is " <<
-       i.name << "Function is " << i.funcname<<std::endl;
-                    }
-            }*/
-    return ip;
+    DEBUG(1)
+    std::cout << "Not classified IP " << (uint64_t)virt_addr << std::endl;
+    return virt_addr;
 }
 
 /***********************************************************************
