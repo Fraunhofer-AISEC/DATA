@@ -1318,14 +1318,7 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     obj.type = type;
     obj.callstack = callstack;
     calculate_sha1_hash(&obj);
-    /*if (allocmap.count(addr)) {
-      hash.update(allocmap[to_hash.str()].back());
-      allocmap[to_hash.str()].push_back(hash.final());
-      obj->hash = allocmap[to_hash.str()].back();
-      for (auto &i : allocmap[to_hash.str()]) {
-        std::cout <<"Val for the colliding key is " << std::endl;
-     // }
-    } else {*/
+
     if (!old_ptr) {
         allocmap[addr].push_back(obj.hash.substr(32, 8));
     }
@@ -1341,21 +1334,6 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
             allocmap[addr].push_back(obj.hash.substr(32, 8));
         }
     }
-
-    /*		allocmapfile << setw(25) << addr << " " << setw(25);
-                    auto var = allocmap[addr];
-                    for (auto i : var) {
-                                            allocmapfile << i << " ";
-                    }
-                    allocmapfile << std::endl;
-      //}*/
-    /*for ( auto it : allocmap) {
-            allocmapfile << setw(25) << it.first << " " << setw(25);
-            for (auto i : it.second) {
-                                    allocmapfile << i << " ";
-            }
-            allocmapfile << std::endl;
-    }*/
 
     DEBUG(0)
     std::cout << "doalloc " << std::hex << addr << " " << size << std::endl;
