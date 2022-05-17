@@ -1273,7 +1273,7 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
             }
             allocmap[addr].push_back(obj.hash.substr(32, 8));
         } else {
-            allocmap[addr].push_back(obj.hash.substr(32, 8));
+            ASSERT(false, "[Error] doalloc has a valid old_ptr, but no elements!");
         }
     }
 
