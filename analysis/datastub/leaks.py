@@ -327,6 +327,28 @@ class MergeMap:
 """
 
 
+class Key:
+    MAX_BYTES_TO_PRINT = 32
+
+    def __init__(self, index, value):
+        self.index = index
+        self.value = value
+
+    def __str__(self):
+        label = "key"
+        value = self.value.decode()
+        if "\n" in value or len(value) > Key.MAX_BYTES_TO_PRINT:
+            label = "key_index"
+            value = self.index
+        string = f"{label}='{value}'"
+        return string
+
+
+"""
+*************************************************************************
+"""
+
+
 class DataLeakEntry:
     def __init__(self, addr):
         self.addr = addr
