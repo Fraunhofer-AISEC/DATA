@@ -141,14 +141,13 @@ class SymbolInfo:
                     (lower, Symbol(lower, upper - lower, "", img, "", True))
                 )
             else:
-                data = line.split(":")
-                if len(data) == 2:
-                    [addr, symbol] = data
-                    size = "0"
-                    stype = "t"
-                else:
-                    assert len(data) == 4
-                    [addr, size, symbol, stype] = data
+                [addr, symbol] = line.split(":", 1)
+                size = "0"
+                stype = "t"
+                if any([":" in string for string in symbol.split("::")]):
+                    [size, symbol] = symbol.split(":", 1)
+                    [symbol, stype] = symbol.rsplit(":", 1)
+                    # assert not any([":" in string for string in symbol.split("::")])
                 addr = int(addr, 16)
                 size = int(size, 16)
                 self.insert_update_symbol(Symbol(addr, size, symbol, img, stype))
