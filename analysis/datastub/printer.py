@@ -27,6 +27,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import struct
 from collections import Counter
 from copy import deepcopy
+from xml.sax.saxutils import escape
 
 from datastub.utils import debug
 from datastub.SymbolInfo import SymbolInfo
@@ -75,7 +76,7 @@ class XmlLeakPrinter:
         if SymbolInfo.isopen():
             sym = SymbolInfo.lookup(ip)
             if sym is not None:
-                self.outstream.write(sym.strat(ip))
+                self.outstream.write(escape(sym.strat(ip)))
             else:
                 self.outstream.write(hex(ip))
         else:
@@ -259,7 +260,7 @@ class XmlLeakPrinter:
             self.endNode("Lib")
         elif isinstance(obj, FunctionLeak):
             self.startNode("Function")
-            self.doprint_line(obj.__str__())
+            self.doprint_line(escape(obj.__str__()))
             if param1:
                 if len(obj.dataleaks) > 0:
                     self.startNode(DATALEAKS)
