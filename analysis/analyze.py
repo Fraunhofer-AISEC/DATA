@@ -493,6 +493,18 @@ def _glt_sanity_check_abort(lengths, limit=1):
     return False
 
 
+def _glt_sort_and_map(mapping_table, data):
+    tmp_data = dict()
+    # Sort data from big to little wrt to the counts
+    data = sorted(data.items(), key=lambda kv: kv[1], reverse=True)
+    # Map addr to new value
+    for (address, count) in data:
+        if address not in mapping_table:
+            mapping_table[address] = len(mapping_table.keys())
+        tmp_data[mapping_table[address]] = count
+    return tmp_data
+
+
 def _glt_solve_entry_mismatches(fnum, rnum):
     fset = set(fnum.keys())
     rset = set(rnum.keys())
@@ -531,6 +543,15 @@ def generic_leakage_test1b(msgleak, fl, key_index, key, fnum_uniq, rnum_uniq):
 
 def generic_leakage_test2(msgleak, fl, key_index, key, fdic, rdic):
     test = {"idx": "2", "nsp_type": NSPType.Type2}
+    return generic_leakage_testX(msgleak, fl, key_index, key, fdic, rdic, test)
+
+
+def generic_leakage_test2a(msgleak, fl, key_index, key, fdic, rdic):
+    mapping_table = dict()
+    fixed_data = _glt_sort_and_map(mapping_table, fixed_data)
+    random_data = _glt_sort_and_map(mapping_table, random_data)
+
+    test = {"idx": "2a", "nsp_type": NSPType.Type2a}
     return generic_leakage_testX(msgleak, fl, key_index, key, fdic, rdic, test)
 
 
@@ -624,6 +645,11 @@ def generic_leakage_test(fixed, random):
 
         # Test2: number of accesses per address
         (msg["leak"], fl) = generic_leakage_test2(
+            msg["leak"], fl, key_index, key, fdic, rdic
+        )
+
+        # Test2a: number of accesses per address with sorted and mapped data
+        (msg["leak"], fl) = generic_leakage_test2a(
             msg["leak"], fl, key_index, key, fdic, rdic
         )
 
