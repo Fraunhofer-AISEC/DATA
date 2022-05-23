@@ -536,8 +536,9 @@ class NSPType(Enum):
     Type1a = 0  # number of addresses
     Type1b = 1  # number of unique addresses
     Type2  = 2  # number of accesses per address    # noqa
-    Type3  = 3  # position of address during access # noqa
-    Noleak = 4  # special: no leakage detected
+    Type2a = 3  # number of accesses per address    # noqa
+    Type3  = 4  # position of address during access # noqa
+    Noleak = 5  # special: no leakage detected
 # fmt: on
 
     def __lt__(self, other):
@@ -554,6 +555,8 @@ class NSPType(Enum):
             string = "pos(b)"
         elif self == NSPType.Type2:
             string = "addr"
+        elif self == NSPType.Type2a:
+            string = "addr_sort"
         elif self == NSPType.Type3:
             string = "pos"
         else:
