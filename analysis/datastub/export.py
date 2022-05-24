@@ -188,7 +188,14 @@ def export_ip(ip, datafs, imgmap, info_map):
                 # asm_dump = subprocess.check_output(["objdump", "-Dj", ".text", bin_file_path], universal_newlines=True)
                 with datafs.create_file(asm_file_path) as f:
                     subprocess.call(
-                        ["objdump", "-dS", bin_file_path],
+                        [
+                            "objdump",
+                            "--disassemble",
+                            "--demangle",
+                            "--source",
+                            "--no-show-raw-insn",
+                            bin_file_path,
+                        ],
                         universal_newlines=True,
                         stdout=f,
                     )
