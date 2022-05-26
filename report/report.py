@@ -1,5 +1,6 @@
 import argparse
 from collections import defaultdict
+import glob
 from itertools import chain
 import pylatex
 from pylatex import Command, NewPage, NewLine, NoEscape, Package, Section, Subsection
@@ -54,6 +55,9 @@ parser.add_argument(
 )
 parser.add_argument("zip", nargs="?", default=None, help="Path to the 'framework.zip'")
 args = parser.parse_args()
+
+PICKLE = ["result_phase", ".pickle"]
+ZIP = "framework.zip"
 
 
 class LeakOverview:
@@ -440,6 +444,17 @@ class Report:
 
 
 if __name__ == "__main__":
+    if args.pickle is None or args.zip is None:
+        experiment_dir = "/".join(args.experiment.split("/")[:-1])
+        results = list()
+        for file in glob.glob(f"{experiment_dir}/{'*'.join(PICKLE)}"):
+            results.append(file)
+        args.pickle = sorted(results)[-1]
+        args.zip = f"{experiment_dir}/{ZIP}"
+
+        debug(0, f"[REPORT] Automatically selected {args.pickle}")
+        debug(0, f"[REPORT] Automatically selected {args.zip}")
+
     try:
         call_hierarchy = loadpickle(args.pickle)
         if not call_hierarchy:
@@ -448,7 +463,7 @@ if __name__ == "__main__":
         debug(0, "Please enter a valid pickle file path (mandatory)")
         sys.exit(ErrorCode.INVALID_PICKLE)
     except Exception as e:
-        debug(0, "Unable to load pickle file")
+        debug(0, f"Unable to load pickle file at {args.pickle}")
         debug(1, "Exception: " + str(e))
         sys.exit(ErrorCode.CANNOT_LOAD_PICKLE)
 
@@ -458,7 +473,7 @@ if __name__ == "__main__":
         debug(0, "Please enter a valid zip file path (mandatory)")
         sys.exit(ErrorCode.INVALID_ZIP)
     except Exception:
-        debug(0, "Unable to load zip file")
+        debug(0, f"Unable to load zip file at {args.zip}")
         sys.exit(ErrorCode.CANNOT_LOAD_ZIP)
 
     if call_hierarchy is None:
