@@ -1,0 +1,11 @@
+*.aux
+*.dvi
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.pdf
+*.tex
+*.toc
+*.swp
+__pycache__/
