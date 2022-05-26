@@ -9,3 +9,5 @@
 *.toc
 *.swp
 __pycache__/
+*/
+*.zip
