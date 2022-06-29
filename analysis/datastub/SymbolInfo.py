@@ -38,10 +38,10 @@ from datastub.utils import debug
 
 def readelfsyms(fname, image):
     try:
-        command = "objdump -f %s" % (fname)
+        command = "objdump --demangle -f %s" % (fname)
         output = subprocess.check_output(command.split(" ")).decode("utf-8")
         image.dynamic = output.find("DYNAMIC") >= 0
-        command = "nm -nS --defined-only %s" % (fname)
+        command = "nm --demangle -nS --defined-only %s" % (fname)
         output = subprocess.check_output(command.split(" ")).decode("utf-8")
         lines = output.splitlines()
     except OSError:
