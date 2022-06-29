@@ -593,7 +593,7 @@ class NSPType(Enum):
 
 class NSLeak(object):
     def __init__(
-        self, nstype, key_index, key, addr=0, statistic=0.0, limit=0.0, conf=0.0, isleak=False
+        self, nstype, key, addr=0, statistic=0.0, limit=0.0, conf=0.0, isleak=False
     ):
         self.nstype = nstype
         self.address = addr
@@ -602,7 +602,6 @@ class NSLeak(object):
         self.confidence = conf
         self.isleak = isleak
 
-        self.key_index = key_index
         self.key = key
 
     def normalized(self):
@@ -628,7 +627,7 @@ class NSLeak(object):
             (self.nstype in [NSPType.Type1a, NSPType.Type1b])
             and (other.nstype in [NSPType.Type1a, NSPType.Type1b])
         ) or ((self.nstype in [NSPType.Type2]) and (other.nstype in [NSPType.Type2])):
-            return self.teststat < other.teststat
+            return self.key.index < other.key.index
 
     def __eq__(self, other):
         if self.isleak is False and other.isleak is False:
@@ -640,7 +639,7 @@ class NSLeak(object):
             and (self.limit == other.limit)
             and (self.confidence == other.confidence)
             and (self.isleak == other.isleak)
-            and (self.key_index == self.key_index)
+            and (self.key.index == self.key.index)
         ):
             return True
         else:
@@ -667,7 +666,7 @@ class NSLeak(object):
         string += (
             f" kuiper='{self.teststat:.4f}' "
             f"significance='{self.limit:.4f}' confidence='{self.confidence:.4f}' "
-            f"key='{self.key.decode()}'"
+            f"{str(self.key)}"
         )
         return string
 
@@ -780,19 +779,19 @@ class EvidenceEntry:
     # key:      Key for which this EE was recorded.
     # source:
     # count:    If EEs are merged, duplicates are collapsed and count is increased.
-    def __init__(self, entries, key, source, origin, key_index):
+    def __init__(self, entries, key, source, origin):
         self.entries = entries
-        self.key = key
         self.source = source
         self.origin = origin
-        self.key_index = key_index
         self.count = 1
+
+        self.key = key
 
     def element(self):
         entry = -1
         if len(self.entries) != 0:
             entry = self.entries[0]
-        return (self.key_index, entry)
+        return (self.key.index, entry)
 
     def __hash__(self):
         return hash(self.element())
