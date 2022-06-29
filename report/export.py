@@ -36,13 +36,15 @@ for args_result in args.results:
         # Copy files into the export directory
         export_dir = root.replace(args_result, "").replace("/", "_").lstrip("_")
         export_dirs.append(export_dir)
-        pathlib.Path(f"{root}/{export_dir}", exist_ok=True)
+        path = pathlib.Path(export_dir)
+        path.mkdir(exist_ok=True)
         for xml in glob.glob(f"{root}/{'*'.join(XML)}"):
             shutil.copy(xml, f"{export_dir}/.")
         shutil.copy(f"{result}", f"{export_dir}/.")
         shutil.copy(f"{root}/{ZIP}", f"{export_dir}/.")
         # Create report
         report_cmd = f"python report.py {export_dir} {result} {root}/{ZIP}"
+        print(f"[EXPORT] Creating report: {report_cmd}")
         subprocess.run(report_cmd, shell=True, check=True)
         shutil.copy(f"{export_dir}.pdf", f"{export_dir}/.")
         # Cleanup directory
