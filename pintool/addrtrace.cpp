@@ -1949,7 +1949,9 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         if (imgfile.is_open()) {
             for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
                  sym = SYM_Next(sym)) {
-                imgfile << std::hex << SYM_Address(sym) << ":" + SYM_Name(sym)
+                imgfile << std::hex << SYM_Address(sym)
+                        << ":" + PIN_UndecorateSymbolName(
+                                     SYM_Name(sym), UNDECORATION_NAME_ONLY)
                         << std::endl;
             }
         }
