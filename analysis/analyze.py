@@ -59,6 +59,7 @@ from datastub.leaks import (
     Entry,
     EvidenceEntry,
     EvidenceSource,
+    Key,
     Lookahead,
     MergePoint,
     NSLeak,
@@ -431,7 +432,7 @@ def load_leaks(files, keys, source):
             (evidence, idx) = read_and_advance(trace, idx, "Q", no)
             debug(2, str(evidence))
 
-            ee = EvidenceEntry(evidence, key, source, origin, key_index)
+            ee = EvidenceEntry(evidence, Key(key_index, key), source, origin)
             leak.add_evidence(ee)
             if debuglevel(3):
                 cs.doprint_reverse()
@@ -567,8 +568,9 @@ def generic_leakage_test2a(msgleak, fl, key_index, key, fdic, rdic):
 def generic_leakage_testX(msgleak, fl, key_index, key, fixed_data, random_data, test):
     test_idx = test["idx"]
     nsp_type = test["nsp_type"]
+    key = Key(key_index, key)
 
-    abort_cfl = NSLeak(nsp_type, key_index, key)
+    abort_cfl = NSLeak(nsp_type, key)
     abort_msgleak = msgleak + f"    [Test{test_idx}] -- {str(abort_cfl)}\n"
 
     if _glt_sanity_check_abort([len(fixed_data), len(random_data)]):
@@ -588,7 +590,7 @@ def generic_leakage_testX(msgleak, fl, key_index, key, fixed_data, random_data, 
 
     (D, L, R, confidence) = _glt_do_kuipertest(fhist, rhist, fhist_len, rhist_len)
 
-    cfl = NSLeak(nsp_type, key_index, key, None, D, L, confidence, R)
+    cfl = NSLeak(nsp_type, key, None, D, L, confidence, R)
     fl.status.nsleak += [cfl]
     msgleak += f"    [Test{test_idx}] -- {str(cfl)}\n"
 
@@ -615,8 +617,8 @@ def generic_leakage_test(fixed, random):
         assert fl.ip == rl.ip
 
         # parse key_index and key
-        key_index = set(e.key_index for e in fl.evidence)
-        key = set(e.key for e in fl.evidence)
+        key_index = set(e.key.index for e in fl.evidence)
+        key = set(e.key.value for e in fl.evidence)
         ## Check if `fl` only contains fixed traces
         if len(key_index) != 1 or len(key) != 1:
             assert False
