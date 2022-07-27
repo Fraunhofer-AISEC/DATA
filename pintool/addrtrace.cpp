@@ -1951,6 +1951,48 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         imgfile << "Image:" << std::endl;
         imgfile << name << std::endl;
         imgfile << std::hex << low << ":" << high << std::endl;
+
+        imgobj_t imgdata;
+        imgdata.name = name;
+        imgdata.baseaddr = low;
+        imgdata.endaddr = high;
+
+        SHA1 hash;
+        hash.update(imgdata.name);
+        imgdata.imghash = hash.final().substr(32, 8);
+
+        imgvec.push_back(imgdata);
+
+        for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
+        {
+            string sec_name = SEC_Name(sec);
+            low = SEC_Address(sec);
+            high = SEC_Address(sec) + SEC_Size(sec);
+
+            DEBUG(1) {
+                std::cout << "[pintool] Sec name: " << sec_name
+                          << std::endl;
+                std::cout << "[pintool] Sec low:  0x " << std::hex << low
+                          << std::endl;
+                std::cout << "[pintool] Sec high: 0x " << std::hex << high
+                          << std::endl;
+            }
+            if (!SEC_Mapped(sec)) {
+                std::cout << "Sec dropped, as it is unmapped: " << sec_name << std::endl;
+                continue;
+            }
+
+            imgobj_t imgdata;
+            imgdata.name = sec_name;
+            imgdata.baseaddr = low;
+            imgdata.endaddr = high;
+
+            SHA1 hash;
+            hash.update(imgdata.name);
+            imgdata.imghash = hash.final().substr(32, 8);
+
+            imgvec.push_back(imgdata);
+        }
     }
 
     if (IMG_Valid(img)) {
