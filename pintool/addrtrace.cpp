@@ -1287,13 +1287,13 @@ uint32_t dofree(ADDRINT addr) {
  * @param size The size parameter passed to malloc
  */
 VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
+    DEBUG(1)
+    std::cout << "[pintool] Malloc called with " << std::hex << size
+              << " at " << ip << std::endl;
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
     if (thread_state[threadid].realloc_state.size() == 0) {
-        DEBUG(1)
-        std::cout << "[pintool] Malloc called with " << std::hex << size
-                  << " at " << ip << std::endl;
         SHA1 hash;
         hash.update(getcallstack(threadid)); /* calculte the hash of the set of
                                                 IPs in the Callstack */
@@ -1318,11 +1318,11 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
  * @param addr The allocated heap pointer
  */
 VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
+    DEBUG(1)
+    std::cout << "[pintool] Malloc returned " << std::hex << addr << std::endl;
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
-    DEBUG(1)
-    std::cout << "[pintool] Malloc returned " << std::hex << addr << std::endl;
     ASSERT(thread_state[threadid].malloc_state.size() > 0,
            "[pintool] Error: Malloc returned but not called");
     alloc_state_t state = thread_state[threadid].malloc_state.back();
@@ -1340,12 +1340,12 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
                          ADDRINT size) {
-    if (!Record)
-        return;
-    // PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "[pintool] Realloc called with " << std::hex << addr << " "
               << size << " at " << ip << std::endl;
+    if (!Record)
+        return;
+    // PIN_MutexLock(&lock);
     SHA1 hash;
     hash.update(getcallstack(
         threadid)); /* calculte the hash of the set of IPs in the Callstack */
@@ -1366,12 +1366,12 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
  * @param addr The allocated heap pointer
  */
 VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
-    if (!Record)
-        return;
-    // PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "[pintool] Realloc returned " << std::hex << addr << " at "
               << ip << std::endl;
+    if (!Record)
+        return;
+    // PIN_MutexLock(&lock);
     ASSERT(thread_state[threadid].realloc_state.size() > 0,
            "[pintool] Error: Realloc returned but not called");
     realloc_state_t state = thread_state[threadid].realloc_state.back();
@@ -1394,13 +1394,13 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
                         ADDRINT size, ADDRINT ret) {
+    DEBUG(1)
+    std::cout << "Calloc called with " << std::hex << nelem << " " << size
+              << std::endl;
     if (!Record)
         return;
     //  PIN_MutexLock(&lock);
     if (thread_state[threadid].calloc_state.size() == 0) {
-        DEBUG(1)
-        std::cout << "Calloc called with " << std::hex << nelem << " " << size
-                  << std::endl;
         SHA1 hash;
         hash.update(getcallstack(threadid)); /* calculate the hash of the set of
                                                 IPs in the Callstack */
@@ -1458,29 +1458,31 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
  * @param threadid The thread
  * @param addr The heap pointer which is munmapped
  */
-VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len) {
-    if (!Record)
-        return;
-    //  PIN_MutexLock(&lock);
+VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len, bool force) {
     DEBUG(1)
     std::cout << "munmap called with " << std::hex << addr << "*" << len
               << std::endl;
+    if (!Record && !force)
+        return;
+    // PIN_MutexLock(&lock);
     dofree(addr);
     //  PIN_MutexUnlock(&lock);
 }
 /**
  * Record mmap
- * @param threadid The thread
- * @param size The size parameter passed to mmap
+ * @param threadid      thread
+ * @param size          size parameter passed to mmap
+ * @param ret           TODO
+ * @param force
  */
 VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
-                      ADDRINT ret) {
-    if (!Record)
+                      ADDRINT ret, bool force) {
+    DEBUG(1)
+    std::cout << "mmap called with " << std::hex << size << std::endl;
+    if (!Record && !force)
         return;
     //  PIN_MutexLock(&lock);
     if (thread_state[threadid].mremap_state.size() == 0) {
-        DEBUG(1)
-        std::cout << "mmap called with " << std::hex << size << std::endl;
         SHA1 hash;
         hash.update(getcallstack(threadid)); /* calculate the hash of the set of
                                                 IPs in the Callstack */
@@ -1501,10 +1503,12 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
  *@param threadid The thread
  * @param addr The allocated heap pointer
  */
-VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
-    //  PIN_MutexLock(&lock);
-
+VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
     DEBUG(1) std::cout << "mmap returned " << std::hex << addr << std::endl;
+    if (!Record && !force)
+        return;
+    // PIN_MutexLock(&lock);
+
     ASSERT(thread_state[threadid].mmap_state.size() != 0,
            "[Error] mmap returned but not called");
 
@@ -1525,12 +1529,12 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
  */
 VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
                         ADDRINT old_size, ADDRINT new_size, ADDRINT ret) {
-    if (!Record)
-        return;
-    //  PIN_MutexLock(&lock);
     DEBUG(1)
     std::cout << "mremap called with " << std::hex << addr << " " << new_size
               << std::endl;
+    if (!Record)
+        return;
+    // PIN_MutexLock(&lock);
 
     SHA1 hash;
     hash.update(getcallstack(
@@ -1553,10 +1557,10 @@ VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
  * @param addr The allocated heap pointer
  */
 VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
+    DEBUG(1) std::cout << "mremap returned " << std::hex << addr << std::endl;
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
-    DEBUG(1) std::cout << "mremap returned " << std::hex << addr << std::endl;
+    // PIN_MutexLock(&lock);
     ASSERT(thread_state[threadid].mremap_state.size() != 0,
            "[Error] mremap returned but not called");
 
@@ -1684,6 +1688,8 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_STACK_PTR) : 0;
     DEBUG(1) std::cout << " TOP from WRITE is " << target << std::endl;
+    DEBUG(1)
+    std::cout << "ip in memwrite is   " << (uint64_t)ip << " " << std::endl;
     entry.ip = ip; // getLogicalAddress(ip);
     entry.data = getLogicalAddress(addr);
     DEBUG(3)
@@ -2071,11 +2077,11 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                                        (AFUNPTR)RecordmmapBefore, IARG_ADDRINT,
                                        MMAP, IARG_THREAD_ID,
                                        IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-                                       IARG_RETURN_IP, IARG_END);
+                                       IARG_RETURN_IP, IARG_BOOL, false, IARG_END);
                         RTN_InsertCall(mmapRtn, IPOINT_AFTER,
                                        (AFUNPTR)RecordmmapAfter, IARG_THREAD_ID,
                                        IARG_FUNCRET_EXITPOINT_VALUE,
-                                       IARG_RETURN_IP, IARG_END);
+                                       IARG_RETURN_IP, IARG_BOOL, false, IARG_END);
                         RTN_Close(mmapRtn);
                     }
 
@@ -2106,7 +2112,8 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                             munmapRtn, IPOINT_BEFORE,
                             (AFUNPTR)RecordmunmapBefore, IARG_THREAD_ID,
                             IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+                            IARG_BOOL, false, IARG_END);
                         RTN_Close(munmapRtn);
                     }
                 }
