@@ -326,8 +326,8 @@ uint64_t getIndex(string hash) {
 ADDRINT execute_commands(const std::string command, short pos,
                          const std::string opt_command) {
     std::stringstream command_string;
-    command_string << "cat /proc/" << pid << "/maps | grep " << command
-                   << " | awk '{print $1}' | cut -f" << pos << " -d-"
+    command_string << "cat /proc/" << pid << "/maps | grep '" << command
+                   << "' | awk '{print $1}' | cut -f" << pos << " -d-"
                    << opt_command;
     DEBUG(1) std::cout << command_string.str() << " command is " << std::endl;
     const std::string to_pass(command_string.str());
