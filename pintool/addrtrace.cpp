@@ -316,6 +316,14 @@ std::vector<thread_state_t> thread_state;
  * Every Logical Address is 64 bit = 32 bit MemoryIndex + 32 bit Offset*/
 /***********************************************************************/
 
+void printheap() {
+    std::cout << "[pintool] Heap:" << std::endl;
+    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
+        std::cout << std::setw(3) << std::hex << it->id << ":" << it->base << "-" << it->size
+                  << std::endl;
+    }
+}
+
 uint64_t getIndex(string hash) {
     uint64_t to_shift;
     sscanf(hash.c_str(), "%llx", (long long unsigned int *)&to_shift);
@@ -1121,14 +1129,6 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v) {
 /***********************************************************************/
 /** Heap recording                                                     */
 /***********************************************************************/
-
-void printheap() {
-    std::cout << "[pintool] Heap:" << std::endl;
-    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        std::cout << std::hex << it->id << ":" << it->base << "-" << it->size
-                  << std::endl;
-    }
-}
 
 /**
  * calculate sha1-hash and use the 4 bytes of the hash as the memory Index
