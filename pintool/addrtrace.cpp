@@ -1146,9 +1146,11 @@ void calculate_sha1_hash(memobj_t *obj) {
     obj->hash = hash.final();
     hashmap[to_hash.str()].push_back(obj->hash);
 
-    DEBUG(1) std::cout << "HashMap for    " << to_hash.str() << std::endl;
-    for (auto &i : hashmap[to_hash.str()]) {
-        DEBUG(1) std::cout << "HashMap Value: " << i << std::endl;
+    DEBUG(1) {
+        std::cout << "HashMap for    " << to_hash.str() << std::endl;
+        for (auto &i : hashmap[to_hash.str()]) {
+            std::cout << "HashMap Value: " << i << std::endl;
+        }
     }
 }
 
