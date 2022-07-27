@@ -2588,12 +2588,5 @@ int main(int argc, char *argv[]) {
     init();
     PIN_StartProgram();
 
-    heapBaseAddr = execute_commands("heap", 1, " ");
-    DEBUG(1)
-    std::cout << "heapBaseAddr is " << std::hex << heapBaseAddr << std::endl;
-    heapEndAddr = execute_commands("heap", 2, " ");
-    DEBUG(1)
-    std::cout << "heapEndAddr is " << std::hex << heapEndAddr << std::endl;
-
     return 0;
 }
