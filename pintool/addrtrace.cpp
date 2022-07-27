@@ -1927,26 +1927,27 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
              * with IMG_SizeMapped instead.
              */
             high = low + IMG_SizeMapped(img);
-            DEBUG(1)
-            std::cout << "[pintool] VDSO low:   0x" << std::hex << low
-                      << std::endl;
-            DEBUG(1)
-            std::cout << "[pintool] VDSO high:  0x" << std::hex << high
-                      << std::endl;
-            DEBUG(1)
-            std::cout << "[pintool] VDSO size mapped:  0x" << std::hex
-                      << IMG_SizeMapped(img) << std::endl;
+            DEBUG(1) {
+                std::cout << "[pintool] VDSO low:   0x" << std::hex << low
+                          << std::endl;
+                std::cout << "[pintool] VDSO high:  0x" << std::hex << high
+                          << std::endl;
+                std::cout << "[pintool] VDSO size mapped:  0x" << std::hex
+                          << IMG_SizeMapped(img) << std::endl;
+            }
             vdsofile.write((const char *)low, IMG_SizeMapped(img));
             vdsofile.close();
             name = KnobVDSO.Value();
         }
 
-        DEBUG(1)
-        std::cout << "[pintool] Image low:  0x " << std::hex << low
-                  << std::endl;
-        DEBUG(1)
-        std::cout << "[pintool] Image high: 0x " << std::hex << high
-                  << std::endl;
+        DEBUG(1) {
+            std::cout << "[pintool] Image name: " << name
+                      << std::endl;
+            std::cout << "[pintool] Image low:  0x " << std::hex << low
+                      << std::endl;
+            std::cout << "[pintool] Image high: 0x " << std::hex << high
+                      << std::endl;
+        }
         imgfile << "Image:" << std::endl;
         imgfile << name << std::endl;
         imgfile << std::hex << low << ":" << high << std::endl;
