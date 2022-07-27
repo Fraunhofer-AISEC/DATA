@@ -2538,12 +2538,14 @@ int main(int argc, char *argv[]) {
     }
 
     /* Getting the stack, heap and vvar address range for this process */
-    stackBaseAddr = execute_commands("stack", 2, " ");
-    DEBUG(1)
-    std::cout << "stackBaseAddr is " << std::hex << stackBaseAddr << std::endl;
-    stackEndAddr = execute_commands("stack", 1, " ");
-    DEBUG(1)
-    std::cout << "stackEndAddr is " << std::hex << stackEndAddr << std::endl;
+    stackBaseAddr = execute_commands("stack", 1, " ");
+    stackEndAddr = execute_commands("stack", 2, " ");
+    DEBUG(1) {
+        std::cout << "stackBaseAddr is " << std::hex << stackBaseAddr
+                  << std::endl;
+        std::cout << "stackEndAddr  is " << std::hex << stackEndAddr
+                  << std::endl;
+    }
 
     imgobj_t imgdata;
     imgdata.name = "vvar";
@@ -2552,13 +2554,13 @@ int main(int argc, char *argv[]) {
     imgdata.imghash = hash.final().substr(32, 8);
 
     imgdata.baseaddr = execute_commands("vvar", 1, " ");
-    DEBUG(1)
-    std::cout << "vvarBaseAddr is " << std::hex << imgdata.baseaddr
-              << std::endl;
-
     imgdata.endaddr = execute_commands("vvar", 2, " ");
-    DEBUG(1)
-    std::cout << "vvarEndAddr is " << std::hex << imgdata.endaddr << std::endl;
+    DEBUG(1) {
+        std::cout << "vvarBaseAddr is " << std::hex << imgdata.baseaddr
+                  << std::endl;
+        std::cout << "vvarEndAddr  is " << std::hex << imgdata.endaddr
+                  << std::endl;
+    }
 
     imgvec.push_back(imgdata);
 
