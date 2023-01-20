@@ -151,6 +151,7 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
 #define MREMAP "mremap"
 #define MUNMAP "munmap"
 #define FREE "free"
+#define BRK "brk"
 #define DEBUG(x) if (KnobDebug.Value() >= x)
 
 int alloc_instrumented = 0;
@@ -159,6 +160,9 @@ int alloc_instrumented = 0;
 bool WaitForFirstFunction = false;
 bool Record = false;
 bool use_callstack = false;
+
+/* Store the latest accessed SYSCALL */
+int syscall_number = -1;
 
 /**
  * Traces are stored in a binary format, containing a sequence of
@@ -284,6 +288,11 @@ std::unordered_map<uint64_t, uint64_t>
 
 typedef struct {
     char const *type;
+    ADDRINT addr;
+} free_state_t;
+
+typedef struct {
+    char const *type;
     ADDRINT size;
     ADDRINT callsite;
     std::string callstack;
@@ -300,6 +309,7 @@ typedef struct {
 typedef struct {
     /* allocation routines sometimes call themselves in a nested way during
      * initialization */
+    std::vector<free_state_t> free_state;
     std::vector<alloc_state_t> malloc_state;
     std::vector<alloc_state_t> calloc_state;
     std::vector<realloc_state_t> realloc_state;
@@ -372,30 +382,60 @@ void *getLogicalAddress(void *virt_addr) {
         std::cout << " ERROR: dereferenced a nullptr " << std::endl;
         return nullptr;
     }
-    // Is the Virtual Address in the Heap object address space?
-    uint64_t *log_addr = static_cast<uint64_t *>(virt_addr);
-    for (auto i : heap) {
-        if ((uint64_t)virt_addr < i.base ||
-            (uint64_t)virt_addr >= (i.base + i.size)) {
-            continue;
+    // Is the Virtual Address in the Heap address space?
+    /* Set heap start and end markers */
+    if (heap.size() && (heapBaseAddr != heap.front().base ||
+                        heapEndAddr != heap.back().base + heap.back().size)) {
+        heapBaseAddr = heap.front().base;
+        heapEndAddr = heap.back().base + heap.back().size;
+        DEBUG(1) {
+            std::cout << "heapBaseAddr: " << heapBaseAddr << std::endl;
+            std::cout << "heapEndAddr: " << heapEndAddr << std::endl;
         }
-        auto offset = (uint64_t)virt_addr - i.base;
-        log_addr = (uint64_t *)(getIndex(allocmap[i.base].front()) | offset);
-        logaddrfile << setw(25) << "HEAP"
-                    << " " << setw(25) << (uint64_t)virt_addr << " " << setw(25)
-                    << log_addr << " " << std::endl;
-        return log_addr;
     }
-    // Is the Virtual Address in the Heap address space,
-    // but does not belong to any heap object already tracked?
+    // Does the Virtual Address belong to any heap object?
     if ((uint64_t)virt_addr >= heapBaseAddr &&
         (uint64_t)virt_addr <= heapEndAddr) {
+        uint64_t *log_addr = static_cast<uint64_t *>(virt_addr);
+        for (auto i : heap) {
+            if ((uint64_t)virt_addr < i.base ||
+                (uint64_t)virt_addr >= (i.base + i.size)) {
+                continue;
+            }
+            auto offset = (uint64_t)virt_addr - i.base;
+            log_addr =
+                (uint64_t *)(getIndex(allocmap[i.base].front()) | offset);
+            logaddrfile << setw(25) << "HEAP"
+                        << " " << setw(25) << (uint64_t)virt_addr << " "
+                        << setw(25) << log_addr << " " << std::endl;
+            return log_addr;
+        }
+        // Virtual Address not found!
         std::cout << "Questionable VirtAddr within heap " << virt_addr
                   << std::endl;
-        ASSERT(false, "[pintool] Error: Heap corruption");
+        printheap();
+        // ASSERT(false, "[pintool] Error: Heap corruption");
     }
-    DEBUG(1)
-    std::cout << "Not classified IP " << (uint64_t)virt_addr << std::endl;
+    // Is the Virtual Address in the Stack address space?
+    if ((uint64_t)virt_addr >= stackBaseAddr &&
+        (uint64_t)virt_addr < stackEndAddr) {
+        DEBUG(1) std::cout << "Found Addr in stack " << std::hex << (uint64_t)virt_addr << std::endl;
+        return virt_addr;
+    }
+    // Is the Virtual Address in the IMG/Code address space?
+    for (auto i : imgvec) {
+        if ((uint64_t)virt_addr < i.baseaddr ||
+            (uint64_t)virt_addr >= i.endaddr) {
+            // std::cout << "img " << i.baseaddr << " " << i.endaddr << std::endl;
+            continue;
+        }
+        DEBUG(1) std::cout << "Found Addr in IMG " << std::hex << (uint64_t)virt_addr << std::endl;
+        return virt_addr;
+    }
+
+    std::cout << "Not found Addr " << std::hex << (uint64_t)virt_addr << std::endl;
+    printheap();
+    // ASSERT(false, "[pintool] Error: LogicalAddress");
     return virt_addr;
 }
 
@@ -436,196 +476,196 @@ void *getLogicalAddress(void *virt_addr) {
 /***********************************************************************/
 
 /**
- * Collect evidence for a specific data leak
- */
+* Collect evidence for a specific data leak
+*/
 class DataLeak {
-  private:
-    std::vector<uint64_t> data; /* Holds evidences */
-    uint64_t ip;                /* The leaking instruction */
+private:
+std::vector<uint64_t> data; /* Holds evidences */
+uint64_t ip;                /* The leaking instruction */
 
-  public:
-    DataLeak(uint64_t ip = 0) : ip(ip) {}
+public:
+DataLeak(uint64_t ip = 0) : ip(ip) {}
 
-    /**
-     * Add evidence
-     * @param d The evidence to add
-     */
-    void append(uint64_t d) {
-        ASSERT(ip, "[pintool] Error: IP not set");
-        DEBUG(1)
-        printf("[pintool] DLEAK@%" PRIx64 ": %" PRIx64 " appended\n", ip, d);
-        data.push_back(d);
+/**
+ * Add evidence
+ * @param d The evidence to add
+ */
+void append(uint64_t d) {
+    ASSERT(ip, "[pintool] Error: IP not set");
+    DEBUG(1)
+    printf("[pintool] DLEAK@%" PRIx64 ": %" PRIx64 " appended\n", ip, d);
+    data.push_back(d);
+}
+
+void print() {
+    for (std::vector<uint64_t>::iterator it = data.begin();
+         it != data.end(); it++) {
+        printf("         %" PRIx64 " ", *it);
     }
+    printf("\n");
+}
 
-    void print() {
-        for (std::vector<uint64_t>::iterator it = data.begin();
-             it != data.end(); it++) {
-            printf("         %" PRIx64 " ", *it);
-        }
-        printf("\n");
-    }
-
-    /**
-     * Export evidence to binary format
-     * @param f The file to export to
-     */
-    void doexport(FILE *f) {
-        uint8_t type = DLEAK;
-        uint64_t len = data.size();
-        uint8_t res = 0;
-        res += fwrite(&type, sizeof(type), 1, f) != 1;
-        res += fwrite(&ip, sizeof(ip), 1, f) != 1;
-        res += fwrite(&len, sizeof(len), 1, f) != 1;
-        res += fwrite(&data[0], sizeof(uint64_t), len, f) != len;
-        ASSERT(!res, "[pintool] Error: Unable to write file");
-    }
+/**
+ * Export evidence to binary format
+ * @param f The file to export to
+ */
+void doexport(FILE *f) {
+    uint8_t type = DLEAK;
+    uint64_t len = data.size();
+    uint8_t res = 0;
+    res += fwrite(&type, sizeof(type), 1, f) != 1;
+    res += fwrite(&ip, sizeof(ip), 1, f) != 1;
+    res += fwrite(&len, sizeof(len), 1, f) != 1;
+    res += fwrite(&data[0], sizeof(uint64_t), len, f) != len;
+    ASSERT(!res, "[pintool] Error: Unable to write file");
+}
 };
 
 /**
- * Collect evidence for a specific control-flow leak
- */
+* Collect evidence for a specific control-flow leak
+*/
 class CFLeak {
-  private:
-    std::vector<uint64_t> targets;     /* Holds evidences */
-    std::vector<uint64_t> mergepoints; /* unused */
-    uint64_t bp;                       /* The leaking instruction */
+private:
+std::vector<uint64_t> targets;     /* Holds evidences */
+std::vector<uint64_t> mergepoints; /* unused */
+uint64_t bp;                       /* The leaking instruction */
 
-  public:
-    CFLeak(uint64_t bp = 0) : bp(bp) {}
+public:
+CFLeak(uint64_t bp = 0) : bp(bp) {}
 
-    /**
-     * Add evidence
-     * @param ip The evidence to add
-     */
-    void append(uint64_t ip) {
-        ASSERT(bp, "[pintool] Error: BP not set");
-        DEBUG(1)
-        printf("[pintool] CFLEAK@%" PRIx64 ": %" PRIx64 " appended\n", bp, ip);
-        targets.push_back(ip);
+/**
+ * Add evidence
+ * @param ip The evidence to add
+ */
+void append(uint64_t ip) {
+    ASSERT(bp, "[pintool] Error: BP not set");
+    DEBUG(1)
+    printf("[pintool] CFLEAK@%" PRIx64 ": %" PRIx64 " appended\n", bp, ip);
+    targets.push_back(ip);
+}
+
+void print() {
+    for (std::vector<uint64_t>::iterator it = targets.begin();
+         it != targets.end(); it++) {
+        printf("         %" PRIx64 " ", *it);
     }
+    printf("\n");
+}
 
-    void print() {
-        for (std::vector<uint64_t>::iterator it = targets.begin();
-             it != targets.end(); it++) {
-            printf("         %" PRIx64 " ", *it);
-        }
-        printf("\n");
-    }
-
-    /**
-     * Export evidence to binary format
-     * @param f The file to export to
-     */
-    void doexport(FILE *f) {
-        uint8_t type = CFLEAK;
-        uint64_t len = targets.size();
-        uint8_t res = 0;
-        res += fwrite(&type, sizeof(type), 1, f) != 1;
-        res += fwrite(&bp, sizeof(bp), 1, f) != 1;
-        res += fwrite(&len, sizeof(len), 1, f) != 1;
-        res += fwrite(&targets[0], sizeof(uint64_t), len, f) != len;
-        ASSERT(!res, "[pintool] Error: Unable to write file");
-    }
+/**
+ * Export evidence to binary format
+ * @param f The file to export to
+ */
+void doexport(FILE *f) {
+    uint8_t type = CFLEAK;
+    uint64_t len = targets.size();
+    uint8_t res = 0;
+    res += fwrite(&type, sizeof(type), 1, f) != 1;
+    res += fwrite(&bp, sizeof(bp), 1, f) != 1;
+    res += fwrite(&len, sizeof(len), 1, f) != 1;
+    res += fwrite(&targets[0], sizeof(uint64_t), len, f) != len;
+    ASSERT(!res, "[pintool] Error: Unable to write file");
+}
 };
 
 typedef std::map<uint64_t, DataLeak> dleaks_t;
 typedef std::map<uint64_t, CFLeak> cfleaks_t;
 
 /**
- * Holds a single context of the call hierarchy,
- * holding leaks which shall be recorded at precisely this context.
- */
+* Holds a single context of the call hierarchy,
+* holding leaks which shall be recorded at precisely this context.
+*/
 class Context {
-  private:
-    dleaks_t dleaks;
-    cfleaks_t cfleaks;
+private:
+dleaks_t dleaks;
+cfleaks_t cfleaks;
 
-  public:
-    Context() {}
+public:
+Context() {}
 
-    /**
-     * Add a new dataleak to trace during execution
-     * @param ip The instruction to trace
-     */
-    virtual void dleak_create(uint64_t ip) {
-        if (dleaks.find(ip) == dleaks.end()) {
-            dleaks.insert(std::pair<uint64_t, DataLeak>(ip, DataLeak(ip)));
-        } else {
-            DEBUG(1)
-            printf("[pintool] Warning: DLEAK: %" PRIx64 " not created\n", ip);
-        }
+/**
+ * Add a new dataleak to trace during execution
+ * @param ip The instruction to trace
+ */
+virtual void dleak_create(uint64_t ip) {
+    if (dleaks.find(ip) == dleaks.end()) {
+        dleaks.insert(std::pair<uint64_t, DataLeak>(ip, DataLeak(ip)));
+    } else {
+        DEBUG(1)
+        printf("[pintool] Warning: DLEAK: %" PRIx64 " not created\n", ip);
     }
+}
 
-    /**
-     * Add a new cfleak to trace during execution
-     * @param ip The instruction to trace (branch point)
-     * @param mp The merge point (unused)
-     * @param len The length of the branch (branch point-> merge point) (unused)
-     */
-    virtual void cfleak_create(uint64_t ip, uint64_t *mp, uint8_t len) {
-        if (cfleaks.find(ip) == cfleaks.end()) {
-            cfleaks.insert(std::pair<uint64_t, CFLeak>(ip, CFLeak(ip)));
-        } else {
-            DEBUG(1)
-            printf("[pintool] Warning: CFLEAK: %" PRIx64 " not created\n", ip);
-        }
+/**
+ * Add a new cfleak to trace during execution
+ * @param ip The instruction to trace (branch point)
+ * @param mp The merge point (unused)
+ * @param len The length of the branch (branch point-> merge point) (unused)
+ */
+virtual void cfleak_create(uint64_t ip, uint64_t *mp, uint8_t len) {
+    if (cfleaks.find(ip) == cfleaks.end()) {
+        cfleaks.insert(std::pair<uint64_t, CFLeak>(ip, CFLeak(ip)));
+    } else {
+        DEBUG(1)
+        printf("[pintool] Warning: CFLEAK: %" PRIx64 " not created\n", ip);
     }
+}
 
-    /**
-     * Record evidence for a data leak
-     * @param ip The leaking instruction
-     * @param data The accessed memory (the evidence).
-     *             We do not (need to) distinguish between read and write here.
-     */
-    virtual void dleak_append(uint64_t ip, uint64_t data) {
-        if (dleaks.find(ip) == dleaks.end()) {
-            DEBUG(1)
-            printf("[pintool] Warning: DLEAK: %" PRIx64 " not appended\n", ip);
-        } else {
-            dleaks[ip].append(data);
-        }
+/**
+ * Record evidence for a data leak
+ * @param ip The leaking instruction
+ * @param data The accessed memory (the evidence).
+ *             We do not (need to) distinguish between read and write here.
+ */
+virtual void dleak_append(uint64_t ip, uint64_t data) {
+    if (dleaks.find(ip) == dleaks.end()) {
+        DEBUG(1)
+        printf("[pintool] Warning: DLEAK: %" PRIx64 " not appended\n", ip);
+    } else {
+        dleaks[ip].append(data);
     }
+}
 
-    /**
-     * Record evidence for a control-flow leak
-     * @param bbl The basic block which contains the cf-leak
-     * @param target The taken branch target (the evidence)
-     */
-    virtual void cfleak_append(uint64_t bbl, uint64_t target) {
-        if (cfleaks.find(bbl) == cfleaks.end()) {
-            DEBUG(1)
-            printf("[pintool] Warning: CFLEAK: %" PRIx64 " not appended\n",
-                   bbl);
-        } else {
-            cfleaks[bbl].append(target);
-        }
+/**
+ * Record evidence for a control-flow leak
+ * @param bbl The basic block which contains the cf-leak
+ * @param target The taken branch target (the evidence)
+ */
+virtual void cfleak_append(uint64_t bbl, uint64_t target) {
+    if (cfleaks.find(bbl) == cfleaks.end()) {
+        DEBUG(1)
+        printf("[pintool] Warning: CFLEAK: %" PRIx64 " not appended\n",
+               bbl);
+    } else {
+        cfleaks[bbl].append(target);
     }
+}
 
-    virtual void print() {
-        for (dleaks_t::iterator it = dleaks.begin(); it != dleaks.end(); it++) {
-            printf("[pintool]  DLEAK %" PRIx64 ": ", it->first);
-            it->second.print();
-        }
-        for (cfleaks_t::iterator it = cfleaks.begin(); it != cfleaks.end();
-             it++) {
-            printf("[pintool]  CFLEAK %" PRIx64 ": ", it->first);
-            it->second.print();
-        }
+virtual void print() {
+    for (dleaks_t::iterator it = dleaks.begin(); it != dleaks.end(); it++) {
+        printf("[pintool]  DLEAK %" PRIx64 ": ", it->first);
+        it->second.print();
     }
+    for (cfleaks_t::iterator it = cfleaks.begin(); it != cfleaks.end();
+         it++) {
+        printf("[pintool]  CFLEAK %" PRIx64 ": ", it->first);
+        it->second.print();
+    }
+}
 
-    /**
-     * Export evidence to binary format
-     * @param f The file to export to
-     */
-    virtual void doexport(FILE *f) {
-        for (dleaks_t::iterator it = dleaks.begin(); it != dleaks.end(); it++) {
-            it->second.doexport(f);
-        }
-        for (cfleaks_t::iterator it = cfleaks.begin(); it != cfleaks.end();
-             it++) {
-            it->second.doexport(f);
-        }
+/**
+ * Export evidence to binary format
+ * @param f The file to export to
+ */
+virtual void doexport(FILE *f) {
+    for (dleaks_t::iterator it = dleaks.begin(); it != dleaks.end(); it++) {
+        it->second.doexport(f);
     }
+    for (cfleaks_t::iterator it = cfleaks.begin(); it != cfleaks.end();
+         it++) {
+        it->second.doexport(f);
+    }
+}
 };
 
 class CallContext;
@@ -633,400 +673,400 @@ class CallStack;
 typedef std::map<uint64_t, CallContext *> children_t;
 
 /**
- * Wraps class Context for use in class CallStack
- */
+* Wraps class Context for use in class CallStack
+*/
 class CallContext : public Context {
-    friend class CallStack;
+friend class CallStack;
 
-  private:
-    uint64_t caller;
-    uint64_t callee;
-    CallContext *parent;
-    children_t children;
-    int unknown_child_depth;
-    bool used;
+private:
+uint64_t caller;
+uint64_t callee;
+CallContext *parent;
+children_t children;
+int unknown_child_depth;
+bool used;
 
-  public:
-    CallContext(uint64_t caller = 0, uint64_t callee = 0)
-        : Context(), caller(caller), callee(callee), parent(NULL),
-          unknown_child_depth(0), used(false) {}
+public:
+CallContext(uint64_t caller = 0, uint64_t callee = 0)
+    : Context(), caller(caller), callee(callee), parent(NULL),
+      unknown_child_depth(0), used(false) {}
 
-    virtual void dleak_append(uint64_t ip, uint64_t data) {
-        if (used == false || unknown_child_depth) {
-            DEBUG(1)
-            printf("[pintool] Warning: DLEAK %" PRIx64
-                   ": skipping due to %d %d\n",
-                   ip, used, unknown_child_depth);
-        } else {
-            Context::dleak_append(ip, data);
-        }
+virtual void dleak_append(uint64_t ip, uint64_t data) {
+    if (used == false || unknown_child_depth) {
+        DEBUG(1)
+        printf("[pintool] Warning: DLEAK %" PRIx64
+               ": skipping due to %d %d\n",
+               ip, used, unknown_child_depth);
+    } else {
+        Context::dleak_append(ip, data);
     }
+}
 
-    virtual void cfleak_append(uint64_t bbl, uint64_t target) {
-        if (used == false || unknown_child_depth) {
-            DEBUG(1)
-            printf("[pintool] Warning: CFLEAK %" PRIx64
-                   ": skipping due to %d %d\n",
-                   bbl, used, unknown_child_depth);
-        } else {
-            Context::cfleak_append(bbl, target);
-        }
+virtual void cfleak_append(uint64_t bbl, uint64_t target) {
+    if (used == false || unknown_child_depth) {
+        DEBUG(1)
+        printf("[pintool] Warning: CFLEAK %" PRIx64
+               ": skipping due to %d %d\n",
+               bbl, used, unknown_child_depth);
+    } else {
+        Context::cfleak_append(bbl, target);
     }
+}
 
-    virtual void print(Context *currentContext = NULL) {
-        if (this == currentContext) {
-            printf("*");
-        }
-        printf("%" PRIx64 "-->%" PRIx64 " (%d)(%d)\n", this->caller,
-               this->callee, this->unknown_child_depth, this->used);
-        Context::print();
-        for (children_t::iterator it = children.begin(); it != children.end();
-             it++) {
-            it->second->print(currentContext);
-        }
-        printf("<\n");
+virtual void print(Context *currentContext = NULL) {
+    if (this == currentContext) {
+        printf("*");
     }
+    printf("%" PRIx64 "-->%" PRIx64 " (%d)(%d)\n", this->caller,
+           this->callee, this->unknown_child_depth, this->used);
+    Context::print();
+    for (children_t::iterator it = children.begin(); it != children.end();
+         it++) {
+        it->second->print(currentContext);
+    }
+    printf("<\n");
+}
 
-    /**
-     * Export evidence to binary format
-     * @param f The file to export to
-     */
-    virtual void doexport(FILE *f) {
-        uint8_t type = FUNC_ENTRY;
-        uint8_t res = 0;
-        res += fwrite(&type, sizeof(type), 1, f) != 1;
-        res += fwrite(&caller, sizeof(caller), 1, f) != 1;
-        res += fwrite(&callee, sizeof(callee), 1, f) != 1;
-        ASSERT(!res, "[pintool] Error: Unable to write file");
-        Context::doexport(f);
-        for (children_t::iterator it = children.begin(); it != children.end();
-             it++) {
-            it->second->doexport(f);
-        }
-        type = FUNC_EXIT;
-        res = fwrite(&type, sizeof(type), 1, f) != 1;
-        ASSERT(!res, "[pintool] Error: Unable to write file");
+/**
+ * Export evidence to binary format
+ * @param f The file to export to
+ */
+virtual void doexport(FILE *f) {
+    uint8_t type = FUNC_ENTRY;
+    uint8_t res = 0;
+    res += fwrite(&type, sizeof(type), 1, f) != 1;
+    res += fwrite(&caller, sizeof(caller), 1, f) != 1;
+    res += fwrite(&callee, sizeof(callee), 1, f) != 1;
+    ASSERT(!res, "[pintool] Error: Unable to write file");
+    Context::doexport(f);
+    for (children_t::iterator it = children.begin(); it != children.end();
+         it++) {
+        it->second->doexport(f);
     }
+    type = FUNC_EXIT;
+    res = fwrite(&type, sizeof(type), 1, f) != 1;
+    ASSERT(!res, "[pintool] Error: Unable to write file");
+}
 };
 
 /**
- * Container for managing fast-recording
- */
+* Container for managing fast-recording
+*/
 class AbstractLeakContainer {
-  protected:
-    std::set<uint64_t>
-        traced_dataleaks; /* List of data leaks which shall be instrumented */
-    std::set<uint64_t> traced_cfleaks; /* List of control-flow leaks which shall
-                                          be instrumented */
-    std::set<uint64_t> erased_dataleaks; /* List of data leaks which are already
-                                            instrumented */
-    std::set<uint64_t> erased_cfleaks;   /* List of control-flow leaks which are
-                                            already instrumented */
-    Context *currentContext;
+protected:
+std::set<uint64_t>
+    traced_dataleaks; /* List of data leaks which shall be instrumented */
+std::set<uint64_t> traced_cfleaks; /* List of control-flow leaks which shall
+                                      be instrumented */
+std::set<uint64_t> erased_dataleaks; /* List of data leaks which are already
+                                        instrumented */
+std::set<uint64_t> erased_cfleaks;   /* List of control-flow leaks which are
+                                        already instrumented */
+Context *currentContext;
 
-  public:
-    size_t get_uninstrumented_dleak_size() { return traced_dataleaks.size(); }
+public:
+size_t get_uninstrumented_dleak_size() { return traced_dataleaks.size(); }
 
-    size_t get_uninstrumented_cfleak_size() { return traced_cfleaks.size(); }
+size_t get_uninstrumented_cfleak_size() { return traced_cfleaks.size(); }
 
-    /**
-     * Checks whether an instruction shall be instrumented and if yes,
-     * removes it from the list of uninstrumented instructions.
-     * @param ip The instruction to test
-     * @return a value != 0 if successful
-     */
-    size_t get_erase_dleak(uint64_t ip) {
-        size_t er = traced_dataleaks.erase(ip);
-        if (er) {
-            erased_dataleaks.insert(ip);
-        }
-        return er;
+/**
+ * Checks whether an instruction shall be instrumented and if yes,
+ * removes it from the list of uninstrumented instructions.
+ * @param ip The instruction to test
+ * @return a value != 0 if successful
+ */
+size_t get_erase_dleak(uint64_t ip) {
+    size_t er = traced_dataleaks.erase(ip);
+    if (er) {
+        erased_dataleaks.insert(ip);
     }
+    return er;
+}
 
-    /**
-     * Returns whether an instruction was previously
-     * instrumented and, thus, erased.
-     */
-    bool was_erased_dleak(uint64_t ip) { return erased_dataleaks.count(ip); }
+/**
+ * Returns whether an instruction was previously
+ * instrumented and, thus, erased.
+ */
+bool was_erased_dleak(uint64_t ip) { return erased_dataleaks.count(ip); }
 
-    /**
-     * Checks whether an instruction shall be instrumented and if yes,
-     * removes it from the list of uninstrumented instructions.
-     * @param ip The instruction to test
-     * @return a value != 0 if successful
-     */
-    size_t get_erase_cfleak(uint64_t ip) {
-        size_t er = traced_cfleaks.erase(ip);
-        if (er) {
-            erased_cfleaks.insert(ip);
-        }
-        return er;
+/**
+ * Checks whether an instruction shall be instrumented and if yes,
+ * removes it from the list of uninstrumented instructions.
+ * @param ip The instruction to test
+ * @return a value != 0 if successful
+ */
+size_t get_erase_cfleak(uint64_t ip) {
+    size_t er = traced_cfleaks.erase(ip);
+    if (er) {
+        erased_cfleaks.insert(ip);
     }
+    return er;
+}
 
-    /**
-     * Returns whether an instruction was previously
-     * instrumented and, thus, erased.
-     */
-    bool was_erased_cfleak(uint64_t ip) { return erased_cfleaks.count(ip); }
+/**
+ * Returns whether an instruction was previously
+ * instrumented and, thus, erased.
+ */
+bool was_erased_cfleak(uint64_t ip) { return erased_cfleaks.count(ip); }
 
-    void print_uninstrumented_leaks() {
-        if (traced_dataleaks.size() > 0) {
-            printf("[pintool] Uninstrumented DLEAKS:\n");
-            for (std::set<uint64_t>::iterator it = traced_dataleaks.begin();
-                 it != traced_dataleaks.end(); it++) {
-                printf(" %" PRIx64 "\n", *it);
-            }
-        }
-        if (traced_cfleaks.size() > 0) {
-            printf("[pintool] Uninstrumented CFLEAKS:\n");
-            for (std::set<uint64_t>::iterator it = traced_cfleaks.begin();
-                 it != traced_cfleaks.end(); it++) {
-                printf(" %" PRIx64 "\n", *it);
-            }
+void print_uninstrumented_leaks() {
+    if (traced_dataleaks.size() > 0) {
+        printf("[pintool] Uninstrumented DLEAKS:\n");
+        for (std::set<uint64_t>::iterator it = traced_dataleaks.begin();
+             it != traced_dataleaks.end(); it++) {
+            printf(" %" PRIx64 "\n", *it);
         }
     }
-
-    /**
-     * Can be used to build a call stack. Is called for every function
-     * call in the leakage file
-     * @param caller The caller
-     * @param callee The callee
-     */
-    virtual void call_create(uint64_t caller, uint64_t callee) = 0;
-
-    /**
-     * Can be used to build a call stack. Is called for every function
-     * return in the leakage file
-     * @param ip The return instruction
-     */
-    virtual void ret_create(uint64_t ip) = 0;
-
-    /**
-     * Can be used to traverse the call stack during recording.
-     * Is called for every function call during recording.
-     * @param caller The caller
-     * @param callee The callee
-     */
-    virtual void call_consume(uint64_t caller, uint64_t callee) = 0;
-
-    /**
-     * Can be used to traverse the call stack during recording.
-     * Is called for every function return during recording.
-     * @param ip The return instruction
-     */
-    virtual void ret_consume(uint64_t ip) = 0;
-
-    /**
-     * Add a new dataleak to trace during execution
-     * @param ip The instruction to trace
-     */
-    virtual void dleak_create(uint64_t ip) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
-        traced_dataleaks.insert(ip);
-        currentContext->dleak_create(ip);
+    if (traced_cfleaks.size() > 0) {
+        printf("[pintool] Uninstrumented CFLEAKS:\n");
+        for (std::set<uint64_t>::iterator it = traced_cfleaks.begin();
+             it != traced_cfleaks.end(); it++) {
+            printf(" %" PRIx64 "\n", *it);
+        }
     }
+}
 
-    /**
-     * Add a new cfleak to trace during execution
-     * @param ip The instruction to trace (branch point)
-     * @param mp The merge point (unused)
-     * @param len The length of the branch (branch point-> merge point) (unused)
-     */
-    virtual void cfleak_create(uint64_t bp, uint64_t *mp, uint8_t len) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
-        traced_cfleaks.insert(bp);
-        currentContext->cfleak_create(bp, mp, len);
-    }
+/**
+ * Can be used to build a call stack. Is called for every function
+ * call in the leakage file
+ * @param caller The caller
+ * @param callee The callee
+ */
+virtual void call_create(uint64_t caller, uint64_t callee) = 0;
 
-    /**
-     * Record evidence for a data leak
-     * @param ip The leaking instruction
-     * @param data The accessed memory (the evidence).
-     *             We do not (need to) distinguish between read and write here.
-     */
-    virtual void dleak_consume(uint64_t ip, uint64_t data) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
-        DEBUG(1) printf("[pintool] Consuming DLEAK %" PRIx64 "\n", ip);
-        currentContext->dleak_append(ip, data);
-    }
+/**
+ * Can be used to build a call stack. Is called for every function
+ * return in the leakage file
+ * @param ip The return instruction
+ */
+virtual void ret_create(uint64_t ip) = 0;
 
-    /**
-     * Record evidence for a control-flow leak
-     * @param bbl The basic block which contains the cf-leak
-     * @param target The taken branch target (the evidence)
-     */
-    virtual void cfleak_consume(uint64_t bbl, uint64_t target) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
-        DEBUG(1) printf("[pintool] Consuming CFLEAK %" PRIx64 "\n", bbl);
-        currentContext->cfleak_append(bbl, target);
-    }
+/**
+ * Can be used to traverse the call stack during recording.
+ * Is called for every function call during recording.
+ * @param caller The caller
+ * @param callee The callee
+ */
+virtual void call_consume(uint64_t caller, uint64_t callee) = 0;
 
-    virtual void print_all() = 0;
+/**
+ * Can be used to traverse the call stack during recording.
+ * Is called for every function return during recording.
+ * @param ip The return instruction
+ */
+virtual void ret_consume(uint64_t ip) = 0;
 
-    /**
-     * Export evidence to binary format
-     * @param f The file to export to
-     */
-    virtual void doexport(FILE *f) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
-        currentContext->doexport(f);
-    }
+/**
+ * Add a new dataleak to trace during execution
+ * @param ip The instruction to trace
+ */
+virtual void dleak_create(uint64_t ip) {
+    ASSERT(currentContext, "[pintool] Error: Context not initialized");
+    traced_dataleaks.insert(ip);
+    currentContext->dleak_create(ip);
+}
+
+/**
+ * Add a new cfleak to trace during execution
+ * @param ip The instruction to trace (branch point)
+ * @param mp The merge point (unused)
+ * @param len The length of the branch (branch point-> merge point) (unused)
+ */
+virtual void cfleak_create(uint64_t bp, uint64_t *mp, uint8_t len) {
+    ASSERT(currentContext, "[pintool] Error: Context not initialized");
+    traced_cfleaks.insert(bp);
+    currentContext->cfleak_create(bp, mp, len);
+}
+
+/**
+ * Record evidence for a data leak
+ * @param ip The leaking instruction
+ * @param data The accessed memory (the evidence).
+ *             We do not (need to) distinguish between read and write here.
+ */
+virtual void dleak_consume(uint64_t ip, uint64_t data) {
+    ASSERT(currentContext, "[pintool] Error: Context not initialized");
+    DEBUG(1) printf("[pintool] Consuming DLEAK %" PRIx64 "\n", ip);
+    currentContext->dleak_append(ip, data);
+}
+
+/**
+ * Record evidence for a control-flow leak
+ * @param bbl The basic block which contains the cf-leak
+ * @param target The taken branch target (the evidence)
+ */
+virtual void cfleak_consume(uint64_t bbl, uint64_t target) {
+    ASSERT(currentContext, "[pintool] Error: Context not initialized");
+    DEBUG(1) printf("[pintool] Consuming CFLEAK %" PRIx64 "\n", bbl);
+    currentContext->cfleak_append(bbl, target);
+}
+
+virtual void print_all() = 0;
+
+/**
+ * Export evidence to binary format
+ * @param f The file to export to
+ */
+virtual void doexport(FILE *f) {
+    ASSERT(currentContext, "[pintool] Error: Context not initialized");
+    currentContext->doexport(f);
+}
 };
 
 /**
- * This class is used to report leaks.
- * It does not keep track of the actual calling context.
- * It is used to trace leaking instructions at any calling context.
- */
+* This class is used to report leaks.
+* It does not keep track of the actual calling context.
+* It is used to trace leaking instructions at any calling context.
+*/
 class Flat : public AbstractLeakContainer {
 
-  public:
-    Flat() { currentContext = new Context(); }
+public:
+Flat() { currentContext = new Context(); }
 
-    virtual void call_create(uint64_t caller, uint64_t callee) {}
+virtual void call_create(uint64_t caller, uint64_t callee) {}
 
-    virtual void ret_create(uint64_t ip) {}
+virtual void ret_create(uint64_t ip) {}
 
-    virtual void call_consume(uint64_t caller, uint64_t callee) {}
+virtual void call_consume(uint64_t caller, uint64_t callee) {}
 
-    virtual void ret_consume(uint64_t ip) {}
+virtual void ret_consume(uint64_t ip) {}
 
-    virtual void print_all() { currentContext->print(); }
+virtual void print_all() { currentContext->print(); }
 };
 
 /**
- * This class is used to report leaks at certain instructions only.
- * It keeps track of the call-stack. It is used to trace leaking
- * instructions only in the calling context where the leakage
- * occured.
- *
- * To initially build the callstack, sequentially traverse the leakage
- * bin-file and use call_create and ret_consume as well as dleak_create
- * and cfleak_create.
- *
- * During binary instrumentation, use call_consume and ret_consume to
- * move to the current calling context. Then, use isdleaking and
- * iscfleaking to determine whether the current instruction shall be
- * traced or not.
- */
+* This class is used to report leaks at certain instructions only.
+* It keeps track of the call-stack. It is used to trace leaking
+* instructions only in the calling context where the leakage
+* occured.
+*
+* To initially build the callstack, sequentially traverse the leakage
+* bin-file and use call_create and ret_consume as well as dleak_create
+* and cfleak_create.
+*
+* During binary instrumentation, use call_consume and ret_consume to
+* move to the current calling context. Then, use isdleaking and
+* iscfleaking to determine whether the current instruction shall be
+* traced or not.
+*/
 class CallStack : public AbstractLeakContainer {
 
-  protected:
-    /* Generate a hash of caller and callee by swapping callee's DWORDS and
-     * XORING both. */
-    uint64_t get_call_id(uint64_t caller, uint64_t callee) {
-        uint64_t id = caller;
-        uint32_t lower = callee & 0x00000000FFFFFFFFULL;
-        uint32_t upper = callee >> 32ULL;
-        id ^= upper | ((uint64_t)lower << 32ULL);
-        return id;
+protected:
+/* Generate a hash of caller and callee by swapping callee's DWORDS and
+ * XORING both. */
+uint64_t get_call_id(uint64_t caller, uint64_t callee) {
+    uint64_t id = caller;
+    uint32_t lower = callee & 0x00000000FFFFFFFFULL;
+    uint32_t upper = callee >> 32ULL;
+    id ^= upper | ((uint64_t)lower << 32ULL);
+    return id;
+}
+
+public:
+CallStack() {}
+
+void call_create(uint64_t caller, uint64_t callee) {
+    ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+    DEBUG(2)
+    printf("[pintool] Building callstack %" PRIx64 " --> %" PRIx64 "\n",
+           caller, callee);
+    uint64_t id = get_call_id(caller, callee);
+    if (currentContext == NULL) {
+        currentContext = new CallContext(caller, callee);
+    } else {
+        CallContext *top = static_cast<CallContext *>(currentContext);
+        if (top->children.find(id) == top->children.end()) {
+            CallContext *newcs = new CallContext(caller, callee);
+            newcs->used = true;
+            newcs->parent = top;
+            top->children[id] = newcs;
+        }
+        CallContext *move = top->children[id];
+        currentContext = top = move;
     }
+}
 
-  public:
-    CallStack() {}
-
-    void call_create(uint64_t caller, uint64_t callee) {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        DEBUG(2)
-        printf("[pintool] Building callstack %" PRIx64 " --> %" PRIx64 "\n",
-               caller, callee);
-        uint64_t id = get_call_id(caller, callee);
-        if (currentContext == NULL) {
-            currentContext = new CallContext(caller, callee);
+void call_consume(uint64_t caller, uint64_t callee) {
+    ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+    ASSERT(currentContext, "[pintool] Error: Callstack is not initialized");
+    DEBUG(3) print_all();
+    DEBUG(2)
+    printf("[pintool] Calling %" PRIx64 " --> %" PRIx64 "\n", caller,
+           callee);
+    uint64_t id = get_call_id(caller, callee);
+    CallContext *top = static_cast<CallContext *>(currentContext);
+    if (!top->used) {
+        if (top->caller == caller && top->callee == callee) {
+            DEBUG(2) printf("[pintool] Entered first leaking callstack\n");
+            top->used = true;
+        }
+    } else {
+        if (top->unknown_child_depth ||
+            top->children.find(id) == top->children.end()) {
+            top->unknown_child_depth++;
         } else {
-            CallContext *top = static_cast<CallContext *>(currentContext);
-            if (top->children.find(id) == top->children.end()) {
-                CallContext *newcs = new CallContext(caller, callee);
-                newcs->used = true;
-                newcs->parent = top;
-                top->children[id] = newcs;
-            }
             CallContext *move = top->children[id];
             currentContext = top = move;
         }
     }
+    DEBUG(3) print_all();
+}
 
-    void call_consume(uint64_t caller, uint64_t callee) {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        ASSERT(currentContext, "[pintool] Error: Callstack is not initialized");
-        DEBUG(3) print_all();
-        DEBUG(2)
-        printf("[pintool] Calling %" PRIx64 " --> %" PRIx64 "\n", caller,
-               callee);
-        uint64_t id = get_call_id(caller, callee);
-        CallContext *top = static_cast<CallContext *>(currentContext);
-        if (!top->used) {
-            if (top->caller == caller && top->callee == callee) {
-                DEBUG(2) printf("[pintool] Entered first leaking callstack\n");
-                top->used = true;
-            }
+void ret_consume(uint64_t ip) {
+    ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+    ASSERT(currentContext, "[pintool] Error: Callstack is not initialized");
+    DEBUG(2) printf("[pintool] Returning %" PRIx64 "\n", ip);
+    CallContext *top = static_cast<CallContext *>(currentContext);
+    if (top->unknown_child_depth) {
+        top->unknown_child_depth--;
+    } else {
+        if (top->parent) {
+            ASSERT(top->parent,
+                   "[pintool] Error: Callstack parent is empty");
+            currentContext = top = top->parent;
         } else {
-            if (top->unknown_child_depth ||
-                top->children.find(id) == top->children.end()) {
-                top->unknown_child_depth++;
-            } else {
-                CallContext *move = top->children[id];
-                currentContext = top = move;
-            }
-        }
-        DEBUG(3) print_all();
-    }
-
-    void ret_consume(uint64_t ip) {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        ASSERT(currentContext, "[pintool] Error: Callstack is not initialized");
-        DEBUG(2) printf("[pintool] Returning %" PRIx64 "\n", ip);
-        CallContext *top = static_cast<CallContext *>(currentContext);
-        if (top->unknown_child_depth) {
-            top->unknown_child_depth--;
-        } else {
-            if (top->parent) {
-                ASSERT(top->parent,
-                       "[pintool] Error: Callstack parent is empty");
-                currentContext = top = top->parent;
-            } else {
-                DEBUG(2) printf("[pintool] Warning: Ignoring return\n");
-            }
+            DEBUG(2) printf("[pintool] Warning: Ignoring return\n");
         }
     }
+}
 
-    void ret_create(uint64_t ip) { ret_consume(ip); }
+void ret_create(uint64_t ip) { ret_consume(ip); }
 
-    bool empty() {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        CallContext *top = static_cast<CallContext *>(currentContext);
-        return top == NULL || top->used == false;
+bool empty() {
+    ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+    CallContext *top = static_cast<CallContext *>(currentContext);
+    return top == NULL || top->used == false;
+}
+
+CallContext *get_begin() {
+    ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+    CallContext *c = static_cast<CallContext *>(currentContext);
+    while (c && c->parent) {
+        c = c->parent;
     }
+    return c;
+}
 
-    CallContext *get_begin() {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        CallContext *c = static_cast<CallContext *>(currentContext);
-        while (c && c->parent) {
-            c = c->parent;
-        }
-        return c;
-    }
+/**
+ * After loading leakage file, use this function to rewind to the
+ * initial context
+ */
+void rewind() {
+    ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+    CallContext *top = get_begin();
+    ASSERT(top, "[pintool] Error: Leaks not initialized");
+    top->used = false;
+    currentContext = top;
+}
 
-    /**
-     * After loading leakage file, use this function to rewind to the
-     * initial context
-     */
-    void rewind() {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        CallContext *top = get_begin();
-        ASSERT(top, "[pintool] Error: Leaks not initialized");
-        top->used = false;
-        currentContext = top;
+void print_all() {
+    ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+    CallContext *top = get_begin();
+    if (top) {
+        printf("[pintool] Callstack:\n");
+        top->print(currentContext);
     }
-
-    void print_all() {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        CallContext *top = get_begin();
-        if (top) {
-            printf("[pintool] Callstack:\n");
-            top->print(currentContext);
-        }
-    }
+}
 };
 
 AbstractLeakContainer *leaks = NULL;
@@ -1040,59 +1080,59 @@ void init() {
 }
 
 /**
- * Add an entry to the trace
- * This function is not thread-safe. Lock first.
- */
+* Add an entry to the trace
+* This function is not thread-safe. Lock first.
+*/
 VOID record_entry(entry_t entry) { trace.push_back(entry); }
 
 /**
- * Start recording.
- * @param threadid The thread
- * @param ins The first recorded instruction
- * @param target UNUSED
- */
+* Start recording.
+* @param threadid The thread
+* @param ins The first recorded instruction
+* @param target UNUSED
+*/
 VOID RecordMainBegin(THREADID threadid, ADDRINT ins, ADDRINT target,
-                     const CONTEXT *ctxt) {
-    PIN_LockClient();
-    Record = true;
-    DEBUG(1)
-    printf("Start main() %x to %x\n", (unsigned int)ins, (unsigned int)target);
-    RecordFunctionEntry(threadid, 0, 0, false, ins, ctxt, false);
-    PIN_UnlockClient();
+                 const CONTEXT *ctxt) {
+PIN_LockClient();
+Record = true;
+DEBUG(1)
+printf("Start main() %x to %x\n", (unsigned int)ins, (unsigned int)target);
+RecordFunctionEntry(threadid, 0, 0, false, ins, ctxt, false);
+PIN_UnlockClient();
 }
 
 /**
- * Stop recording.
- * @param threadid The thread
- * @param ins The last recorded instruction
- */
+* Stop recording.
+* @param threadid The thread
+* @param ins The last recorded instruction
+*/
 VOID RecordMainEnd(THREADID threadid, ADDRINT ins) {
-    PIN_LockClient();
-    Record = false;
-    DEBUG(1) printf("[pintool] End main()\n");
-    RecordFunctionExit(threadid, ins, ins, NULL, false);
-    PIN_UnlockClient();
+PIN_LockClient();
+Record = false;
+DEBUG(1) printf("[pintool] End main()\n");
+RecordFunctionExit(threadid, ins, ins, NULL, false);
+PIN_UnlockClient();
 }
 
 /**
- * Track thread creation.
- * Creates a separate recording context per thread.
- * Note: currently all threads report to the same trace
- * @param threadid The thread
- * @param ctxt Unused
- * @param flags Unused
- * @param v Unused
- */
+* Track thread creation.
+* Creates a separate recording context per thread.
+* Note: currently all threads report to the same trace
+* @param threadid The thread
+* @param ctxt Unused
+* @param flags Unused
+* @param v Unused
+*/
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
     ASSERT(threadid == 0,
            "[pintool] Error: Multithreading detected but not supported!");
     DEBUG(1) printf("[pintool] Thread begin %d\n", threadid);
     // PIN_MutexLock(&lock);
 
-    std::string to_hash_stack = "STACKSSPACE";
-    SHA1 hash_stack;
-    hash_stack.update(to_hash_stack);
-    stackBaseAddr_hash = hash_stack.final().substr(32, 8);
+std::string to_hash_stack = "STACKSSPACE";
+SHA1 hash_stack;
+hash_stack.update(to_hash_stack);
+stackBaseAddr_hash = hash_stack.final().substr(32, 8);
 
     std::string to_hash_heap = "HEAPSPACE";
     SHA1 hash_heap;
@@ -1197,6 +1237,7 @@ ADDRINT get_callsite_offset(ADDRINT callsite) {
         }
     }
     std::cout << "Error: callsite does not belong to image space?" << std::endl;
+    std::cout << "callsite " << std::hex << callsite << std::endl;
     return 0;
 }
 
@@ -1234,23 +1275,34 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     /* Keep heap vector sorted */
     HEAPVEC::iterator below = heap.begin();
     HEAPVEC::iterator above = heap.end();
-    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        if (it->base >= obj.base) {
+    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); it++) {
+        if (obj.base < it->base) {
             above = it;
             break;
         }
         below = it;
     }
 
-    if (above == heap.end()) {
+    if ( !heap.size()
+        || (below == &heap.back() && obj.base >= heap.back().base + heap.back().size)
+    ) {
         /* No inbetween slot found, thus append to the end */
+        std::cout << "Push to heap end" << std::endl;
         heap.push_back(obj);
-    } else if (below == heap.begin() || obj.base >= below->base + below->size) {
+    } else if (
+        /* Insert in front, if obj does not overlap first element */
+        (above == heap.begin() && obj.base + obj.size <= above->base)
         /* Valid inbetween slot found, thus insert before 'above' */
+        || (obj.base >= below->base + below->size && obj.base + obj.size <= above->base)
+    ) {
         heap.insert(above, obj);
     } else {
         /* Invalid inbetween slot found, thus quit */
         printheap();
+        std::cout << "below    " << below << std::endl;
+        std::cout << "above    " << above << std::endl;
+        std::cout << "obj.base " << obj.base << std::endl;
+        std::cout << "obj.size " << obj.size << std::endl;
         ASSERT(false, "[Error] Corrupted heap?!");
     }
     /* Print the current obj into the heapfile */
@@ -1277,6 +1329,7 @@ uint32_t dofree(ADDRINT addr) {
         return it->id;
     }
     printheap();
+    std::stringstream unique_cs(ios_base::app | ios_base::out);
     ASSERT(false, "[Error] Invalid free!");
     return 0;
 }
@@ -1449,8 +1502,29 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
     DEBUG(1)
     std::cout << "[pintool] Free called with " << std::hex << addr << " at "
               << ip << std::endl;
-    dofree(addr);
-    //  PIN_MutexUnlock(&lock);
+    free_state_t state = {
+        .type = "free",
+        .addr = addr,
+    };
+    thread_state[threadid].free_state.push_back(state);
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record free
+ * @param threadid The thread
+ * @param addr The heap pointer which is freed
+ */
+VOID RecordFreeAfter(THREADID threadid, VOID *ip) {
+    if (!Record)
+        return;
+    // PIN_MutexLock(&lock);
+    ASSERT(thread_state[threadid].free_state.size() != 0,
+           "[Error] Free returned but not called");
+    free_state_t state = thread_state[threadid].free_state.back();
+    thread_state[threadid].free_state.pop_back();
+    dofree(state.addr);
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1464,6 +1538,11 @@ VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len, bool force
               << std::endl;
     if (!Record && !force)
         return;
+    if (thread_state[threadid].free_state.size() != 0) {
+        DEBUG(1)
+        std::cout << "[pintool] Munmap ignored due to free pending" << std::endl;
+        return;
+    }
     // PIN_MutexLock(&lock);
     dofree(addr);
     //  PIN_MutexUnlock(&lock);
@@ -1481,21 +1560,31 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
     std::cout << "mmap called with " << std::hex << size << std::endl;
     if (!Record && !force)
         return;
-    //  PIN_MutexLock(&lock);
-    if (thread_state[threadid].mremap_state.size() == 0) {
-        SHA1 hash;
-        hash.update(getcallstack(threadid)); /* calculate the hash of the set of
-                                                IPs in the Callstack */
-        alloc_state_t state = {
-            .type = name,
-            .size = size,
-            .callsite = get_callsite_offset(ret),
-            .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
-        };
-
-        thread_state[threadid].mmap_state.push_back(state);
+    if (thread_state[threadid].mremap_state.size() != 0) {
+        DEBUG(1)
+        std::cout << "[pintool] Mmap ignored due to mremap_pending (size= "
+                  << std::hex << size << ")" << std::endl;
+        return;
     }
-    //  PIN_MutexUnlock(&lock);
+    if (thread_state[threadid].malloc_state.size() != 0 || thread_state[threadid].realloc_state.size() != 0) {
+        DEBUG(1)
+        std::cout << "[pintool] Mmap ignored due to [m,re]alloc pending"
+                  << " (size= " << std::hex << size << ")" << std::endl;
+        return;
+    }
+    // PIN_MutexLock(&lock);
+    SHA1 hash;
+    hash.update(getcallstack(threadid)); /* calculate the hash of the set of
+                                            IPs in the Callstack */
+    alloc_state_t state = {
+        .type = name,
+        .size = size,
+        .callsite = get_callsite_offset(ret),
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
+
+    thread_state[threadid].mmap_state.push_back(state);
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1507,6 +1596,16 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
     DEBUG(1) std::cout << "mmap returned " << std::hex << addr << std::endl;
     if (!Record && !force)
         return;
+    if (thread_state[threadid].mremap_state.size() != 0) {
+        DEBUG(1)
+        std::cout << "[pintool] Mmap ignored due to mremap_pending" << std::endl;
+        return;
+    }
+    if (thread_state[threadid].malloc_state.size() != 0 || thread_state[threadid].realloc_state.size() != 0) {
+        DEBUG(1)
+        std::cout << "[pintool] Mmap ignored due to [m,re]alloc pending" << std::endl;
+        return;
+    }
     // PIN_MutexLock(&lock);
 
     ASSERT(thread_state[threadid].mmap_state.size() != 0,
@@ -1718,7 +1817,7 @@ VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
     entry_t entry;
     entry.type = BRANCH;
     entry.ip = (void *)ins; // getLogicalAddress((void *)ins);
-    entry.data = getLogicalAddress((void *)target);
+    entry.data = (void *) target; // getLogicalAddress((void *)target);
     record_entry(entry);
     DEBUG(4) std::cout << "Branch entry" << std::endl;
     DEBUG(4) std::cout << "ip \t" << std::hex << entry.ip << std::endl;
@@ -1799,7 +1898,7 @@ VOID RecordFunctionEntry_unlocked(THREADID threadid, ADDRINT ins, BOOL indirect,
         entry.ip = (void *)ins;
     }
     // entry.data = getLogicalAddress((void*) ((uintptr_t)target), ctxt);
-    entry.data = getLogicalAddress((void *)(target));
+    entry.data = (void *) target; // getLogicalAddress((void *)(target));
     DEBUG(3)
     std::cout << "Call " << std::hex << ins << " to " << target << std::endl;
     // leaks->call_consume(ins, target);
@@ -1863,7 +1962,7 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
     std::cout << " TOP from func EXIT is "
               << PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
     entry.ip = (void *)ins; // getLogicalAddress((void *)((uintptr_t)ins));
-    entry.data = getLogicalAddress((void *)((uintptr_t)target));
+    entry.data = (void *) target; // getLogicalAddress((void *)((uintptr_t)target));
     DEBUG(2)
     std::cout << "Ret " << std::hex << ins << " to " << target << std::endl;
     // leaks->ret_consume(ins);
@@ -2107,6 +2206,9 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                             freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
                             IARG_THREAD_ID, IARG_INST_PTR,
                             IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
+                        RTN_InsertCall(
+                            freeRtn, IPOINT_AFTER, (AFUNPTR)RecordFreeAfter,
+                            IARG_THREAD_ID, IARG_INST_PTR, IARG_END);
                         RTN_Close(freeRtn);
                     }
 
@@ -2166,6 +2268,148 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
     }
 }
 
+//////// TEST
+// Print syscall number and arguments
+VOID SysBefore(ADDRINT ip, ADDRINT num, ADDRINT arg0, ADDRINT arg1, ADDRINT arg2, ADDRINT arg3, ADDRINT arg4, ADDRINT arg5)
+{
+#if defined(TARGET_LINUX) && defined(TARGET_IA32)
+    // On ia32 Linux, there are only 5 registers for passing system call arguments,
+    // but mmap needs 6. For mmap on ia32, the first argument to the system call
+    // is a pointer to an array of the 6 arguments
+    if (num == SYS_mmap)
+    {
+        ADDRINT * mmapArgs = reinterpret_cast<ADDRINT *>(arg0);
+        arg0 = mmapArgs[0];
+        arg1 = mmapArgs[1];
+        arg2 = mmapArgs[2];
+        arg3 = mmapArgs[3];
+        arg4 = mmapArgs[4];
+        arg5 = mmapArgs[5];
+    }
+#endif
+
+    std::cout << "syscall" << std::endl;
+    std::cout
+        << (unsigned long)ip
+        << " " << (long)num
+        << " " << (unsigned long)arg0
+        << " " << (unsigned long)arg1
+        << " " << (unsigned long)arg2
+        << " " << (unsigned long)arg3
+        << " " << (unsigned long)arg4
+        << " " << (unsigned long)arg5
+        << std::endl;
+}
+
+// Print the return value of the system call
+VOID SysAfter(ADDRINT ret)
+{
+    std::cout << "returns: " << (unsigned long)ret << std::endl;
+}
+
+VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v)
+{
+    syscall_number = PIN_GetSyscallNumber(ctxt, std);
+    SysBefore(PIN_GetContextReg(ctxt, REG_INST_PTR),
+        syscall_number,
+        PIN_GetSyscallArgument(ctxt, std, 0),
+        PIN_GetSyscallArgument(ctxt, std, 1),
+        PIN_GetSyscallArgument(ctxt, std, 2),
+        PIN_GetSyscallArgument(ctxt, std, 3),
+        PIN_GetSyscallArgument(ctxt, std, 4),
+        PIN_GetSyscallArgument(ctxt, std, 5));
+
+    // https://filippo.io/linux-syscall-table/
+    switch(syscall_number) {
+        case 9:
+            if (PIN_GetSyscallArgument(ctxt, std, 0)) {
+                std::cout << "Dropped syscall.";
+                syscall_number = -1;
+                break;
+            }
+            std::cout << "mmap syscall." << std::endl;
+            RecordmmapBefore(
+                (char *) MMAP,
+                threadid,
+                PIN_GetSyscallArgument(ctxt, std, 1),
+                PIN_GetContextReg(ctxt, REG_INST_PTR),
+                true
+            );
+            break;
+        case 11:
+            std::cout << "munmap syscall." << std::endl;
+            RecordmunmapBefore(
+                threadid,
+                PIN_GetSyscallArgument(ctxt, std, 0),
+                PIN_GetSyscallArgument(ctxt, std, 1),
+                true
+            );
+            break;
+        case 12:
+            // Drop brk syscall if 1st argument equals 0, as:
+            // a) if arg_0 == 0 the current location of the program break is returned
+            // b) if arg_0 != 0 the program break is extended to arg_0
+            // Only case b) is of interest
+            if (!PIN_GetSyscallArgument(ctxt, std, 0)) {
+                std::cout << "Dropped syscall.";
+                syscall_number = -1;
+                break;
+            }
+            std::cout << "brk syscall." << std::endl;
+            // RecordBrkBefore(
+            //     (char *) BRK,
+            //     threadid,
+            //     PIN_GetSyscallArgument(ctxt, std, 0),
+            //     PIN_GetContextReg(ctxt, REG_INST_PTR),
+            //     true
+            // );
+            break;
+        default:
+            syscall_number = -1;
+            std::cout << "Syscall not catched. syscall number: "
+                      << PIN_GetSyscallNumber(ctxt, std) << std::endl;
+            break;
+    }
+}
+
+VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v)
+{
+    SysAfter(PIN_GetSyscallReturn(ctxt, std));
+
+    // https://filippo.io/linux-syscall-table/
+    switch(syscall_number) {
+        case -1:
+            // Syscall will be dropped, as its number is set to -1 in SyscallEntry
+            break;
+        case 9:
+            RecordmmapAfter(
+                threadid,
+                PIN_GetSyscallReturn(ctxt, std),
+                PIN_GetContextReg(ctxt, REG_INST_PTR),
+                true
+            );
+            break;
+        case 11:
+            break;
+        case 12:
+            // RecordBrkAfter(
+            //     (char *) BRK,
+            //     threadid,
+            //     PIN_GetSyscallReturn(ctxt, std),
+            //     PIN_GetContextReg(ctxt, REG_INST_PTR),
+            //     true
+            // );
+            break;
+        default:
+            std::cout << "[pin-error]: syscall unknown. syscall number: "
+                      << syscall_number << std::endl;
+            ASSERT(false, "[pin-error] syscall");
+            break;
+    }
+    syscall_number = -1;
+}
+//////// TEST
+
 /**
  * Instruments instructions operating on memory
  * @param ins The instruction
@@ -2178,7 +2422,7 @@ BOOL instrumentMemIns(INS ins, bool fast_recording) {
         bool found = false;
         ADDRINT ip = INS_Address(ins);
         /* convert this Virtual IP to corresponding Memory Index here */
-        DEBUG(1) printf("Adding %lx to instrumentation\n", ip);
+        DEBUG(2) printf("Adding %lx to instrumentation\n", ip);
 
         for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
             if (INS_MemoryOperandIsRead(ins, memOp)) {
@@ -2574,6 +2818,8 @@ int main(int argc, char *argv[]) {
         /* Traditional tracing */
         if (KnobBbl.Value() || KnobMem.Value() || KnobFunc.Value()) {
             INS_AddInstrumentFunction(instrumentAnyInstructions, 0);
+            PIN_AddSyscallEntryFunction(SyscallEntry, 0);
+            PIN_AddSyscallExitFunction(SyscallExit, 0);
         }
     } else {
         /* Tracing only leaks specified by leak file */

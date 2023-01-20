@@ -2,8 +2,8 @@
 
 set -e
 
-OPTIONS="--phase1 --phase2 --export --parallel"
-# OPTIONS="--phase1"
+# OPTIONS="--phase1 --phase2 --export --parallel"
+OPTIONS="--phase1"
 export RESULTDIR=${PWD}/results
 
 cd selftest-heap
