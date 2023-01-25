@@ -1331,10 +1331,10 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     } else {
         /* Invalid inbetween slot found, thus quit */
         printheap();
-        std::cout << "below    " << below << std::endl;
-        std::cout << "above    " << above << std::endl;
-        std::cout << "obj.base " << obj.base << std::endl;
-        std::cout << "obj.size " << obj.size << std::endl;
+        std::cout << "below.base " << below->base << std::endl;
+        std::cout << "above.base " << above->base << std::endl;
+        std::cout << "obj.base   " << obj.base << std::endl;
+        std::cout << "obj.size   " << obj.size << std::endl;
         ASSERT(false, "[Error] Corrupted heap?!");
     }
     /* Print the current obj into the heapfile */
