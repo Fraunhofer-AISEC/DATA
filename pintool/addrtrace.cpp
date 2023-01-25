@@ -1329,6 +1329,13 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
         || (obj.base >= below->base + below->size && obj.base + obj.size <= above->base)
     ) {
         heap.insert(above, obj);
+    } else if (
+        /* Insert in front, if below is of type MMAP and spans over obj */
+        (below->type == std::string(MMAP))
+        && (obj.base >= below->base)
+        && (obj.base + obj.size <= below->base + below->size)
+    ) {
+        heap.insert(below, obj);
     } else {
         /* Invalid inbetween slot found, thus quit */
         printheap();
