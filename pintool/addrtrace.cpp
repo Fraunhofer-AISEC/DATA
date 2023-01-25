@@ -1161,10 +1161,10 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
     DEBUG(1) printf("[pintool] Thread begin %d\n", threadid);
     // PIN_MutexLock(&lock);
 
-std::string to_hash_stack = "STACKSSPACE";
-SHA1 hash_stack;
-hash_stack.update(to_hash_stack);
-stackBaseAddr_hash = hash_stack.final().substr(32, 8);
+    std::string to_hash_stack = "STACKSSPACE";
+    SHA1 hash_stack;
+    hash_stack.update(to_hash_stack);
+    stackBaseAddr_hash = hash_stack.final().substr(32, 8);
 
     std::string to_hash_heap = "HEAPSPACE";
     SHA1 hash_heap;
