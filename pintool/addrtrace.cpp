@@ -466,7 +466,8 @@ void *getLogicalAddress(void *virt_addr) {
     }
 
     std::cout << "Not found Addr " << std::hex << (uint64_t)virt_addr << std::endl;
-    printheap();
+    DEBUG(1) printheap();
+    DEBUG(1) print_proc_map();
     // ASSERT(false, "[pintool] Error: LogicalAddress");
     return virt_addr;
 }
