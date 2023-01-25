@@ -344,6 +344,29 @@ uint64_t getIndex(string hash) {
     return (to_shift << 32);
 }
 
+VOID print_proc_map(VOID) {
+    std::stringstream command_string;
+    command_string << "cat /proc/" << pid << "/maps";
+    DEBUG(1) std::cout << command_string.str() << " command is " << std::endl;
+    const std::string to_pass(command_string.str());
+    DEBUG(1) std::cout << to_pass.c_str() << std::endl;
+
+    FILE *fp;
+    char buffer[64];
+    const char *arg = to_pass.c_str();
+    fp = popen(arg, "r");
+    if (!fp) {
+        std::cout << " ERROR executing command " << std::endl;
+        return;
+    }
+    if (fp != NULL) {
+        while (fgets(buffer, 64, fp) != NULL) {
+            DEBUG(1) std::cout << buffer;
+        }
+        pclose(fp);
+    }
+}
+
 ADDRINT execute_commands(const std::string command, short pos,
                          const std::string opt_command) {
     std::stringstream command_string;
