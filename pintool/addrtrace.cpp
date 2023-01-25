@@ -1571,11 +1571,6 @@ VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len, bool force
               << std::endl;
     if (!Record && !force)
         return;
-    if (thread_state[threadid].free_state.size() != 0) {
-        DEBUG(1)
-        std::cout << "[pintool] Munmap ignored due to free pending" << std::endl;
-        return;
-    }
     // PIN_MutexLock(&lock);
     dofree(addr);
     //  PIN_MutexUnlock(&lock);
@@ -1599,11 +1594,15 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
                   << std::hex << size << ")" << std::endl;
         return;
     }
-    if (thread_state[threadid].malloc_state.size() != 0 || thread_state[threadid].realloc_state.size() != 0) {
+    if (thread_state[threadid].malloc_state.size() != 0) {
         DEBUG(1)
-        std::cout << "[pintool] Mmap ignored due to [m,re]alloc pending"
+        std::cout << "[pintool] Nested mmap stemming from pending malloc"
                   << " (size= " << std::hex << size << ")" << std::endl;
-        return;
+    }
+    if (thread_state[threadid].realloc_state.size() != 0) {
+        DEBUG(1)
+        std::cout << "[pintool] Nested mmap stemming from pending realloc"
+                  << " (size= " << std::hex << size << ")" << std::endl;
     }
     // PIN_MutexLock(&lock);
     SHA1 hash;
@@ -1636,8 +1635,7 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
     }
     if (thread_state[threadid].malloc_state.size() != 0 || thread_state[threadid].realloc_state.size() != 0) {
         DEBUG(1)
-        std::cout << "[pintool] Mmap ignored due to [m,re]alloc pending" << std::endl;
-        return;
+        std::cout << "[pintool] Nested mmap due to [m,re]alloc pending" << std::endl;
     }
     // PIN_MutexLock(&lock);
 
