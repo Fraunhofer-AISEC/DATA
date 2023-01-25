@@ -241,6 +241,9 @@ ADDRINT heapBaseAddr;
 ADDRINT heapEndAddr;
 string heapBaseAddr_hash;
 
+ADDRINT programBreakBaseAddr = 0;
+ADDRINT programBreakEndAddr = 0;
+
 int writecount = 0;
 
 /***********************************************************************/
@@ -430,6 +433,12 @@ void *getLogicalAddress(void *virt_addr) {
             continue;
         }
         DEBUG(1) std::cout << "Found Addr in IMG " << std::hex << (uint64_t)virt_addr << std::endl;
+        return virt_addr;
+    }
+    // Is the Virtual Address in the Program Break address space?
+    if ((uint64_t)virt_addr >= programBreakBaseAddr &&
+        (uint64_t)virt_addr < programBreakEndAddr) {
+        std::cout << "Found Addr in program break " << std::hex << (uint64_t)virt_addr << std::endl;
         return virt_addr;
     }
 
@@ -1675,6 +1684,25 @@ VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     //  PIN_MutexUnlock(&lock);
 }
 
+/**
+ * Record brk's result
+ *@param threadid The thread
+ * @param addr The returned program break end address
+ */
+VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, bool force) {
+    DEBUG(1) std::cout << "brk returned " << std::hex << addr << std::endl;
+    if (!Record && !force)
+        return;
+    // PIN_MutexLock(&lock);
+
+    programBreakEndAddr = addr;
+    if (programBreakBaseAddr == 0) {
+        programBreakBaseAddr = addr;
+    }
+
+    // PIN_MutexUnlock(&lock);
+}
+
 std::ofstream outFile;
 
 // Holds instruction count for a single procedure
@@ -2261,6 +2289,19 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                             IARG_BOOL, false, IARG_END);
                         RTN_Close(munmapRtn);
                     }
+
+                    RTN brkRtn = RTN_FindByName(img, BRK);
+                    if (brkRtn.is_valid()) {
+                        DEBUG(1)
+                        std::cout << "brk found in " << IMG_Name(img)
+                                  << std::endl;
+                        RTN_Open(brkRtn);
+                        RTN_InsertCall(brkRtn, IPOINT_AFTER,
+                                       (AFUNPTR)RecordBrkAfter, IARG_THREAD_ID,
+                                       IARG_FUNCRET_EXITPOINT_VALUE,
+                                       IARG_BOOL, false, IARG_END);
+                        RTN_Close(brkRtn);
+                    }
                 }
                 alloc_instrumented = 1;
             }
@@ -2346,23 +2387,7 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *
             );
             break;
         case 12:
-            // Drop brk syscall if 1st argument equals 0, as:
-            // a) if arg_0 == 0 the current location of the program break is returned
-            // b) if arg_0 != 0 the program break is extended to arg_0
-            // Only case b) is of interest
-            if (!PIN_GetSyscallArgument(ctxt, std, 0)) {
-                std::cout << "Dropped syscall.";
-                syscall_number = -1;
-                break;
-            }
             std::cout << "brk syscall." << std::endl;
-            // RecordBrkBefore(
-            //     (char *) BRK,
-            //     threadid,
-            //     PIN_GetSyscallArgument(ctxt, std, 0),
-            //     PIN_GetContextReg(ctxt, REG_INST_PTR),
-            //     true
-            // );
             break;
         default:
             syscall_number = -1;
@@ -2392,13 +2417,12 @@ VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v
         case 11:
             break;
         case 12:
-            // RecordBrkAfter(
-            //     (char *) BRK,
-            //     threadid,
-            //     PIN_GetSyscallReturn(ctxt, std),
-            //     PIN_GetContextReg(ctxt, REG_INST_PTR),
-            //     true
-            // );
+            std::cout << "brk syscall returned." << std::endl;
+            RecordBrkAfter(
+                threadid,
+                PIN_GetSyscallReturn(ctxt, std),
+                true
+            );
             break;
         default:
             std::cout << "[pin-error]: syscall unknown. syscall number: "
