@@ -439,7 +439,7 @@ void *getLogicalAddress(void *virt_addr) {
         // Virtual Address not found!
         std::cout << "Questionable VirtAddr within heap " << virt_addr
                   << std::endl;
-        printheap();
+        DEBUG(1) printheap();
         // ASSERT(false, "[pintool] Error: Heap corruption");
     }
     // Is the Virtual Address in the Stack address space?
