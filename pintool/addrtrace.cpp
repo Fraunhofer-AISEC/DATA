@@ -280,12 +280,6 @@ program_break_obj_t program_break;
 imgobj_t stack;
 
 int pid = PIN_GetPid();
-/***********************************************************************/
-/* Map for Book keeping between Virtual Address <----------> Logical Address*/
-std::unordered_map<uint64_t, uint64_t>
-    addressMap; // Virtual Address is  the Key , Logical Address is the Value
-std::unordered_map<uint64_t, uint64_t>
-    conversionMap; // Logical Address is  the Key , Virtual Address is the Value
 
 /***********************************************************************/
 /* Multithreading */
