@@ -249,7 +249,6 @@ typedef struct {
     string name;
     uint64_t baseaddr;
     uint64_t endaddr;
-    uint32_t startaddr;
     string imghash;
 } imgobj_t;
 
