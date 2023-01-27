@@ -241,9 +241,6 @@ ADDRINT heapBaseAddr;
 ADDRINT heapEndAddr;
 string heapBaseAddr_hash;
 
-ADDRINT programBreakBaseAddr = 0;
-ADDRINT programBreakEndAddr = 0;
-
 int writecount = 0;
 
 /***********************************************************************/
@@ -269,6 +266,19 @@ typedef struct {
 
 typedef std::vector<funcobj_t> FUNCVEC;
 FUNCVEC funcvec;
+
+/***********************************************************************/
+/* Brk tracking*/
+typedef struct {
+    std::string image_name;
+    ADDRINT image_low;
+    ADDRINT image_high;
+    ADDRINT low;
+    ADDRINT high;
+} program_break_obj_t;
+
+program_break_obj_t program_break;
+
 /***********************************************************************/
 /* Stack tracking*/
 ADDRINT stackBaseAddr; // Base address of the stack is calculated at Threadstart
@@ -400,7 +410,7 @@ ADDRINT execute_commands(const std::string command, short pos,
     return ((ADDRINT)strtol(tmp.c_str(), NULL, 0));
 }
 
-void *getLogicalAddress(void *virt_addr) {
+void *getLogicalAddress(void *virt_addr, void *ip) {
     DEBUG(1)
     std::cout << "Converting VirtualAddr 0x" << virt_addr << std::endl;
 
@@ -459,9 +469,10 @@ void *getLogicalAddress(void *virt_addr) {
         return virt_addr;
     }
     // Is the Virtual Address in the Program Break address space?
-    if ((uint64_t)virt_addr >= programBreakBaseAddr &&
-        (uint64_t)virt_addr < programBreakEndAddr) {
-        std::cout << "Found Addr in program break " << std::hex << (uint64_t)virt_addr << std::endl;
+    if ((uint64_t)virt_addr >= program_break.low &&
+        (uint64_t)virt_addr < program_break.high) {
+        std::cout << "Found Addr in program break " << std::hex << (uint64_t)virt_addr << " called from " << std::hex << (uint64_t)ip <<std::endl;
+        ASSERT( ((uint64_t)ip < program_break.image_low || (uint64_t)ip >= program_break.image_high ),"[pintool] Error: brk access within different image than brk syscall originated.");
         return virt_addr;
     }
 
@@ -1718,15 +1729,31 @@ VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
  *@param threadid The thread
  * @param addr The returned program break end address
  */
-VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, bool force) {
+VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
     DEBUG(1) std::cout << "brk returned " << std::hex << addr << std::endl;
     if (!Record && !force)
         return;
     // PIN_MutexLock(&lock);
 
-    programBreakEndAddr = addr;
-    if (programBreakBaseAddr == 0) {
-        programBreakBaseAddr = addr;
+    imgobj_t img;
+    for (auto i : imgvec) {
+        if ((uint64_t)ret < i.baseaddr ||
+            (uint64_t)ret >= i.endaddr) {
+            continue;
+        }
+        img = i;
+        break;
+    }
+
+    program_break.high = addr;
+    if (program_break.image_name.empty()) {
+        program_break.image_name = img.name;
+        program_break.low = addr;
+        std::cout << "brk owned by image: " << img.name << std::endl;
+    } else if (program_break.image_name.compare(img.name) == 0) {
+        std::cout << "brk called before from image: " << program_break.image_name << std::endl;
+        std::cout << "brk called now from image: " << img.name << std::endl;
+        ASSERT(false, "[pintool] Error: brk syscalls called within different images");
     }
 
     // PIN_MutexUnlock(&lock);
@@ -1815,7 +1842,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
     entry_t entry;
     entry.type = READ;
     entry.ip = ip;
-    entry.data = getLogicalAddress(addr);
+    entry.data = getLogicalAddress(addr, ip);
     DEBUG(3)
     printf("Read %llx to %llx\n", (long long unsigned int)entry.ip,
            (long long unsigned int)entry.data);
@@ -1847,7 +1874,7 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     DEBUG(1)
     std::cout << "ip in memwrite is   " << (uint64_t)ip << " " << std::endl;
     entry.ip = ip;
-    entry.data = getLogicalAddress(addr);
+    entry.data = getLogicalAddress(addr, ip);
     DEBUG(3)
     printf("Write %llx to %llx\n", (long long unsigned int)entry.ip,
            (long long unsigned int)entry.data);
@@ -2326,7 +2353,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                         RTN_InsertCall(brkRtn, IPOINT_AFTER,
                                        (AFUNPTR)RecordBrkAfter, IARG_THREAD_ID,
                                        IARG_FUNCRET_EXITPOINT_VALUE,
-                                       IARG_BOOL, false, IARG_END);
+                                       IARG_RETURN_IP, IARG_BOOL, false, IARG_END);
                         RTN_Close(brkRtn);
                     }
                 }
@@ -2448,6 +2475,7 @@ VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v
             RecordBrkAfter(
                 threadid,
                 PIN_GetSyscallReturn(ctxt, std),
+                PIN_GetContextReg(ctxt, REG_INST_PTR),
                 true
             );
             break;
