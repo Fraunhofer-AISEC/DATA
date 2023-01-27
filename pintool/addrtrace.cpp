@@ -262,7 +262,6 @@ std::unordered_map<uint64_t, std::vector<string>> allocmap;
 
 ADDRINT heapBaseAddr;
 ADDRINT heapEndAddr;
-string heapBaseAddr_hash;
 
 int writecount = 0;
 
@@ -1167,16 +1166,6 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
            "[pintool] Error: Multithreading detected but not supported!");
     DEBUG(1) printf("[pintool] Thread begin %d\n", threadid);
     // PIN_MutexLock(&lock);
-
-    std::string to_hash_stack = "STACKSPACE";
-    SHA1 hash_stack;
-    hash_stack.update(to_hash_stack);
-    stack.hash = hash_stack.final().substr(32, 8);
-
-    std::string to_hash_heap = "HEAPSPACE";
-    SHA1 hash_heap;
-    hash_heap.update(to_hash_heap);
-    heapBaseAddr_hash = hash_heap.final().substr(32, 8);
 
     if (thread_state.size() <= threadid) {
         thread_state_t newstate;
