@@ -269,9 +269,7 @@ FUNCVEC funcvec;
 /***********************************************************************/
 /* Brk tracking*/
 typedef struct {
-    std::string image_name;
-    ADDRINT image_low;
-    ADDRINT image_high;
+    imgobj_t image;
     ADDRINT low;
     ADDRINT high;
 } program_break_obj_t;
@@ -471,7 +469,7 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
     if ((uint64_t)virt_addr >= program_break.low &&
         (uint64_t)virt_addr < program_break.high) {
         std::cout << "Found Addr in program break " << std::hex << (uint64_t)virt_addr << " called from " << std::hex << (uint64_t)ip <<std::endl;
-        ASSERT( ((uint64_t)ip < program_break.image_low || (uint64_t)ip >= program_break.image_high ),"[pintool] Error: brk access within different image than brk syscall originated.");
+        ASSERT( ((uint64_t)ip < program_break.image.baseaddr || (uint64_t)ip >= program_break.image.endaddr ),"[pintool] Error: brk access within different image than brk syscall originated.");
         return virt_addr;
     }
 
@@ -1745,12 +1743,12 @@ VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
     }
 
     program_break.high = addr;
-    if (program_break.image_name.empty()) {
-        program_break.image_name = img.name;
+    if (program_break.image.name.empty()) {
+        program_break.image = img;
         program_break.low = addr;
         std::cout << "brk owned by image: " << img.name << std::endl;
-    } else if (program_break.image_name.compare(img.name) == 0) {
-        std::cout << "brk called before from image: " << program_break.image_name << std::endl;
+    } else if (program_break.image.name.compare(img.name) == 0) {
+        std::cout << "brk called before from image: " << program_break.image.name << std::endl;
         std::cout << "brk called now from image: " << img.name << std::endl;
         ASSERT(false, "[pintool] Error: brk syscalls called within different images");
     }
