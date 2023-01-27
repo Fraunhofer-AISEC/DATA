@@ -223,7 +223,7 @@ typedef struct {
     string name;
     uint64_t baseaddr;
     uint64_t endaddr;
-    string imghash;
+    string hash;
 } imgobj_t;
 
 typedef std::vector<imgobj_t> IMGVEC;
@@ -2137,7 +2137,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 
         SHA1 hash;
         hash.update(imgdata.name);
-        imgdata.imghash = hash.final().substr(32, 8);
+        imgdata.hash = hash.final().substr(32, 8);
 
         imgvec.push_back(imgdata);
 
@@ -2167,7 +2167,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 
             SHA1 hash;
             hash.update(imgdata.name);
-            imgdata.imghash = hash.final().substr(32, 8);
+            imgdata.hash = hash.final().substr(32, 8);
 
             imgvec.push_back(imgdata);
         }
@@ -2922,7 +2922,7 @@ int main(int argc, char *argv[]) {
     imgdata.name = "vvar";
     SHA1 hash;
     hash.update(imgdata.name);
-    imgdata.imghash = hash.final().substr(32, 8);
+    imgdata.hash = hash.final().substr(32, 8);
 
     imgdata.baseaddr = execute_commands("vvar", 1, " ");
     imgdata.endaddr = execute_commands("vvar", 2, " ");
@@ -2939,7 +2939,7 @@ int main(int argc, char *argv[]) {
     imgdataUnknown.name = "unknown1";
     SHA1 hashUnknown;
     hashUnknown.update(imgdataUnknown.name);
-    imgdataUnknown.imghash = hashUnknown.final().substr(32, 8);
+    imgdataUnknown.hash = hashUnknown.final().substr(32, 8);
 
     imgdataUnknown.baseaddr = execute_commands("-B 1 stack", 1, "| head -n 1");
     DEBUG(1)
