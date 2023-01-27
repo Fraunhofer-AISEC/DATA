@@ -260,8 +260,7 @@ HEAPVEC heap;
 std::unordered_map<std::string, std::vector<string>> hashmap;
 std::unordered_map<uint64_t, std::vector<string>> allocmap;
 
-ADDRINT heapBaseAddr;
-ADDRINT heapEndAddr;
+imgobj_t heaprange;
 
 int writecount = 0;
 
@@ -408,18 +407,18 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
     }
     // Is the Virtual Address in the Heap address space?
     /* Set heap start and end markers */
-    if (heap.size() && (heapBaseAddr != heap.front().base ||
-                        heapEndAddr != heap.back().base + heap.back().size)) {
-        heapBaseAddr = heap.front().base;
-        heapEndAddr = heap.back().base + heap.back().size;
+    if (heap.size() && (heaprange.baseaddr != heap.front().base ||
+                        heaprange.endaddr != heap.back().base + heap.back().size)) {
+        heaprange.baseaddr = heap.front().base;
+        heaprange.endaddr = heap.back().base + heap.back().size;
         DEBUG(1) {
-            std::cout << "heapBaseAddr: " << heapBaseAddr << std::endl;
-            std::cout << "heapEndAddr: " << heapEndAddr << std::endl;
+            std::cout << "heapBaseAddr: " << heaprange.baseaddr << std::endl;
+            std::cout << "heapEndAddr: " << heaprange.endaddr << std::endl;
         }
     }
     // Does the Virtual Address belong to any heap object?
-    if ((uint64_t)virt_addr >= heapBaseAddr &&
-        (uint64_t)virt_addr <= heapEndAddr) {
+    if ((uint64_t)virt_addr >= heaprange.baseaddr &&
+        (uint64_t)virt_addr <= heaprange.endaddr) {
         uint64_t *log_addr = static_cast<uint64_t *>(virt_addr);
         for (auto i : heap) {
             if ((uint64_t)virt_addr < i.base ||
