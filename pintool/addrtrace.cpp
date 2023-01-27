@@ -278,9 +278,7 @@ program_break_obj_t program_break;
 
 /***********************************************************************/
 /* Stack tracking*/
-ADDRINT stackBaseAddr; // Base address of the stack is calculated at Threadstart
-ADDRINT stackEndAddr;  // Base address of the stack is calculated at Threadstart
-string stackBaseAddr_hash; // hash of the stackBaseAddr
+imgobj_t stack;
 
 int pid = PIN_GetPid();
 /***********************************************************************/
@@ -450,8 +448,8 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
         // ASSERT(false, "[pintool] Error: Heap corruption");
     }
     // Is the Virtual Address in the Stack address space?
-    if ((uint64_t)virt_addr >= stackBaseAddr &&
-        (uint64_t)virt_addr < stackEndAddr) {
+    if ((uint64_t)virt_addr >= stack.baseaddr &&
+        (uint64_t)virt_addr < stack.endaddr) {
         DEBUG(1) std::cout << "Found Addr in stack " << std::hex << (uint64_t)virt_addr << std::endl;
         return virt_addr;
     }
@@ -1170,15 +1168,15 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
     DEBUG(1) printf("[pintool] Thread begin %d\n", threadid);
     // PIN_MutexLock(&lock);
 
-    std::string to_hash_stack = "STACKSSPACE";
+    std::string to_hash_stack = "STACKSPACE";
     SHA1 hash_stack;
     hash_stack.update(to_hash_stack);
-    stackBaseAddr_hash = hash_stack.final().substr(32, 8);
+    stack.hash = hash_stack.final().substr(32, 8);
 
     std::string to_hash_heap = "HEAPSPACE";
     SHA1 hash_heap;
     hash_heap.update(to_hash_heap);
-    stackBaseAddr_hash = hash_heap.final().substr(32, 8);
+    heapBaseAddr_hash = hash_heap.final().substr(32, 8);
 
     if (thread_state.size() <= threadid) {
         thread_state_t newstate;
@@ -2909,12 +2907,12 @@ int main(int argc, char *argv[]) {
     }
 
     /* Getting the stack, heap and vvar address range for this process */
-    stackBaseAddr = execute_commands("stack", 1, " ");
-    stackEndAddr = execute_commands("stack", 2, " ");
+    stack.baseaddr = execute_commands("stack", 1, " ");
+    stack.endaddr = execute_commands("stack", 2, " ");
     DEBUG(1) {
-        std::cout << "stackBaseAddr is " << std::hex << stackBaseAddr
+        std::cout << "stackBaseAddr is " << std::hex << stack.baseaddr
                   << std::endl;
-        std::cout << "stackEndAddr  is " << std::hex << stackEndAddr
+        std::cout << "stackEndAddr  is " << std::hex << stack.endaddr
                   << std::endl;
     }
 
