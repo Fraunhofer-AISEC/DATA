@@ -218,6 +218,29 @@ ofstream allocmapfile;      /* Holds Realloc invariance information */
 ofstream vdsofile;          /* Holds vdso shared library */
 
 /***********************************************************************/
+/* Image tracking*/
+typedef struct {
+    string name;
+    uint64_t baseaddr;
+    uint64_t endaddr;
+    string imghash;
+} imgobj_t;
+
+typedef std::vector<imgobj_t> IMGVEC;
+IMGVEC imgvec;
+
+/* Image to function mapping*/
+typedef struct {
+    string name;
+    uint64_t baseaddr;
+    uint64_t endaddr;
+    string funcname;
+} funcobj_t;
+
+typedef std::vector<funcobj_t> FUNCVEC;
+FUNCVEC funcvec;
+
+/***********************************************************************/
 /* Heap tracking */
 
 typedef struct {
@@ -242,29 +265,6 @@ ADDRINT heapEndAddr;
 string heapBaseAddr_hash;
 
 int writecount = 0;
-
-/***********************************************************************/
-/* Image tracking*/
-typedef struct {
-    string name;
-    uint64_t baseaddr;
-    uint64_t endaddr;
-    string imghash;
-} imgobj_t;
-
-typedef std::vector<imgobj_t> IMGVEC;
-IMGVEC imgvec;
-
-/* Image to function mapping*/
-typedef struct {
-    string name;
-    uint64_t baseaddr;
-    uint64_t endaddr;
-    string funcname;
-} funcobj_t;
-
-typedef std::vector<funcobj_t> FUNCVEC;
-FUNCVEC funcvec;
 
 /***********************************************************************/
 /* Brk tracking*/
