@@ -433,11 +433,8 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
                         << setw(25) << log_addr << " " << std::endl;
             return log_addr;
         }
-        // Virtual Address not found!
-        std::cout << "Questionable VirtAddr within heap " << virt_addr
-                  << std::endl;
+        // Virtual Address is within heaprange but is not found in heap vector!
         DEBUG(1) printheap();
-        // ASSERT(false, "[pintool] Error: Heap corruption");
     }
     // Is the Virtual Address in the Stack address space?
     if ((uint64_t)virt_addr >= stack.baseaddr &&
@@ -458,7 +455,7 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
     // Is the Virtual Address in the Program Break address space?
     if ((uint64_t)virt_addr >= program_break.low &&
         (uint64_t)virt_addr < program_break.high) {
-        std::cout << "Found Addr in program break " << std::hex << (uint64_t)virt_addr << " called from " << std::hex << (uint64_t)ip <<std::endl;
+        DEBUG(1) std::cout << "Found Addr in program break " << std::hex << (uint64_t)virt_addr << " called from " << std::hex << (uint64_t)ip <<std::endl;
         ASSERT( ((uint64_t)ip < program_break.image.baseaddr || (uint64_t)ip >= program_break.image.endaddr ),"[pintool] Error: brk access within different image than brk syscall originated.");
         return virt_addr;
     }
@@ -466,7 +463,6 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
     std::cout << "Not found Addr " << std::hex << (uint64_t)virt_addr << std::endl;
     DEBUG(1) printheap();
     DEBUG(1) print_proc_map();
-    // ASSERT(false, "[pintool] Error: LogicalAddress");
     return virt_addr;
 }
 
