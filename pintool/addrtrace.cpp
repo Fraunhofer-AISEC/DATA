@@ -465,8 +465,8 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
             std::cout << "Found Addr in program break " << std::hex
                       << (uint64_t)virt_addr << " called from " << std::hex
                       << (uint64_t)ip << std::endl;
-        ASSERT(((uint64_t)ip < program_break.image.baseaddr ||
-                (uint64_t)ip >= program_break.image.endaddr),
+        ASSERT(((uint64_t)ip >= program_break.image.baseaddr &&
+                (uint64_t)ip < program_break.image.endaddr),
                "[pintool] Error: brk access within different image than brk "
                "syscall originated.");
         return virt_addr;
