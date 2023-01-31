@@ -1736,7 +1736,7 @@ VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
         program_break.image = img;
         program_break.low = addr;
         std::cout << "brk owned by image: " << img.name << std::endl;
-    } else if (program_break.image.name.compare(img.name) == 0) {
+    } else if (program_break.image.name.compare(img.name) != 0) {
         std::cout << "brk called before from image: "
                   << program_break.image.name << std::endl;
         std::cout << "brk called now from image: " << img.name << std::endl;
