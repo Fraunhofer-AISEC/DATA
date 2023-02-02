@@ -153,6 +153,19 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
 #define FREE "free"
 #define BRK "brk"
 #define DEBUG(x) if (KnobDebug.Value() >= x)
+#define MESSAGE(x, y) std::cout << x << y << std::endl
+
+#define PT_DEBUG(x, msg) DEBUG(x) MESSAGE("[pt-dbg" << x << "] ", msg)
+#define PT_INFO(msg) MESSAGE("[pt-info] ", msg)
+#define PT_WARN(msg) MESSAGE("[pt-warn] ", msg)
+#define PT_ASSERT(x, msg)                                                      \
+    {                                                                          \
+        if (!(x)) {                                                            \
+            MESSAGE("[pt-error] ", msg);                                       \
+            ASSERT(false, "pintool failed.");                                  \
+        }                                                                      \
+    }
+#define PT_ERROR(msg) PT_ASSERT(false, msg)
 
 int alloc_instrumented = 0;
 
@@ -327,7 +340,7 @@ std::vector<thread_state_t> thread_state;
 /***********************************************************************/
 
 void printheap() {
-    std::cout << "[pintool] Heap:" << std::endl;
+    PT_INFO("heap: ");
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
         std::cout << std::setw(3) << std::hex << it->id << ":" << it->base
                   << "-" << it->size << std::endl;
@@ -344,16 +357,15 @@ uint64_t getIndex(string hash) {
 VOID print_proc_map(VOID) {
     std::stringstream command_string;
     command_string << "cat /proc/" << pid << "/maps";
-    DEBUG(1) std::cout << command_string.str() << " command is " << std::endl;
     const std::string to_pass(command_string.str());
-    DEBUG(1) std::cout << to_pass.c_str() << std::endl;
+    PT_DEBUG(1, "print_proc_map with " << to_pass.c_str());
 
     FILE *fp;
     char buffer[64];
     const char *arg = to_pass.c_str();
     fp = popen(arg, "r");
     if (!fp) {
-        std::cout << " ERROR executing command " << std::endl;
+        PT_ERROR("command failed");
         return;
     }
     if (fp != NULL) {
@@ -370,16 +382,15 @@ ADDRINT execute_commands(const std::string command, short pos,
     command_string << "cat /proc/" << pid << "/maps | grep '" << command
                    << "' | awk '{print $1}' | cut -f" << pos << " -d-"
                    << opt_command;
-    DEBUG(1) std::cout << command_string.str() << " command is " << std::endl;
     const std::string to_pass(command_string.str());
-    DEBUG(1) std::cout << to_pass.c_str() << std::endl;
+    PT_DEBUG(1, "execute_commands " << to_pass.c_str());
 
     FILE *fp;
     char buffer[64];
     const char *arg = to_pass.c_str();
     fp = popen(arg, "r");
     if (!fp) {
-        std::cout << " ERROR executing command " << std::endl;
+        PT_ERROR("command failed");
         return 0;
     }
     if (fp != NULL) {
@@ -387,22 +398,20 @@ ADDRINT execute_commands(const std::string command, short pos,
             pclose(fp);
         }
     }
-    DEBUG(1) std::cout << " buf is " << buffer << std::endl;
+    PT_DEBUG(1, " buf is " << buffer);
     std::string tmp = "0x" + (std::string)buffer;
-    DEBUG(1) std::cout << " tmp is " << tmp << std::endl;
-    DEBUG(1)
-    std::cout << " func is " << std::hex << strtol(tmp.c_str(), NULL, 0)
-              << std::endl;
+    PT_DEBUG(1, " tmp is " << tmp);
+    PT_DEBUG(1, " func is " << std::hex << strtol(tmp.c_str(), NULL, 0));
 
     return ((ADDRINT)strtol(tmp.c_str(), NULL, 0));
 }
 
 void *getLogicalAddress(void *virt_addr, void *ip) {
-    DEBUG(1)
-    std::cout << "Converting VirtualAddr 0x" << virt_addr << std::endl;
+    PT_DEBUG(1, "Converting VirtualAddr " << virt_addr);
 
     if (virt_addr == nullptr) {
-        std::cout << " ERROR: dereferenced a nullptr " << std::endl;
+        // TODO assert false?
+        PT_ERROR("dereferenced a nullptr");
         return nullptr;
     }
     // Is the Virtual Address in the Heap address space?
@@ -412,10 +421,8 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
          heaprange.endaddr != heap.back().base + heap.back().size)) {
         heaprange.baseaddr = heap.front().base;
         heaprange.endaddr = heap.back().base + heap.back().size;
-        DEBUG(1) {
-            std::cout << "heapBaseAddr: " << heaprange.baseaddr << std::endl;
-            std::cout << "heapEndAddr: " << heaprange.endaddr << std::endl;
-        }
+        PT_DEBUG(1, "heap.baseaddr: " << heaprange.baseaddr);
+        PT_DEBUG(1, "heap.endaddr: " << heaprange.endaddr);
     }
     // Does the Virtual Address belong to any heap object?
     if ((uint64_t)virt_addr >= heaprange.baseaddr &&
@@ -440,40 +447,32 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
     // Is the Virtual Address in the Stack address space?
     if ((uint64_t)virt_addr >= stack.baseaddr &&
         (uint64_t)virt_addr < stack.endaddr) {
-        DEBUG(1)
-            std::cout << "Found Addr in stack " << std::hex
-                      << (uint64_t)virt_addr << std::endl;
+        PT_DEBUG(1, "found addr in stack " << std::hex << (uint64_t)virt_addr);
         return virt_addr;
     }
     // Is the Virtual Address in the IMG/Code address space?
     for (auto i : imgvec) {
         if ((uint64_t)virt_addr < i.baseaddr ||
             (uint64_t)virt_addr >= i.endaddr) {
-            // std::cout << "img " << i.baseaddr << " " << i.endaddr <<
-            // std::endl;
             continue;
         }
-        DEBUG(1)
-            std::cout << "Found Addr in IMG " << std::hex << (uint64_t)virt_addr
-                      << std::endl;
+        PT_DEBUG(1, "found addr in image " << std::hex << (uint64_t)virt_addr);
         return virt_addr;
     }
     // Is the Virtual Address in the Program Break address space?
     if ((uint64_t)virt_addr >= program_break.low &&
         (uint64_t)virt_addr < program_break.high) {
-        DEBUG(1)
-            std::cout << "Found Addr in program break " << std::hex
-                      << (uint64_t)virt_addr << " called from " << std::hex
-                      << (uint64_t)ip << std::endl;
-        ASSERT(((uint64_t)ip >= program_break.image.baseaddr &&
-                (uint64_t)ip < program_break.image.endaddr),
-               "[pintool] Error: brk access within different image than brk "
-               "syscall originated.");
+        PT_DEBUG(1, "found addr in brk " << std::hex << (uint64_t)virt_addr
+                                         << " called from " << std::hex
+                                         << (uint64_t)ip);
+        PT_ASSERT(((uint64_t)ip >= program_break.image.baseaddr &&
+                   (uint64_t)ip < program_break.image.endaddr),
+                  "brk access within different image than brk "
+                  "syscall originated.");
         return virt_addr;
     }
 
-    std::cout << "Not found Addr " << std::hex << (uint64_t)virt_addr
-              << std::endl;
+    PT_WARN("not found addr " << std::hex << (uint64_t)virt_addr);
     DEBUG(1) printheap();
     DEBUG(1) print_proc_map();
     return virt_addr;
@@ -531,9 +530,9 @@ class DataLeak {
      * @param d The evidence to add
      */
     void append(uint64_t d) {
-        ASSERT(ip, "[pintool] Error: IP not set");
+        PT_ASSERT(ip, "IP not set");
         DEBUG(1)
-        printf("[pintool] DLEAK@%" PRIx64 ": %" PRIx64 " appended\n", ip, d);
+        printf("[pt-info] DLEAK@%" PRIx64 ": %" PRIx64 " appended\n", ip, d);
         data.push_back(d);
     }
 
@@ -557,7 +556,7 @@ class DataLeak {
         res += fwrite(&ip, sizeof(ip), 1, f) != 1;
         res += fwrite(&len, sizeof(len), 1, f) != 1;
         res += fwrite(&data[0], sizeof(uint64_t), len, f) != len;
-        ASSERT(!res, "[pintool] Error: Unable to write file");
+        PT_ASSERT(!res, "Unable to write file");
     }
 };
 
@@ -578,9 +577,9 @@ class CFLeak {
      * @param ip The evidence to add
      */
     void append(uint64_t ip) {
-        ASSERT(bp, "[pintool] Error: BP not set");
+        PT_ASSERT(bp, "BP not set");
         DEBUG(1)
-        printf("[pintool] CFLEAK@%" PRIx64 ": %" PRIx64 " appended\n", bp, ip);
+        printf("[pt-info] CFLEAK@%" PRIx64 ": %" PRIx64 " appended\n", bp, ip);
         targets.push_back(ip);
     }
 
@@ -604,7 +603,7 @@ class CFLeak {
         res += fwrite(&bp, sizeof(bp), 1, f) != 1;
         res += fwrite(&len, sizeof(len), 1, f) != 1;
         res += fwrite(&targets[0], sizeof(uint64_t), len, f) != len;
-        ASSERT(!res, "[pintool] Error: Unable to write file");
+        PT_ASSERT(!res, "Unable to write file");
     }
 };
 
@@ -777,7 +776,7 @@ class CallContext : public Context {
         res += fwrite(&type, sizeof(type), 1, f) != 1;
         res += fwrite(&caller, sizeof(caller), 1, f) != 1;
         res += fwrite(&callee, sizeof(callee), 1, f) != 1;
-        ASSERT(!res, "[pintool] Error: Unable to write file");
+        PT_ASSERT(!res, "Unable to write file");
         Context::doexport(f);
         for (children_t::iterator it = children.begin(); it != children.end();
              it++) {
@@ -785,7 +784,7 @@ class CallContext : public Context {
         }
         type = FUNC_EXIT;
         res = fwrite(&type, sizeof(type), 1, f) != 1;
-        ASSERT(!res, "[pintool] Error: Unable to write file");
+        PT_ASSERT(!res, "Unable to write file");
     }
 };
 
@@ -901,7 +900,7 @@ class AbstractLeakContainer {
      * @param ip The instruction to trace
      */
     virtual void dleak_create(uint64_t ip) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
+        PT_ASSERT(currentContext, "Context not initialized");
         traced_dataleaks.insert(ip);
         currentContext->dleak_create(ip);
     }
@@ -913,7 +912,7 @@ class AbstractLeakContainer {
      * @param len The length of the branch (branch point-> merge point) (unused)
      */
     virtual void cfleak_create(uint64_t bp, uint64_t *mp, uint8_t len) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
+        PT_ASSERT(currentContext, "Context not initialized");
         traced_cfleaks.insert(bp);
         currentContext->cfleak_create(bp, mp, len);
     }
@@ -925,7 +924,7 @@ class AbstractLeakContainer {
      *             We do not (need to) distinguish between read and write here.
      */
     virtual void dleak_consume(uint64_t ip, uint64_t data) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
+        PT_ASSERT(currentContext, "Context not initialized");
         DEBUG(1) printf("[pintool] Consuming DLEAK %" PRIx64 "\n", ip);
         currentContext->dleak_append(ip, data);
     }
@@ -936,7 +935,7 @@ class AbstractLeakContainer {
      * @param target The taken branch target (the evidence)
      */
     virtual void cfleak_consume(uint64_t bbl, uint64_t target) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
+        PT_ASSERT(currentContext, "Context not initialized");
         DEBUG(1) printf("[pintool] Consuming CFLEAK %" PRIx64 "\n", bbl);
         currentContext->cfleak_append(bbl, target);
     }
@@ -948,7 +947,7 @@ class AbstractLeakContainer {
      * @param f The file to export to
      */
     virtual void doexport(FILE *f) {
-        ASSERT(currentContext, "[pintool] Error: Context not initialized");
+        PT_ASSERT(currentContext, "Context not initialized");
         currentContext->doexport(f);
     }
 };
@@ -1006,7 +1005,7 @@ class CallStack : public AbstractLeakContainer {
     CallStack() {}
 
     void call_create(uint64_t caller, uint64_t callee) {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
         DEBUG(2)
         printf("[pintool] Building callstack %" PRIx64 " --> %" PRIx64 "\n",
                caller, callee);
@@ -1027,8 +1026,8 @@ class CallStack : public AbstractLeakContainer {
     }
 
     void call_consume(uint64_t caller, uint64_t callee) {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        ASSERT(currentContext, "[pintool] Error: Callstack is not initialized");
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        PT_ASSERT(currentContext, "Callstack is not initialized");
         DEBUG(3) print_all();
         DEBUG(2)
         printf("[pintool] Calling %" PRIx64 " --> %" PRIx64 "\n", caller,
@@ -1053,16 +1052,15 @@ class CallStack : public AbstractLeakContainer {
     }
 
     void ret_consume(uint64_t ip) {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-        ASSERT(currentContext, "[pintool] Error: Callstack is not initialized");
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        PT_ASSERT(currentContext, "Callstack is not initialized");
         DEBUG(2) printf("[pintool] Returning %" PRIx64 "\n", ip);
         CallContext *top = static_cast<CallContext *>(currentContext);
         if (top->unknown_child_depth) {
             top->unknown_child_depth--;
         } else {
             if (top->parent) {
-                ASSERT(top->parent,
-                       "[pintool] Error: Callstack parent is empty");
+                PT_ASSERT(top->parent, "Callstack parent is empty");
                 currentContext = top = top->parent;
             } else {
                 DEBUG(2) printf("[pintool] Warning: Ignoring return\n");
@@ -1073,13 +1071,13 @@ class CallStack : public AbstractLeakContainer {
     void ret_create(uint64_t ip) { ret_consume(ip); }
 
     bool empty() {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
         CallContext *top = static_cast<CallContext *>(currentContext);
         return top == NULL || top->used == false;
     }
 
     CallContext *get_begin() {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
         CallContext *c = static_cast<CallContext *>(currentContext);
         while (c && c->parent) {
             c = c->parent;
@@ -1092,15 +1090,15 @@ class CallStack : public AbstractLeakContainer {
      * initial context
      */
     void rewind() {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
         CallContext *top = get_begin();
-        ASSERT(top, "[pintool] Error: Leaks not initialized");
+        PT_ASSERT(top, "Leaks not initialized");
         top->used = false;
         currentContext = top;
     }
 
     void print_all() {
-        ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
         CallContext *top = get_begin();
         if (top) {
             printf("[pintool] Callstack:\n");
@@ -1116,7 +1114,7 @@ AbstractLeakContainer *leaks = NULL;
 /***********************************************************************/
 
 void init() {
-    // ASSERT(PIN_MutexInit(&lock), "[pintool] Error: Mutex init failed");
+    // PT_ASSERT(PIN_MutexInit(&lock), "Mutex init failed");
 }
 
 /**
@@ -1164,8 +1162,7 @@ VOID RecordMainEnd(THREADID threadid, ADDRINT ins) {
  * @param v Unused
  */
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
-    ASSERT(threadid == 0,
-           "[pintool] Error: Multithreading detected but not supported!");
+    PT_ASSERT(threadid == 0, "Multithreading detected but not supported!");
     DEBUG(1) printf("[pintool] Thread begin %d\n", threadid);
     // PIN_MutexLock(&lock);
 
@@ -1178,8 +1175,7 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
         thread_state[threadid].RetIP = 0;
         thread_state[threadid].newbbl = 0;
     }
-    ASSERT(thread_state.size() > threadid,
-           "[pintool] Error: thread_state corrupted");
+    PT_ASSERT(thread_state.size() > threadid, "thread_state corrupted");
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1217,9 +1213,9 @@ void calculate_sha1_hash(memobj_t *obj) {
     hashmap[to_hash.str()].push_back(obj->hash);
 
     DEBUG(1) {
-        std::cout << "HashMap for    " << to_hash.str() << std::endl;
+        PT_DEBUG(1, "HashMap for    " << to_hash.str());
         for (auto &i : hashmap[to_hash.str()]) {
-            std::cout << "HashMap Value: " << i << std::endl;
+            PT_DEBUG(1, "HashMap Value: " << i);
         }
     }
 }
@@ -1238,7 +1234,7 @@ std::string getcallstack(THREADID threadid) {
     CALLSTACK::IPVEC ipvec;
     cs.emit_stack(cs.depth(), out, ipvec);
     DEBUG(1) for (uint32_t i = 0; i < out.size(); i++) {
-        std::cout << out[i] << std::endl;
+        DEBUG(1) std::cout << out[i];
     }
     std::stringstream unique_cs(ios_base::app | ios_base::out);
 
@@ -1251,9 +1247,8 @@ std::string getcallstack(THREADID threadid) {
         for (auto j : imgvec) {
             if (name == (j.name)) {
                 unique_cs << i.ipaddr - j.baseaddr;
-                DEBUG(1)
-                std::cout << name << " " << j.baseaddr << " " << unique_cs.str()
-                          << " " << i.ipaddr << std::endl;
+                PT_DEBUG(1, name << " " << j.baseaddr << " " << unique_cs.str()
+                                 << " " << i.ipaddr);
             }
         }
     }
@@ -1266,8 +1261,8 @@ ADDRINT get_callsite_offset(ADDRINT callsite) {
             return callsite - i.baseaddr;
         }
     }
-    std::cout << "Error: callsite does not belong to image space?" << std::endl;
-    std::cout << "callsite " << std::hex << callsite << std::endl;
+    PT_WARN("callsite does not belong to image space?");
+    PT_WARN("callsite " << std::hex << callsite);
     return 0;
 }
 
@@ -1277,9 +1272,8 @@ ADDRINT get_callsite_offset(ADDRINT callsite) {
  */
 void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
              char const *type, std::string callstack, ADDRINT old_ptr) {
-    DEBUG(1)
-    std::cout << "doalloc " << std::hex << addr << " " << size << " type "
-              << type << std::endl;
+    PT_DEBUG(1,
+             "doalloc " << std::hex << addr << " " << size << " type " << type);
 
     memobj_t obj;
     obj.id = (objid) ? objid : nextheapid++;
@@ -1292,8 +1286,7 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
 
     if (old_ptr && old_ptr != addr) {
         if (!allocmap.count(old_ptr)) {
-            ASSERT(false,
-                   "[Error] doalloc has a valid old_ptr, but no elements!");
+            PT_ASSERT(false, "doalloc has a valid old_ptr, but no elements!");
         }
         for (auto item : allocmap[old_ptr]) {
             allocmap[addr].push_back(item);
@@ -1316,7 +1309,7 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     if (!heap.size() || (below == &heap.back() &&
                          obj.base >= heap.back().base + heap.back().size)) {
         /* No inbetween slot found, thus append to the end */
-        std::cout << "Push to heap end" << std::endl;
+        PT_INFO("Push to heap end");
         heap.push_back(obj);
     } else if (
         /* Insert in front, if obj does not overlap first element */
@@ -1333,11 +1326,11 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     } else {
         /* Invalid inbetween slot found, thus quit */
         printheap();
-        std::cout << "below.base " << below->base << std::endl;
-        std::cout << "above.base " << above->base << std::endl;
-        std::cout << "obj.base   " << obj.base << std::endl;
-        std::cout << "obj.size   " << obj.size << std::endl;
-        ASSERT(false, "[Error] Corrupted heap?!");
+        PT_INFO("below.base " << below->base);
+        PT_INFO("above.base " << above->base);
+        PT_INFO("obj.base   " << obj.base);
+        PT_INFO("obj.size   " << obj.size);
+        PT_ASSERT(false, "Corrupted heap?!");
     }
     /* Print the current obj into the heapfile */
     heapfile << setw(15) << obj.type << " " << setw(15) << obj.size << " "
@@ -1351,7 +1344,7 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
  * This function is not thread-safe. Lock first.
  */
 uint32_t dofree(ADDRINT addr) {
-    DEBUG(1) std::cout << "dofree " << std::hex << addr << std::endl;
+    PT_DEBUG(1, "dofree 0x" << std::hex << addr);
     if (!addr) {
         return 0;
     }
@@ -1364,7 +1357,7 @@ uint32_t dofree(ADDRINT addr) {
     }
     printheap();
     std::stringstream unique_cs(ios_base::app | ios_base::out);
-    ASSERT(false, "[Error] Invalid free!");
+    PT_ASSERT(false, "Invalid free!");
     return 0;
 }
 
@@ -1374,9 +1367,7 @@ uint32_t dofree(ADDRINT addr) {
  * @param size The size parameter passed to malloc
  */
 VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
-    DEBUG(1)
-    std::cout << "[pintool] Malloc called with " << std::hex << size << " at "
-              << ip << std::endl;
+    PT_DEBUG(1, "malloc called with 0x" << std::hex << size << " at " << ip);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
@@ -1392,9 +1383,8 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
         };
         thread_state[threadid].malloc_state.push_back(state);
     } else {
-        DEBUG(1)
-        std::cout << "[pintool] Malloc ignored due to realloc_pending (size= "
-                  << std::hex << size << ") at " << ip << std::endl;
+        PT_DEBUG(1, "Malloc ignored due to realloc_pending (size= "
+                        << std::hex << size << ") at " << ip);
     }
     // PIN_MutexUnlock(&lock);
 }
@@ -1405,13 +1395,12 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
  * @param addr The allocated heap pointer
  */
 VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
-    DEBUG(1)
-    std::cout << "[pintool] Malloc returned " << std::hex << addr << std::endl;
+    PT_DEBUG(1, "Malloc returned " << std::hex << addr);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
-    ASSERT(thread_state[threadid].malloc_state.size() > 0,
-           "[pintool] Error: Malloc returned but not called");
+    PT_ASSERT(thread_state[threadid].malloc_state.size() > 0,
+              "Malloc returned but not called");
     alloc_state_t state = thread_state[threadid].malloc_state.back();
     thread_state[threadid].malloc_state.pop_back();
     doalloc((ADDRINT)addr, state.size, 0, state.callsite, state.type,
@@ -1427,9 +1416,8 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
                          ADDRINT size) {
-    DEBUG(1)
-    std::cout << "[pintool] Realloc called with " << std::hex << addr << " "
-              << size << " at " << ip << std::endl;
+    PT_DEBUG(1, "Realloc called with " << std::hex << addr << " " << size
+                                       << " at " << ip);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
@@ -1453,14 +1441,12 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
  * @param addr The allocated heap pointer
  */
 VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
-    DEBUG(1)
-    std::cout << "[pintool] Realloc returned " << std::hex << addr << " at "
-              << ip << std::endl;
+    PT_DEBUG(1, "Realloc returned " << std::hex << addr << " at " << ip);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
-    ASSERT(thread_state[threadid].realloc_state.size() > 0,
-           "[pintool] Error: Realloc returned but not called");
+    PT_ASSERT(thread_state[threadid].realloc_state.size() > 0,
+              "Realloc returned but not called");
     realloc_state_t state = thread_state[threadid].realloc_state.back();
     thread_state[threadid].realloc_state.pop_back();
 
@@ -1481,9 +1467,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
                         ADDRINT size, ADDRINT ret) {
-    DEBUG(1)
-    std::cout << "Calloc called with " << std::hex << nelem << " " << size
-              << std::endl;
+    PT_DEBUG(1, "Calloc called with " << std::hex << nelem << " " << size);
     if (!Record)
         return;
     //  PIN_MutexLock(&lock);
@@ -1509,14 +1493,14 @@ VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
  * @param addr The allocated heap pointer
  */
 VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
-    //  PIN_MutexLock(&lock);
-    DEBUG(1) std::cout << "Calloc returned " << std::hex << addr << std::endl;
+    PT_DEBUG(1, "calloc returned " << std::hex << addr);
     if (!Record) {
-        DEBUG(1) std::cout << "ignoring" << std::endl;
+        PT_DEBUG(1, "ignoring");
         return;
     }
-    ASSERT(thread_state[threadid].calloc_state.size() != 0,
-           "[Error] Calloc returned but not called");
+    // PIN_MutexLock(&lock);
+    PT_ASSERT(thread_state[threadid].calloc_state.size() != 0,
+              "calloc returned but not called");
     alloc_state_t state = thread_state[threadid].calloc_state.back();
     thread_state[threadid].calloc_state.pop_back();
     doalloc(addr, state.size, 0, state.callsite, state.type, state.callstack,
@@ -1532,10 +1516,8 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
 VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
     if (!Record)
         return;
-    //  PIN_MutexLock(&lock);
-    DEBUG(1)
-    std::cout << "[pintool] Free called with " << std::hex << addr << " at "
-              << ip << std::endl;
+    // PIN_MutexLock(&lock);
+    PT_DEBUG(1, "free called with " << std::hex << addr << " at " << ip);
     free_state_t state = {
         .type = "free",
         .addr = addr,
@@ -1553,8 +1535,8 @@ VOID RecordFreeAfter(THREADID threadid, VOID *ip) {
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
-    ASSERT(thread_state[threadid].free_state.size() != 0,
-           "[Error] Free returned but not called");
+    PT_ASSERT(thread_state[threadid].free_state.size() != 0,
+              "free returned but not called");
     free_state_t state = thread_state[threadid].free_state.back();
     thread_state[threadid].free_state.pop_back();
     dofree(state.addr);
@@ -1568,9 +1550,7 @@ VOID RecordFreeAfter(THREADID threadid, VOID *ip) {
  */
 VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len,
                         bool force) {
-    DEBUG(1)
-    std::cout << "munmap called with " << std::hex << addr << "*" << len
-              << std::endl;
+    PT_DEBUG(1, "munmap called with " << std::hex << addr << "*" << len);
     if (!Record && !force)
         return;
     // PIN_MutexLock(&lock);
@@ -1586,25 +1566,21 @@ VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len,
  */
 VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size, ADDRINT ret,
                       bool force) {
-    DEBUG(1)
-    std::cout << "mmap called with " << std::hex << size << std::endl;
+    PT_DEBUG(1, "mmap called with " << std::hex << size);
     if (!Record && !force)
         return;
     if (thread_state[threadid].mremap_state.size() != 0) {
-        DEBUG(1)
-        std::cout << "[pintool] Mmap ignored due to mremap_pending (size= "
-                  << std::hex << size << ")" << std::endl;
+        PT_DEBUG(1, "mmap ignored due to mremap_pending (size= "
+                        << std::hex << size << ")");
         return;
     }
     if (thread_state[threadid].malloc_state.size() != 0) {
-        DEBUG(1)
-        std::cout << "[pintool] Nested mmap stemming from pending malloc"
-                  << " (size= " << std::hex << size << ")" << std::endl;
+        PT_DEBUG(1, "nested mmap stemming from pending malloc"
+                        << " (size= " << std::hex << size << ")");
     }
     if (thread_state[threadid].realloc_state.size() != 0) {
-        DEBUG(1)
-        std::cout << "[pintool] Nested mmap stemming from pending realloc"
-                  << " (size= " << std::hex << size << ")" << std::endl;
+        PT_DEBUG(1, "nested mmap stemming from pending realloc"
+                        << " (size= " << std::hex << size << ")");
     }
     // PIN_MutexLock(&lock);
     SHA1 hash;
@@ -1627,25 +1603,21 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size, ADDRINT ret,
  * @param addr The allocated heap pointer
  */
 VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
-    DEBUG(1) std::cout << "mmap returned " << std::hex << addr << std::endl;
+    PT_DEBUG(1, "mmap returned " << std::hex << addr);
     if (!Record && !force)
         return;
     if (thread_state[threadid].mremap_state.size() != 0) {
-        DEBUG(1)
-        std::cout << "[pintool] Mmap ignored due to mremap_pending"
-                  << std::endl;
+        PT_DEBUG(1, "mmap ignored due to mremap_pending");
         return;
     }
     if (thread_state[threadid].malloc_state.size() != 0 ||
         thread_state[threadid].realloc_state.size() != 0) {
-        DEBUG(1)
-        std::cout << "[pintool] Nested mmap due to [m,re]alloc pending"
-                  << std::endl;
+        PT_DEBUG(1, "nested mmap due to [m,re]alloc pending");
     }
     // PIN_MutexLock(&lock);
 
-    ASSERT(thread_state[threadid].mmap_state.size() != 0,
-           "[Error] mmap returned but not called");
+    PT_ASSERT(thread_state[threadid].mmap_state.size() != 0,
+              "mmap returned but not called");
 
     alloc_state_t state = thread_state[threadid].mmap_state.back();
     thread_state[threadid].mmap_state.pop_back();
@@ -1664,9 +1636,7 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
  */
 VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
                         ADDRINT old_size, ADDRINT new_size, ADDRINT ret) {
-    DEBUG(1)
-    std::cout << "mremap called with " << std::hex << addr << " " << new_size
-              << std::endl;
+    PT_DEBUG(1, "mremap called with " << std::hex << addr << " " << new_size);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
@@ -1692,12 +1662,12 @@ VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
  * @param addr The allocated heap pointer
  */
 VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
-    DEBUG(1) std::cout << "mremap returned " << std::hex << addr << std::endl;
+    PT_DEBUG(1, "mremap returned " << std::hex << addr);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
-    ASSERT(thread_state[threadid].mremap_state.size() != 0,
-           "[Error] mremap returned but not called");
+    PT_ASSERT(thread_state[threadid].mremap_state.size() != 0,
+              "mremap returned but not called");
 
     realloc_state_t state = thread_state[threadid].mremap_state.back();
     thread_state[threadid].mremap_state.pop_back();
@@ -1717,7 +1687,8 @@ VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
  * @param addr The returned program break end address
  */
 VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
-    DEBUG(1) std::cout << "brk returned " << std::hex << addr << std::endl;
+    PT_DEBUG(1, "brk returned from " << std::hex << ret << " with " << std::hex
+                                     << addr);
     if (!Record && !force)
         return;
     // PIN_MutexLock(&lock);
@@ -1735,13 +1706,11 @@ VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
     if (program_break.image.name.empty()) {
         program_break.image = img;
         program_break.low = addr;
-        std::cout << "brk owned by image: " << img.name << std::endl;
+        PT_INFO("brk owned by image: " << img.name);
     } else if (program_break.image.name.compare(img.name) != 0) {
-        std::cout << "brk called before from image: "
-                  << program_break.image.name << std::endl;
-        std::cout << "brk called now from image: " << img.name << std::endl;
-        ASSERT(false,
-               "[pintool] Error: brk syscalls called within different images");
+        PT_INFO("brk called before from image: " << program_break.image.name);
+        PT_INFO("brk called now from image: " << img.name);
+        PT_ASSERT(false, "brk syscalls called within different images");
     }
 
     // PIN_MutexUnlock(&lock);
@@ -1824,8 +1793,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
                    const CONTEXT *ctxt) {
     if (!Record)
         return;
-    DEBUG(1)
-    std::cout << "ip in memread is   " << (uint64_t)ip << " " << std::endl;
+    PT_DEBUG(1, "ip in memread is   " << (uint64_t)ip);
     // PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = READ;
@@ -1858,9 +1826,8 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     entry.type = WRITE;
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_STACK_PTR) : 0;
-    DEBUG(1) std::cout << " TOP from WRITE is " << target << std::endl;
-    DEBUG(1)
-    std::cout << "ip in memwrite is   " << (uint64_t)ip << " " << std::endl;
+    PT_DEBUG(1, " TOP from WRITE is " << target);
+    PT_DEBUG(1, "ip in memwrite is   " << (uint64_t)ip);
     entry.ip = ip;
     entry.data = getLogicalAddress(addr, ip);
     DEBUG(3)
@@ -1891,11 +1858,11 @@ VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
     entry.ip = (void *)ins;
     entry.data = (void *)target;
     record_entry(entry);
-    DEBUG(4) std::cout << "Branch entry" << std::endl;
-    DEBUG(4) std::cout << "ip \t" << std::hex << entry.ip << std::endl;
-    DEBUG(4) std::cout << "data \t" << std::hex << entry.data << std::endl;
-    DEBUG(4) std::cout << "ins \t" << std::hex << ins << std::endl;
-    DEBUG(4) std::cout << "target \t" << std::hex << target << std::endl;
+    PT_DEBUG(4, "Branch entry");
+    PT_DEBUG(4, "ip \t" << std::hex << entry.ip);
+    PT_DEBUG(4, "data \t" << std::hex << entry.data);
+    PT_DEBUG(4, "ins \t" << std::hex << ins);
+    PT_DEBUG(4, "target \t" << std::hex << target);
 }
 
 /**
@@ -1910,10 +1877,8 @@ VOID RecordBranch(THREADID threadid, ADDRINT bbl, ADDRINT bp,
                   const CONTEXT *ctxt, bool fast_recording) {
     //  PIN_MutexLock(&lock);
     ADDRINT target = (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR);
-    DEBUG(3)
-    std::cout << "Branch " << std::hex << bp << " to " << target << std::endl;
-    DEBUG(3)
-    std::cout << "fast_recording " << fast_recording << std::endl;
+    PT_DEBUG(3, "Branch " << std::hex << bp << " to " << target);
+    PT_DEBUG(3, "fast_recording " << fast_recording);
     RecordBranch_unlocked(threadid, bp, target, ctxt);
     if (fast_recording) {
         auto ix = (void *)bp;
@@ -1969,8 +1934,7 @@ VOID RecordFunctionEntry_unlocked(THREADID threadid, ADDRINT ins, BOOL indirect,
         entry.ip = (void *)ins;
     }
     entry.data = (void *)target;
-    DEBUG(3)
-    std::cout << "Call " << std::hex << ins << " to " << target << std::endl;
+    PT_DEBUG(3, "Call " << std::hex << ins << " to " << target);
     // leaks->call_consume(ins, target);
     leaks->call_consume((uint64_t)entry.ip, (uint64_t)entry.data);
     record_entry(entry);
@@ -1997,7 +1961,7 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
         return;
     //  PIN_MutexLock(&lock);
     if (indirect) {
-        DEBUG(2) std::cout << "Icall to  " << std::hex << target << std::endl;
+        PT_DEBUG(2, "Icall to  " << std::hex << target);
     }
     if (KnobFunc.Value()) {
         RecordFunctionEntry_unlocked(threadid, ins, indirect, target, ctxt);
@@ -2028,13 +1992,11 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
         return;
     entry_t entry;
     entry.type = FUNC_EXIT;
-    DEBUG(1)
-    std::cout << " TOP from func EXIT is "
-              << PIN_GetContextReg(ctxt, REG_STACK_PTR) << std::endl;
+    PT_DEBUG(1, " TOP from func EXIT is "
+                    << PIN_GetContextReg(ctxt, REG_STACK_PTR));
     entry.ip = (void *)ins;
     entry.data = (void *)target;
-    DEBUG(2)
-    std::cout << "Ret " << std::hex << ins << " to " << target << std::endl;
+    PT_DEBUG(2, "Ret " << std::hex << ins << " to " << target);
     // leaks->ret_consume(ins);
     leaks->ret_consume((uint64_t)entry.ip);
     record_entry(entry);
@@ -2085,7 +2047,7 @@ VOID Image(IMG img, VOID *v) {}
 VOID instrumentMainAndAlloc(IMG img, VOID *v) {
     // TODO
     string name = IMG_Name(img);
-    DEBUG(1) std::cout << "[pintool] Instrumenting " << name << std::endl;
+    PT_DEBUG(1, "Instrumenting " << name);
     if (imgfile.is_open()) {
         uint64_t high = IMG_HighAddress(img);
         uint64_t low = IMG_LowAddress(img);
@@ -2096,26 +2058,18 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
              * with IMG_SizeMapped instead.
              */
             high = low + IMG_SizeMapped(img);
-            DEBUG(1) {
-                std::cout << "[pintool] VDSO low:   0x" << std::hex << low
-                          << std::endl;
-                std::cout << "[pintool] VDSO high:  0x" << std::hex << high
-                          << std::endl;
-                std::cout << "[pintool] VDSO size mapped:  0x" << std::hex
-                          << IMG_SizeMapped(img) << std::endl;
-            }
+            PT_DEBUG(1, "vdso low:   0x" << std::hex << low);
+            PT_DEBUG(1, "vdso high:  0x" << std::hex << high);
+            PT_DEBUG(1, "vdso size mapped:  0x" << std::hex
+                                                << IMG_SizeMapped(img));
             vdsofile.write((const char *)low, IMG_SizeMapped(img));
             vdsofile.close();
             name = KnobVDSO.Value();
         }
 
-        DEBUG(1) {
-            std::cout << "[pintool] Image name: " << name << std::endl;
-            std::cout << "[pintool] Image low:  0x " << std::hex << low
-                      << std::endl;
-            std::cout << "[pintool] Image high: 0x " << std::hex << high
-                      << std::endl;
-        }
+        PT_DEBUG(1, "image name: " << name);
+        PT_DEBUG(1, "image low:  0x " << std::hex << low);
+        PT_DEBUG(1, "image high: 0x " << std::hex << high);
         imgfile << "Image:" << std::endl;
         imgfile << name << std::endl;
         imgfile << std::hex << low << ":" << high << std::endl;
@@ -2136,16 +2090,11 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
             low = SEC_Address(sec);
             high = SEC_Address(sec) + SEC_Size(sec);
 
-            DEBUG(1) {
-                std::cout << "[pintool] Sec name: " << sec_name << std::endl;
-                std::cout << "[pintool] Sec low:  0x " << std::hex << low
-                          << std::endl;
-                std::cout << "[pintool] Sec high: 0x " << std::hex << high
-                          << std::endl;
-            }
+            PT_DEBUG(1, "sec name: " << sec_name);
+            PT_DEBUG(1, "sec low:  0x " << std::hex << low);
+            PT_DEBUG(1, "sec high: 0x " << std::hex << high);
             if (!SEC_Mapped(sec)) {
-                std::cout << "Sec dropped, as it is unmapped: " << sec_name
-                          << std::endl;
+                PT_INFO("unmapped sec dropped: " << sec_name);
                 continue;
             }
 
@@ -2172,12 +2121,11 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                         << std::endl;
             }
         }
-        DEBUG(1)
-        std::cout << "[pintool] KnobMain: " << KnobMain.Value() << std::endl;
+        PT_DEBUG(1, "KnobMain: " << KnobMain.Value());
         if (KnobMain.Value().compare("ALL") != 0) {
             RTN mainRtn = RTN_FindByName(img, KnobMain.Value().c_str());
             if (mainRtn.is_valid()) {
-                DEBUG(1) std::cout << "KnobMain is valid" << std::endl;
+                PT_DEBUG(1, "KnobMain is valid");
                 RTN_Open(mainRtn);
                 RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
                                IARG_THREAD_ID, IARG_ADDRINT,
@@ -2189,7 +2137,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                 RTN_Close(mainRtn);
             }
         } else {
-            DEBUG(1) std::cout << "[pintool] Recording all" << std::endl;
+            PT_DEBUG(1, "Recording all");
             if (!Record) {
                 WaitForFirstFunction = true;
             }
@@ -2201,18 +2149,13 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
              * We only instrument once
              */
             if (alloc_instrumented) {
-                DEBUG(1)
-                std::cout << "[pintool] Allocation already instrumented"
-                          << std::endl;
+                PT_DEBUG(1, "Allocation already instrumented");
             } else {
-                DEBUG(1)
-                std::cout << "[pintool] Instrumenting allocation" << std::endl;
+                PT_DEBUG(1, "Instrumenting allocation");
                 if (KnobTrackHeap.Value()) {
                     RTN mallocRtn = RTN_FindByName(img, MALLOC);
                     if (mallocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Malloc found in "
-                                  << IMG_Name(img) << std::endl;
+                        PT_DEBUG(1, "malloc found in " << IMG_Name(img));
                         RTN_Open(mallocRtn);
                         RTN_InsertCall(mallocRtn, IPOINT_BEFORE,
                                        (AFUNPTR)RecordMallocBefore,
@@ -2228,9 +2171,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 
                     RTN reallocRtn = RTN_FindByName(img, REALLOC);
                     if (reallocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Realloc found in "
-                                  << IMG_Name(img) << std::endl;
+                        PT_DEBUG(1, "realloc found in " << IMG_Name(img));
                         RTN_Open(reallocRtn);
                         RTN_InsertCall(
                             reallocRtn, IPOINT_BEFORE,
@@ -2246,9 +2187,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 
                     RTN callocRtn = RTN_FindByName(img, CALLOC);
                     if (callocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "Calloc found in " << IMG_Name(img)
-                                  << std::endl;
+                        PT_DEBUG(1, "Calloc found in " << IMG_Name(img));
                         RTN_Open(callocRtn);
                         RTN_InsertCall(callocRtn, IPOINT_BEFORE,
                                        (AFUNPTR)RecordCallocBefore,
@@ -2260,15 +2199,13 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                             callocRtn, IPOINT_AFTER, (AFUNPTR)RecordCallocAfter,
                             IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
                             IARG_RETURN_IP, IARG_END);
-                        DEBUG(1) std::cout << "after Calloc insert " << endl;
+                        PT_DEBUG(1, "after Calloc insert ");
                         RTN_Close(callocRtn);
                     }
 
                     RTN freeRtn = RTN_FindByName(img, FREE);
                     if (freeRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Free found in " << IMG_Name(img)
-                                  << std::endl;
+                        PT_DEBUG(1, "free found in " << IMG_Name(img));
                         RTN_Open(freeRtn);
                         RTN_InsertCall(
                             freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
@@ -2282,9 +2219,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 
                     RTN mmapRtn = RTN_FindByName(img, MMAP);
                     if (mmapRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "mmap found in " << IMG_Name(img)
-                                  << std::endl;
+                        PT_DEBUG(1, "mmap found in " << IMG_Name(img));
                         RTN_Open(mmapRtn);
                         RTN_InsertCall(
                             mmapRtn, IPOINT_BEFORE, (AFUNPTR)RecordmmapBefore,
@@ -2300,9 +2235,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 
                     RTN mremapRtn = RTN_FindByName(img, MREMAP);
                     if (mremapRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "mremap found in " << IMG_Name(img)
-                                  << std::endl;
+                        PT_DEBUG(1, "mremap found in " << IMG_Name(img));
                         RTN_Open(mremapRtn);
                         RTN_InsertCall(mremapRtn, IPOINT_BEFORE,
                                        (AFUNPTR)RecordmremapBefore,
@@ -2332,9 +2265,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 
                     RTN brkRtn = RTN_FindByName(img, BRK);
                     if (brkRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "brk found in " << IMG_Name(img)
-                                  << std::endl;
+                        PT_DEBUG(1, "brk found in " << IMG_Name(img));
                         RTN_Open(brkRtn);
                         RTN_InsertCall(
                             brkRtn, IPOINT_AFTER, (AFUNPTR)RecordBrkAfter,
@@ -2368,7 +2299,7 @@ VOID SysBefore(ADDRINT ip, ADDRINT num, ADDRINT arg0, ADDRINT arg1,
     }
 #endif
 
-    std::cout << "syscall" << std::endl;
+    PT_INFO("syscall");
     std::cout << (unsigned long)ip << " " << (long)num << " "
               << (unsigned long)arg0 << " " << (unsigned long)arg1 << " "
               << (unsigned long)arg2 << " " << (unsigned long)arg3 << " "
@@ -2376,9 +2307,7 @@ VOID SysBefore(ADDRINT ip, ADDRINT num, ADDRINT arg0, ADDRINT arg1,
 }
 
 // Print the return value of the system call
-VOID SysAfter(ADDRINT ret) {
-    std::cout << "returns: " << (unsigned long)ret << std::endl;
-}
+VOID SysAfter(ADDRINT ret) { PT_INFO("returns: " << (unsigned long)ret); }
 
 VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
                   VOID *v) {
@@ -2395,27 +2324,27 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
     switch (syscall_number) {
     case 9:
         if (PIN_GetSyscallArgument(ctxt, std, 0)) {
-            std::cout << "Dropped syscall.";
+            PT_INFO("Dropped syscall.");
             syscall_number = -1;
             break;
         }
-        std::cout << "mmap syscall." << std::endl;
+        PT_INFO("mmap syscall.");
         RecordmmapBefore((char *)MMAP, threadid,
                          PIN_GetSyscallArgument(ctxt, std, 1),
                          PIN_GetContextReg(ctxt, REG_INST_PTR), true);
         break;
     case 11:
-        std::cout << "munmap syscall." << std::endl;
+        PT_INFO("munmap syscall.");
         RecordmunmapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0),
                            PIN_GetSyscallArgument(ctxt, std, 1), true);
         break;
     case 12:
-        std::cout << "brk syscall." << std::endl;
+        PT_INFO("brk syscall.");
         break;
     default:
         syscall_number = -1;
-        std::cout << "Syscall not catched. syscall number: "
-                  << PIN_GetSyscallNumber(ctxt, std) << std::endl;
+        PT_INFO("Syscall not catched. syscall number: "
+                << PIN_GetSyscallNumber(ctxt, std));
         break;
     }
 }
@@ -2436,14 +2365,13 @@ VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
     case 11:
         break;
     case 12:
-        std::cout << "brk syscall returned." << std::endl;
+        PT_INFO("brk syscall returned.");
         RecordBrkAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
                        PIN_GetContextReg(ctxt, REG_INST_PTR), true);
         break;
     default:
-        std::cout << "[pin-error]: syscall unknown. syscall number: "
-                  << syscall_number << std::endl;
-        ASSERT(false, "[pin-error] syscall");
+        PT_ERROR("syscall unknown. syscall number: " << syscall_number);
+        PT_ASSERT(false, "syscall");
         break;
     }
     syscall_number = -1;
@@ -2512,7 +2440,7 @@ VOID instrumentCallBranch(INS bbl, INS bp, bool fast_recording) {
     } else if (INS_IsBranch(bp)) {
         if (KnobBbl.Value()) {
             if (INS_Opcode(bp) == XED_ICLASS_XEND) {
-                DEBUG(1) std::cout << "Ignoring XEND" << std::endl;
+                PT_DEBUG(1, "Ignoring XEND");
             } else {
                 /* unconditional jumps */
                 INS_InsertCall(bp, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordBranch),
@@ -2565,9 +2493,8 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
         /* Instrument dataleaking instruction */
         DEBUG(1) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int)ip);
         bool found = instrumentMemIns(ins, true);
-        ASSERT(found,
-               "[pintool] Error: Memory instruction to instument not found. "
-               "Have you provided the flag -mem?");
+        PT_ASSERT(found, "Memory instruction to instument not found. "
+                         "Have you provided the flag -mem?");
     }
 
     if (KnobFunc.Value()) {
@@ -2582,9 +2509,9 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
             printf("[pintool] Instrumented call stack call@%lx\n",
                    (long unsigned int)INS_Address(ins));
         } else if (INS_IsRet(ins)) {
-            ASSERT(INS_HAS_TAKEN_BRANCH(ins),
-                   "[pintool] Error: Return instruction should support taken "
-                   "branch.");
+            PT_ASSERT(INS_HAS_TAKEN_BRANCH(ins),
+                      "Return instruction should support taken "
+                      "branch.");
             INS_InsertCall(
                 ins, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordFunctionExit),
                 IARG_THREAD_ID, IARG_ADDRINT, INS_Address(ins), IARG_ADDRINT,
@@ -2624,7 +2551,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
             }
             bp = INS_Next(bp);
         }
-        ASSERT(found, "[pintool] Error: Instruction to instument not found");
+        PT_ASSERT(found, "Instruction to instument not found");
     }
 }
 
@@ -2643,7 +2570,7 @@ typedef struct __attribute__((packed)) {
 VOID loadLeaks(VOID *v) {
     FILE *f = NULL;
     f = fopen(KnobLeakIn.Value().c_str(), "r");
-    ASSERT(f, "[pintool] Error: Leak file does not exist");
+    PT_ASSERT(f, "Leak file does not exist");
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     rewind(f);
@@ -2651,50 +2578,50 @@ VOID loadLeaks(VOID *v) {
     DEBUG(1)
     printf("[pintool] Reading leaks from %s, size %ld bytes\n",
            KnobLeakIn.Value().c_str(), len);
-    ASSERT(leaks, "[pintool] Error: Leaks not initialized");
+    PT_ASSERT(leaks, "Leaks not initialized");
     while (ftell(f) < len) {
         leakfmt_t elem;
-        ASSERT(fread(&elem, sizeof(elem), 1, f) == 1,
-               "[pintool] Error: Failed reading leak file");
+        PT_ASSERT(fread(&elem, sizeof(elem), 1, f) == 1,
+                  "Failed reading leak file");
         uint64_t callee = 0;
         DEBUG(1)
         printf("[pintool] Loading leak element %x, %" PRIx64 ", %d\n",
                elem.type, elem.ip, elem.nopt);
         switch (elem.type) {
         case FUNC_ENTRY:
-            ASSERT(elem.nopt == 1, "[pintool] Error: Trace format corrupt");
-            ASSERT(fread(&callee, sizeof(callee), 1, f) == 1,
-                   "[pintool] Error: Failed reading leak file");
+            PT_ASSERT(elem.nopt == 1, "Trace format corrupt");
+            PT_ASSERT(fread(&callee, sizeof(callee), 1, f) == 1,
+                      "Failed reading leak file");
             if (KnobCallstack.Value()) {
                 leaks->call_create(elem.ip, callee);
             }
             DEBUG(1) printf("[pintool] Func entry %" PRIx64 "\n", callee);
             break;
         case FUNC_EXIT:
-            ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0,
-                   "[pintool] Error: Failed reading leak file");
+            PT_ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0,
+                      "Failed reading leak file");
             if (KnobCallstack.Value()) {
                 leaks->ret_create(elem.ip);
             }
             DEBUG(1) printf("[pintool] Func exit\n");
             break;
         case DLEAK:
-            ASSERT(elem.nopt == 0, "[pintool] Error: Trace format corrupt");
+            PT_ASSERT(elem.nopt == 0, "Trace format corrupt");
             leaks->dleak_create(elem.ip);
             DEBUG(1) printf("[pintool] Adding Dleak: %" PRIx64 "\n", elem.ip);
             break;
         case CFLEAK:
-            ASSERT(elem.nopt > 0, "[pintool] Error: Trace format corrupt");
-            ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0,
-                   "[pintool] Error: Failed reading leak file");
+            PT_ASSERT(elem.nopt > 0, "Trace format corrupt");
+            PT_ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0,
+                      "Failed reading leak file");
             leaks->cfleak_create(elem.ip, NULL, 0);
             DEBUG(1) printf("[pintool] Adding CFleak: %" PRIx64 "\n", elem.ip);
             break;
         default:
-            ASSERT(false, "[pintool] Error: Invalid leak type");
+            PT_ASSERT(false, "Invalid leak type");
         }
     }
-    ASSERT(ftell(f) == len, "[pintool] Error: Trace format corrupt");
+    PT_ASSERT(ftell(f) == len, "Trace format corrupt");
     DEBUG(2) leaks->print_all();
     fflush(stdout);
 
@@ -2711,19 +2638,15 @@ VOID Fini(INT32 code, VOID *v) {
         if (!KnobRawFile.Value().empty()) {
             FILE *ftrace = fopen(KnobRawFile.Value().c_str(), "w");
             if (!ftrace) {
-                std::cout << "[pintool] Error: Unable to open file "
-                          << KnobRawFile.Value() << std::endl;
+                PT_ERROR("Unable to open file " << KnobRawFile.Value());
             } else {
-                std::cout << "[pintool] Writing raw results to "
-                          << KnobRawFile.Value() << std::endl;
+                PT_INFO("Writing raw results to " << KnobRawFile.Value());
                 bool res;
                 res = fwrite(&trace[0], sizeof(entry_t), trace.size(),
                              ftrace) == trace.size();
                 fclose(ftrace);
-                ASSERT(
-                    res,
-                    "[pintool] Error: Unable to write complete trace file. Out "
-                    "of disk memory?");
+                PT_ASSERT(res, "Unable to write complete trace file. Out "
+                               "of disk memory?");
             }
         }
         /* KnobLeaks is set */
@@ -2738,16 +2661,13 @@ VOID Fini(INT32 code, VOID *v) {
         DEBUG(1) leaks->print_uninstrumented_leaks();
 
         if (!KnobLeakOut.Value().empty()) {
-            ASSERT(!KnobLeakIn.Value().empty(),
-                   "[pintool] Error: leakout requires leakin");
-            ASSERT(leaks, "[pintool] Error: Leaks not initialized");
+            PT_ASSERT(!KnobLeakIn.Value().empty(), "leakout requires leakin");
+            PT_ASSERT(leaks, "Leaks not initialized");
             FILE *fleaks = fopen(KnobLeakOut.Value().c_str(), "w");
             if (!fleaks) {
-                std::cout << "[pintool] Unable to open file "
-                          << KnobLeakOut.Value() << std::endl;
+                PT_ERROR("Unable to open file " << KnobLeakOut.Value());
             } else {
-                std::cout << "[pintool] Writing leak results to "
-                          << KnobLeakOut.Value() << std::endl;
+                PT_INFO("Writing leak results to " << KnobLeakOut.Value());
                 if (use_callstack) {
                     static_cast<CallStack *>(leaks)->rewind();
                 }
@@ -2862,7 +2782,7 @@ int main(int argc, char *argv[]) {
         }
     } else {
         /* Tracing only leaks specified by leak file */
-        DEBUG(1) std::cout << "[pintool] Tracing leaks" << std::endl;
+        PT_DEBUG(1, "[pintool] Tracing leaks");
         /* calling loadLeaks via PIN_AddApplicationStartFunction.
          * This ensures the program under instrumentation is already completely
          * loaded before loadLeaks is called, thus preserving the order (and
@@ -2875,12 +2795,8 @@ int main(int argc, char *argv[]) {
     /* Getting the stack, heap and vvar address range for this process */
     stack.baseaddr = execute_commands("stack", 1, " ");
     stack.endaddr = execute_commands("stack", 2, " ");
-    DEBUG(1) {
-        std::cout << "stackBaseAddr is " << std::hex << stack.baseaddr
-                  << std::endl;
-        std::cout << "stackEndAddr  is " << std::hex << stack.endaddr
-                  << std::endl;
-    }
+    PT_DEBUG(1, "stackBaseAddr is " << std::hex << stack.baseaddr);
+    PT_DEBUG(1, "stackEndAddr  is " << std::hex << stack.endaddr);
 
     imgobj_t imgdata;
     imgdata.name = "vvar";
@@ -2890,12 +2806,8 @@ int main(int argc, char *argv[]) {
 
     imgdata.baseaddr = execute_commands("vvar", 1, " ");
     imgdata.endaddr = execute_commands("vvar", 2, " ");
-    DEBUG(1) {
-        std::cout << "vvarBaseAddr is " << std::hex << imgdata.baseaddr
-                  << std::endl;
-        std::cout << "vvarEndAddr  is " << std::hex << imgdata.endaddr
-                  << std::endl;
-    }
+    PT_DEBUG(1, "vvarBaseAddr is " << std::hex << imgdata.baseaddr);
+    PT_DEBUG(1, "vvarEndAddr  is " << std::hex << imgdata.endaddr);
 
     imgvec.push_back(imgdata);
 
@@ -2906,14 +2818,10 @@ int main(int argc, char *argv[]) {
     imgdataUnknown.hash = hashUnknown.final().substr(32, 8);
 
     imgdataUnknown.baseaddr = execute_commands("-B 1 stack", 1, "| head -n 1");
-    DEBUG(1)
-    std::cout << "Unknown1 is " << std::hex << imgdataUnknown.baseaddr
-              << std::endl;
+    PT_DEBUG(1, "Unknown1 is " << std::hex << imgdataUnknown.baseaddr);
 
     imgdataUnknown.endaddr = execute_commands("-B 1 stack", 2, "| head -n 1");
-    DEBUG(1)
-    std::cout << "Unknown1 is " << std::hex << imgdataUnknown.endaddr
-              << std::endl;
+    PT_DEBUG(1, "Unknown1 is " << std::hex << imgdataUnknown.endaddr);
 
     imgvec.push_back(imgdataUnknown);
 
