@@ -2842,8 +2842,6 @@ int main(int argc, char *argv[]) {
         /* Traditional tracing */
         if (KnobBbl.Value() || KnobMem.Value() || KnobFunc.Value()) {
             INS_AddInstrumentFunction(instrumentAnyInstructions, 0);
-            PIN_AddSyscallEntryFunction(SyscallEntry, 0);
-            PIN_AddSyscallExitFunction(SyscallExit, 0);
         }
     } else {
         /* Tracing only leaks specified by leak file */
@@ -2856,6 +2854,8 @@ int main(int argc, char *argv[]) {
         PIN_AddApplicationStartFunction(loadLeaks, 0);
         INS_AddInstrumentFunction(instrumentLeakingInstructions, 0);
     }
+    PIN_AddSyscallEntryFunction(SyscallEntry, 0);
+    PIN_AddSyscallExitFunction(SyscallExit, 0);
 
     /* Getting the stack, heap and vvar address range for this process */
     stack.baseaddr = execute_commands("stack", 1, " ");
