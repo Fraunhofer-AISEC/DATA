@@ -169,6 +169,8 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
     }
 #define PT_ERROR(msg) PT_ASSERT(false, msg)
 
+bool fast_recording = false;
+
 int alloc_instrumented = 0;
 
 /* When using '-main ALL', ensures recording starts at function call */
@@ -491,6 +493,8 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
     }
 
     PT_WARN("not found addr " << std::hex << (uint64_t)virt_addr);
+    PT_ASSERT(fast_recording == false,
+              "virt_addr was not found despite being in fast_recording mode");
     DEBUG(1) printheap();
     DEBUG(2) print_proc_map();
     return virt_addr;
@@ -2745,6 +2749,8 @@ int main(int argc, char *argv[]) {
         return Usage();
 
     PIN_InitSymbols();
+
+    fast_recording = (bool)KnobLeaks.Value();
 
     if (KnobLeaks.Value() && KnobCallstack.Value()) {
         leaks = new CallStack();
