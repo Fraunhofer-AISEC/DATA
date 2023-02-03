@@ -2279,22 +2279,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                         RTN_Close(freeRtn);
                     }
 
-                    RTN mmapRtn = RTN_FindByName(img, MMAP);
-                    if (mmapRtn.is_valid()) {
-                        PT_DEBUG(1, "mmap found in " << IMG_Name(img));
-                        RTN_Open(mmapRtn);
-                        RTN_InsertCall(
-                            mmapRtn, IPOINT_BEFORE, (AFUNPTR)RecordmmapBefore,
-                            IARG_ADDRINT, MMAP, IARG_THREAD_ID,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_RETURN_IP,
-                            IARG_BOOL, false, IARG_END);
-                        RTN_InsertCall(
-                            mmapRtn, IPOINT_AFTER, (AFUNPTR)RecordmmapAfter,
-                            IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
-                            IARG_RETURN_IP, IARG_BOOL, false, IARG_END);
-                        RTN_Close(mmapRtn);
-                    }
-
+                    // TODO handle as syscall
                     RTN mremapRtn = RTN_FindByName(img, MREMAP);
                     if (mremapRtn.is_valid()) {
                         PT_DEBUG(1, "mremap found in " << IMG_Name(img));
@@ -2311,32 +2296,6 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                             IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
                             IARG_RETURN_IP, IARG_END);
                         RTN_Close(mremapRtn);
-                    }
-
-                    RTN munmapRtn = RTN_FindByName(img, MUNMAP);
-                    if (munmapRtn.is_valid()) {
-                        RTN_Open(munmapRtn);
-                        RTN_InsertCall(munmapRtn, IPOINT_BEFORE,
-                                       (AFUNPTR)RecordmunmapBefore,
-                                       IARG_THREAD_ID,
-                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-                                       IARG_BOOL, false, IARG_END);
-                        RTN_Close(munmapRtn);
-                    }
-
-                    RTN brkRtn = RTN_FindByName(img, BRK);
-                    if (brkRtn.is_valid()) {
-                        PT_DEBUG(1, "brk found in " << IMG_Name(img));
-                        RTN_Open(brkRtn);
-                        RTN_InsertCall(brkRtn, IPOINT_BEFORE,
-                                       (AFUNPTR)RecordBrkBefore, IARG_THREAD_ID,
-                                       IARG_BOOL, false, IARG_END);
-                        RTN_InsertCall(
-                            brkRtn, IPOINT_AFTER, (AFUNPTR)RecordBrkAfter,
-                            IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
-                            IARG_RETURN_IP, IARG_BOOL, false, IARG_END);
-                        RTN_Close(brkRtn);
                     }
                 }
                 alloc_instrumented = 1;
