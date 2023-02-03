@@ -161,6 +161,8 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
 #define PT_ASSERT(x, msg)                                                      \
     {                                                                          \
         if (!(x)) {                                                            \
+            printheap();                                                       \
+            print_proc_map();                                                  \
             MESSAGE("[pt-error] ", msg);                                       \
             ASSERT(false, "pintool failed.");                                  \
         }                                                                      \
