@@ -285,7 +285,9 @@ typedef struct {
     ADDRINT high;
 } program_break_obj_t;
 
-program_break_obj_t program_break;
+typedef std::vector<program_break_obj_t> BRKVEC;
+BRKVEC brk_vec;
+imgobj_t brk_range;
 
 /***********************************************************************/
 /* Stack tracking*/
@@ -460,16 +462,29 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
         return virt_addr;
     }
     // Is the Virtual Address in the Program Break address space?
-    if ((uint64_t)virt_addr >= program_break.low &&
-        (uint64_t)virt_addr < program_break.high) {
+    if ((uint64_t)virt_addr >= brk_range.baseaddr &&
+        (uint64_t)virt_addr < brk_range.endaddr) {
         PT_DEBUG(1, "found addr in brk " << std::hex << (uint64_t)virt_addr
                                          << " called from " << std::hex
                                          << (uint64_t)ip);
-        PT_ASSERT(((uint64_t)ip >= program_break.image.baseaddr &&
-                   (uint64_t)ip < program_break.image.endaddr),
-                  "brk access within different image than brk "
-                  "syscall originated.");
-        return virt_addr;
+        for (auto brk : brk_vec) {
+            if ((uint64_t)virt_addr < brk.low ||
+                (uint64_t)virt_addr >= brk.high) {
+                continue;
+            }
+            PT_ASSERT(((uint64_t)ip >= brk.image.baseaddr &&
+                       (uint64_t)ip < brk.image.endaddr),
+                      "brk access within different image than brk "
+                      "syscall originated.");
+            return virt_addr;
+        }
+        PT_WARN("found addr in brk " << std::hex << (uint64_t)virt_addr
+                                     << " called from " << std::hex
+                                     << (uint64_t)ip);
+        for (auto brk : brk_vec) {
+            PT_WARN("brk from " << brk.low << " to " << brk.high);
+        }
+        PT_ERROR("brk access cannot be matched to any brk section");
     }
 
     PT_WARN("not found addr " << std::hex << (uint64_t)virt_addr);
@@ -1682,6 +1697,26 @@ VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
 }
 
 /**
+ * Record brk's call
+ *@param threadid The thread
+ * @param addr The returned program break end address
+ */
+VOID RecordBrkBefore(THREADID threadid, ADDRINT addr, bool force) {
+    PT_DEBUG(1, "brk called with " << std::hex << addr);
+    if (!Record && !force)
+        return;
+    if (addr != 0) {
+        return;
+    }
+    // PIN_MutexLock(&lock);
+
+    program_break_obj_t program_break;
+    brk_vec.push_back(program_break);
+
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
  * Record brk's result
  *@param threadid The thread
  * @param addr The returned program break end address
@@ -1702,16 +1737,28 @@ VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
         break;
     }
 
+    program_break_obj_t program_break = brk_vec.back();
+    brk_vec.pop_back();
+
     program_break.high = addr;
+    brk_range.endaddr = addr;
     if (program_break.image.name.empty()) {
         program_break.image = img;
         program_break.low = addr;
-        PT_INFO("brk owned by image: " << img.name);
+        PT_INFO("new brk owned by image: " << img.name);
+        PT_DEBUG(1, "ranging from " << program_break.low << " to "
+                                    << program_break.high);
     } else if (program_break.image.name.compare(img.name) != 0) {
         PT_INFO("brk called before from image: " << program_break.image.name);
         PT_INFO("brk called now from image: " << img.name);
         PT_ASSERT(false, "brk syscalls called within different images");
     }
+
+    if (brk_range.baseaddr == 0) {
+        brk_range.baseaddr = addr;
+    }
+
+    brk_vec.push_back(program_break);
 
     // PIN_MutexUnlock(&lock);
 }
@@ -2267,6 +2314,9 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                     if (brkRtn.is_valid()) {
                         PT_DEBUG(1, "brk found in " << IMG_Name(img));
                         RTN_Open(brkRtn);
+                        RTN_InsertCall(brkRtn, IPOINT_BEFORE,
+                                       (AFUNPTR)RecordBrkBefore, IARG_THREAD_ID,
+                                       IARG_BOOL, false, IARG_END);
                         RTN_InsertCall(
                             brkRtn, IPOINT_AFTER, (AFUNPTR)RecordBrkAfter,
                             IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
@@ -2340,6 +2390,7 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
         break;
     case 12:
         PT_INFO("brk syscall.");
+        RecordBrkBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0), true);
         break;
     default:
         syscall_number = -1;
