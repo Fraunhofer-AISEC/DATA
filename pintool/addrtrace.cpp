@@ -342,6 +342,9 @@ std::vector<thread_state_t> thread_state;
 /***********************************************************************/
 
 void printheap() {
+    if (heap.size() == 0) {
+        return;
+    }
     PT_INFO("heap: ");
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
         std::cout << std::setw(3) << std::hex << it->id << ":" << it->base
@@ -360,7 +363,7 @@ VOID print_proc_map(VOID) {
     std::stringstream command_string;
     command_string << "cat /proc/" << pid << "/maps";
     const std::string to_pass(command_string.str());
-    PT_DEBUG(1, "print_proc_map with " << to_pass.c_str());
+    PT_INFO("print_proc_map with " << to_pass.c_str());
 
     FILE *fp;
     char buffer[64];
@@ -372,7 +375,7 @@ VOID print_proc_map(VOID) {
     }
     if (fp != NULL) {
         while (fgets(buffer, 64, fp) != NULL) {
-            DEBUG(1) std::cout << buffer;
+            std::cout << buffer;
         }
         pclose(fp);
     }
@@ -400,16 +403,16 @@ ADDRINT execute_commands(const std::string command, short pos,
             pclose(fp);
         }
     }
-    PT_DEBUG(1, " buf is " << buffer);
+    PT_DEBUG(3, " buf is " << buffer);
     std::string tmp = "0x" + (std::string)buffer;
-    PT_DEBUG(1, " tmp is " << tmp);
-    PT_DEBUG(1, " func is " << std::hex << strtol(tmp.c_str(), NULL, 0));
+    PT_DEBUG(3, " tmp is " << tmp);
+    PT_DEBUG(3, " func is " << std::hex << strtol(tmp.c_str(), NULL, 0));
 
     return ((ADDRINT)strtol(tmp.c_str(), NULL, 0));
 }
 
 void *getLogicalAddress(void *virt_addr, void *ip) {
-    PT_DEBUG(1, "Converting VirtualAddr " << virt_addr);
+    PT_DEBUG(2, "get log_addr for virt_addr of " << virt_addr);
 
     if (virt_addr == nullptr) {
         // TODO assert false?
@@ -423,8 +426,8 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
          heaprange.endaddr != heap.back().base + heap.back().size)) {
         heaprange.baseaddr = heap.front().base;
         heaprange.endaddr = heap.back().base + heap.back().size;
-        PT_DEBUG(1, "heap.baseaddr: " << heaprange.baseaddr);
-        PT_DEBUG(1, "heap.endaddr: " << heaprange.endaddr);
+        PT_DEBUG(2, "heap.baseaddr: " << heaprange.baseaddr);
+        PT_DEBUG(2, "heap.endaddr: " << heaprange.endaddr);
     }
     // Does the Virtual Address belong to any heap object?
     if ((uint64_t)virt_addr >= heaprange.baseaddr &&
@@ -443,13 +446,11 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
                         << setw(25) << log_addr << " " << std::endl;
             return log_addr;
         }
-        // Virtual Address is within heaprange but is not found in heap vector!
-        DEBUG(1) printheap();
     }
     // Is the Virtual Address in the Stack address space?
     if ((uint64_t)virt_addr >= stack.baseaddr &&
         (uint64_t)virt_addr < stack.endaddr) {
-        PT_DEBUG(1, "found addr in stack " << std::hex << (uint64_t)virt_addr);
+        PT_DEBUG(4, "found addr in stack " << std::hex << (uint64_t)virt_addr);
         return virt_addr;
     }
     // Is the Virtual Address in the IMG/Code address space?
@@ -458,13 +459,13 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
             (uint64_t)virt_addr >= i.endaddr) {
             continue;
         }
-        PT_DEBUG(1, "found addr in image " << std::hex << (uint64_t)virt_addr);
+        PT_DEBUG(4, "found addr in image " << std::hex << (uint64_t)virt_addr);
         return virt_addr;
     }
     // Is the Virtual Address in the Program Break address space?
     if ((uint64_t)virt_addr >= brk_range.baseaddr &&
         (uint64_t)virt_addr < brk_range.endaddr) {
-        PT_DEBUG(1, "found addr in brk " << std::hex << (uint64_t)virt_addr
+        PT_DEBUG(2, "found addr in brk " << std::hex << (uint64_t)virt_addr
                                          << " called from " << std::hex
                                          << (uint64_t)ip);
         for (auto brk : brk_vec) {
@@ -489,7 +490,7 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
 
     PT_WARN("not found addr " << std::hex << (uint64_t)virt_addr);
     DEBUG(1) printheap();
-    DEBUG(1) print_proc_map();
+    DEBUG(2) print_proc_map();
     return virt_addr;
 }
 
@@ -1248,8 +1249,8 @@ std::string getcallstack(THREADID threadid) {
     std::vector<string> out;
     CALLSTACK::IPVEC ipvec;
     cs.emit_stack(cs.depth(), out, ipvec);
-    DEBUG(1) for (uint32_t i = 0; i < out.size(); i++) {
-        DEBUG(1) std::cout << out[i];
+    DEBUG(2) for (uint32_t i = 0; i < out.size(); i++) {
+        DEBUG(2) std::cout << out[i];
     }
     std::stringstream unique_cs(ios_base::app | ios_base::out);
 
@@ -1840,7 +1841,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
                    const CONTEXT *ctxt) {
     if (!Record)
         return;
-    PT_DEBUG(1, "ip in memread is   " << (uint64_t)ip);
+    PT_DEBUG(2, "ip in memread is   " << (uint64_t)ip);
     // PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = READ;
@@ -1873,8 +1874,8 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     entry.type = WRITE;
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_STACK_PTR) : 0;
-    PT_DEBUG(1, " TOP from WRITE is " << target);
-    PT_DEBUG(1, "ip in memwrite is   " << (uint64_t)ip);
+    PT_DEBUG(4, " TOP from WRITE is " << target);
+    PT_DEBUG(2, "ip in memwrite is   " << (uint64_t)ip);
     entry.ip = ip;
     entry.data = getLogicalAddress(addr, ip);
     DEBUG(3)
@@ -2039,7 +2040,7 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
         return;
     entry_t entry;
     entry.type = FUNC_EXIT;
-    PT_DEBUG(1, " TOP from func EXIT is "
+    PT_DEBUG(4, " TOP from func EXIT is "
                     << PIN_GetContextReg(ctxt, REG_STACK_PTR));
     entry.ip = (void *)ins;
     entry.data = (void *)target;
@@ -2349,15 +2350,14 @@ VOID SysBefore(ADDRINT ip, ADDRINT num, ADDRINT arg0, ADDRINT arg1,
     }
 #endif
 
-    PT_INFO("syscall");
-    std::cout << (unsigned long)ip << " " << (long)num << " "
-              << (unsigned long)arg0 << " " << (unsigned long)arg1 << " "
-              << (unsigned long)arg2 << " " << (unsigned long)arg3 << " "
-              << (unsigned long)arg4 << " " << (unsigned long)arg5 << std::endl;
+    PT_INFO("syscall " << std::hex << ip << " " << std::hex << num << " "
+                       << std::hex << arg0 << " " << std::hex << arg1 << " "
+                       << std::hex << arg2 << " " << std::hex << arg3 << " "
+                       << std::hex << arg4 << " " << std::hex << arg5);
 }
 
 // Print the return value of the system call
-VOID SysAfter(ADDRINT ret) { PT_INFO("returns: " << (unsigned long)ret); }
+VOID SysAfter(ADDRINT ret) { PT_INFO("returns: " << std::hex << ret); }
 
 VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
                   VOID *v) {
