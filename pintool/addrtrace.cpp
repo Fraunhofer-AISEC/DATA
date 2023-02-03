@@ -1243,6 +1243,17 @@ void calculate_sha1_hash(memobj_t *obj) {
  * which is used later in the calculate_sha1_hash function
  */
 
+void print_callstack(THREADID threadid) {
+    auto mngr = CALLSTACK::CallStackManager::get_instance();
+    auto cs = mngr->get_stack(threadid);
+    std::vector<string> out;
+    CALLSTACK::IPVEC ipvec;
+    cs.emit_stack(cs.depth(), out, ipvec);
+    for (uint32_t i = 0; i < out.size(); i++) {
+        std::cout << out[i];
+    }
+}
+
 std::string getcallstack(THREADID threadid) {
     auto mngr = CALLSTACK::CallStackManager::get_instance();
     auto cs = mngr->get_stack(threadid);
@@ -1567,6 +1578,7 @@ VOID RecordFreeAfter(THREADID threadid, VOID *ip) {
 VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len,
                         bool force) {
     PT_DEBUG(1, "munmap called with " << std::hex << addr << "*" << len);
+    DEBUG(2) print_callstack(threadid);
     if (!Record && !force)
         return;
     // PIN_MutexLock(&lock);
