@@ -553,7 +553,7 @@ class DataLeak {
      */
     void append(uint64_t d) {
         PT_ASSERT(ip, "IP not set");
-        DEBUG(1)
+        DEBUG(2)
         printf("[pt-info] DLEAK@%" PRIx64 ": %" PRIx64 " appended\n", ip, d);
         data.push_back(d);
     }
@@ -600,7 +600,7 @@ class CFLeak {
      */
     void append(uint64_t ip) {
         PT_ASSERT(bp, "BP not set");
-        DEBUG(1)
+        DEBUG(3)
         printf("[pt-info] CFLEAK@%" PRIx64 ": %" PRIx64 " appended\n", bp, ip);
         targets.push_back(ip);
     }
@@ -652,7 +652,7 @@ class Context {
         if (dleaks.find(ip) == dleaks.end()) {
             dleaks.insert(std::pair<uint64_t, DataLeak>(ip, DataLeak(ip)));
         } else {
-            DEBUG(1)
+            DEBUG(2)
             printf("[pintool] Warning: DLEAK: %" PRIx64 " not created\n", ip);
         }
     }
@@ -667,7 +667,7 @@ class Context {
         if (cfleaks.find(ip) == cfleaks.end()) {
             cfleaks.insert(std::pair<uint64_t, CFLeak>(ip, CFLeak(ip)));
         } else {
-            DEBUG(1)
+            DEBUG(2)
             printf("[pintool] Warning: CFLEAK: %" PRIx64 " not created\n", ip);
         }
     }
@@ -680,7 +680,7 @@ class Context {
      */
     virtual void dleak_append(uint64_t ip, uint64_t data) {
         if (dleaks.find(ip) == dleaks.end()) {
-            DEBUG(1)
+            DEBUG(2)
             printf("[pintool] Warning: DLEAK: %" PRIx64 " not appended\n", ip);
         } else {
             dleaks[ip].append(data);
@@ -694,7 +694,7 @@ class Context {
      */
     virtual void cfleak_append(uint64_t bbl, uint64_t target) {
         if (cfleaks.find(bbl) == cfleaks.end()) {
-            DEBUG(1)
+            DEBUG(2)
             printf("[pintool] Warning: CFLEAK: %" PRIx64 " not appended\n",
                    bbl);
         } else {
@@ -1416,7 +1416,7 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
         };
         thread_state[threadid].malloc_state.push_back(state);
     } else {
-        PT_DEBUG(1, "Malloc ignored due to realloc_pending (size= "
+        PT_DEBUG(1, "malloc ignored due to realloc_pending (size= "
                         << std::hex << size << ") at " << ip);
     }
     // PIN_MutexUnlock(&lock);
@@ -1428,7 +1428,7 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
  * @param addr The allocated heap pointer
  */
 VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
-    PT_DEBUG(1, "Malloc returned " << std::hex << addr);
+    PT_DEBUG(1, "malloc returned " << std::hex << addr);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
@@ -1449,7 +1449,7 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
                          ADDRINT size) {
-    PT_DEBUG(1, "Realloc called with " << std::hex << addr << " " << size
+    PT_DEBUG(1, "realloc called with " << std::hex << addr << " " << size
                                        << " at " << ip);
     if (!Record)
         return;
@@ -1474,12 +1474,12 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
  * @param addr The allocated heap pointer
  */
 VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
-    PT_DEBUG(1, "Realloc returned " << std::hex << addr << " at " << ip);
+    PT_DEBUG(1, "realloc returned " << std::hex << addr << " at " << ip);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
     PT_ASSERT(thread_state[threadid].realloc_state.size() > 0,
-              "Realloc returned but not called");
+              "realloc returned but not called");
     realloc_state_t state = thread_state[threadid].realloc_state.back();
     thread_state[threadid].realloc_state.pop_back();
 
@@ -2327,14 +2327,14 @@ VOID SysBefore(ADDRINT ip, ADDRINT num, ADDRINT arg0, ADDRINT arg1,
     }
 #endif
 
-    PT_INFO("syscall " << std::hex << ip << " " << std::hex << num << " "
-                       << std::hex << arg0 << " " << std::hex << arg1 << " "
-                       << std::hex << arg2 << " " << std::hex << arg3 << " "
-                       << std::hex << arg4 << " " << std::hex << arg5);
+    PT_DEBUG(1, "syscall " << std::hex << ip << " " << std::hex << num << " "
+                           << std::hex << arg0 << " " << std::hex << arg1 << " "
+                           << std::hex << arg2 << " " << std::hex << arg3 << " "
+                           << std::hex << arg4 << " " << std::hex << arg5);
 }
 
 // Print the return value of the system call
-VOID SysAfter(ADDRINT ret) { PT_INFO("returns: " << std::hex << ret); }
+VOID SysAfter(ADDRINT ret) { PT_DEBUG(1, "returns: " << std::hex << ret); }
 
 VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
                   VOID *v) {
@@ -2351,7 +2351,7 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
     switch (syscall_number) {
     case 9:
         if (PIN_GetSyscallArgument(ctxt, std, 0)) {
-            PT_INFO("Dropped syscall.");
+            PT_INFO("mmap syscall dropped.");
             syscall_number = -1;
             break;
         }
@@ -2519,7 +2519,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
 
     if (leaks->get_erase_dleak(l) || leaks->was_erased_dleak(l)) {
         /* Instrument dataleaking instruction */
-        DEBUG(1) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int)ip);
+        DEBUG(2) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int)ip);
         bool found = instrumentMemIns(ins, true);
         PT_ASSERT(found, "Memory instruction to instument not found. "
                          "Have you provided the flag -mem?");
@@ -2552,7 +2552,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
 
     if (leaks->get_erase_cfleak(l) || leaks->was_erased_cfleak(l)) {
         /* Instrument cfleaking instruction */
-        DEBUG(1)
+        DEBUG(2)
         printf("[pintool] Tracing CFLEAK %lx\n", (long unsigned int)ip);
 
         /* Need to find actual branch inside BBL, since ins is start address of
@@ -2612,7 +2612,7 @@ VOID loadLeaks(VOID *v) {
         PT_ASSERT(fread(&elem, sizeof(elem), 1, f) == 1,
                   "Failed reading leak file");
         uint64_t callee = 0;
-        DEBUG(1)
+        DEBUG(3)
         printf("[pintool] Loading leak element %x, %" PRIx64 ", %d\n",
                elem.type, elem.ip, elem.nopt);
         switch (elem.type) {
@@ -2623,7 +2623,7 @@ VOID loadLeaks(VOID *v) {
             if (KnobCallstack.Value()) {
                 leaks->call_create(elem.ip, callee);
             }
-            DEBUG(1) printf("[pintool] Func entry %" PRIx64 "\n", callee);
+            DEBUG(3) printf("[pintool] Func entry %" PRIx64 "\n", callee);
             break;
         case FUNC_EXIT:
             PT_ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0,
@@ -2631,26 +2631,26 @@ VOID loadLeaks(VOID *v) {
             if (KnobCallstack.Value()) {
                 leaks->ret_create(elem.ip);
             }
-            DEBUG(1) printf("[pintool] Func exit\n");
+            DEBUG(3) printf("[pintool] Func exit\n");
             break;
         case DLEAK:
             PT_ASSERT(elem.nopt == 0, "Trace format corrupt");
             leaks->dleak_create(elem.ip);
-            DEBUG(1) printf("[pintool] Adding Dleak: %" PRIx64 "\n", elem.ip);
+            DEBUG(3) printf("[pintool] Adding Dleak: %" PRIx64 "\n", elem.ip);
             break;
         case CFLEAK:
             PT_ASSERT(elem.nopt > 0, "Trace format corrupt");
             PT_ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0,
                       "Failed reading leak file");
             leaks->cfleak_create(elem.ip, NULL, 0);
-            DEBUG(1) printf("[pintool] Adding CFleak: %" PRIx64 "\n", elem.ip);
+            DEBUG(3) printf("[pintool] Adding CFleak: %" PRIx64 "\n", elem.ip);
             break;
         default:
             PT_ASSERT(false, "Invalid leak type");
         }
     }
     PT_ASSERT(ftell(f) == len, "Trace format corrupt");
-    DEBUG(2) leaks->print_all();
+    DEBUG(3) leaks->print_all();
     fflush(stdout);
 
     if (use_callstack) {
@@ -2679,14 +2679,14 @@ VOID Fini(INT32 code, VOID *v) {
         }
         /* KnobLeaks is set */
     } else {
-        DEBUG(1) leaks->print_all();
-        DEBUG(1)
+        DEBUG(2) leaks->print_all();
+        DEBUG(2)
         printf("[pintool] Number of uninstrumented data leaks: %zu\n",
                leaks->get_uninstrumented_dleak_size());
-        DEBUG(1)
+        DEBUG(2)
         printf("[pintool] Number of uninstrumented cflow leaks: %zu\n",
                leaks->get_uninstrumented_cfleak_size());
-        DEBUG(1) leaks->print_uninstrumented_leaks();
+        DEBUG(2) leaks->print_uninstrumented_leaks();
 
         if (!KnobLeakOut.Value().empty()) {
             PT_ASSERT(!KnobLeakIn.Value().empty(), "leakout requires leakin");
