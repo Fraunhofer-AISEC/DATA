@@ -1501,7 +1501,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     thread_state[threadid].realloc_state.pop_back();
 
     uint32_t objid = 0;
-    if (state.old) {
+    if (state.old && state.old != addr) {
         objid = dofree(state.old);
     }
     doalloc((ADDRINT)addr, state.size, objid, state.callsite, state.type,
