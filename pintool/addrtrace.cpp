@@ -1371,8 +1371,11 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
             obj.base + obj.size <= above->base)) {
         heap.insert(above, obj);
     } else if (
-        /* Insert in front, if below is of type MMAP and spans over obj */
-        (below->type == std::string(MMAP)) && (obj.base >= below->base) &&
+        /* Insert in front, if below is of type MMAP/MREMAP and spans over obj
+         */
+        (below->type == std::string(MMAP) ||
+         below->type == std::string(MREMAP)) &&
+        (obj.base >= below->base) &&
         (obj.base + obj.size <= below->base + below->size)) {
         heap.insert(below, obj);
     } else {
