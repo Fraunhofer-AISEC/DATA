@@ -1668,10 +1668,11 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
  * @param addr The heap pointer param of mremap
  * @param size The size parameter passed to mremap
  */
-VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
-                        ADDRINT old_size, ADDRINT new_size, ADDRINT ret) {
+VOID RecordMremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
+                        ADDRINT old_size, ADDRINT new_size, ADDRINT ret,
+                        bool force) {
     PT_DEBUG(1, "mremap called with " << std::hex << addr << " " << new_size);
-    if (!Record)
+    if (!Record && !force)
         return;
     // PIN_MutexLock(&lock);
 
@@ -1695,9 +1696,10 @@ VOID RecordmremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
  * @param threadid The thread
  * @param addr The allocated heap pointer
  */
-VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
+VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret,
+                       bool force) {
     PT_DEBUG(1, "mremap returned " << std::hex << addr);
-    if (!Record)
+    if (!Record && !force)
         return;
     // PIN_MutexLock(&lock);
     PT_ASSERT(thread_state[threadid].mremap_state.size() != 0,
@@ -1707,12 +1709,12 @@ VOID RecordmremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     thread_state[threadid].mremap_state.pop_back();
 
     uint32_t objid = 0;
-    if (state.old) {
+    if (state.old && state.old != addr) {
         objid = dofree(state.old);
     }
     doalloc(addr, state.size, objid, state.callsite, state.type,
-            state.callstack, 0);
-    //  PIN_MutexUnlock(&lock);
+            state.callstack, state.old);
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -2282,25 +2284,6 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                                        IARG_INST_PTR, IARG_END);
                         RTN_Close(freeRtn);
                     }
-
-                    // TODO handle as syscall
-                    RTN mremapRtn = RTN_FindByName(img, MREMAP);
-                    if (mremapRtn.is_valid()) {
-                        PT_DEBUG(1, "mremap found in " << IMG_Name(img));
-                        RTN_Open(mremapRtn);
-                        RTN_InsertCall(mremapRtn, IPOINT_BEFORE,
-                                       (AFUNPTR)RecordmremapBefore,
-                                       IARG_ADDRINT, MREMAP, IARG_THREAD_ID,
-                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 2,
-                                       IARG_RETURN_IP, IARG_END);
-                        RTN_InsertCall(
-                            mremapRtn, IPOINT_AFTER, (AFUNPTR)RecordmremapAfter,
-                            IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
-                            IARG_RETURN_IP, IARG_END);
-                        RTN_Close(mremapRtn);
-                    }
                 }
                 alloc_instrumented = 1;
             }
@@ -2369,6 +2352,14 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
         PT_INFO("brk syscall.");
         RecordBrkBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0), true);
         break;
+    case 25:
+        PT_INFO("mremap syscall.");
+        RecordMremapBefore((char *)MREMAP, threadid,
+                           PIN_GetSyscallArgument(ctxt, std, 0),
+                           PIN_GetSyscallArgument(ctxt, std, 1),
+                           PIN_GetSyscallArgument(ctxt, std, 2),
+                           PIN_GetContextReg(ctxt, REG_INST_PTR), true);
+        break;
     default:
         syscall_number = -1;
         PT_INFO("Syscall not catched. syscall number: "
@@ -2396,6 +2387,10 @@ VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
         PT_INFO("brk syscall returned.");
         RecordBrkAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
                        PIN_GetContextReg(ctxt, REG_INST_PTR), true);
+        break;
+    case 25:
+        RecordMremapAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
+                          PIN_GetContextReg(ctxt, REG_INST_PTR), true);
         break;
     default:
         PT_ERROR("syscall unknown. syscall number: " << syscall_number);
