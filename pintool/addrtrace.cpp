@@ -349,7 +349,7 @@ void printheap() {
     if (heap.size() == 0) {
         return;
     }
-    PT_INFO("heap: ");
+    PT_INFO("heap:");
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
         std::cout << std::setw(3) << std::hex << it->id << ":" << it->base
                   << "-" << it->size << std::endl;
@@ -2363,7 +2363,7 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
     default:
         syscall_number = -1;
         PT_INFO("Syscall not catched. syscall number: "
-                << PIN_GetSyscallNumber(ctxt, std));
+                << std::hex << PIN_GetSyscallNumber(ctxt, std));
         break;
     }
 }
@@ -2413,7 +2413,7 @@ BOOL instrumentMemIns(INS ins, bool fast_recording) {
         bool found = false;
         ADDRINT ip = INS_Address(ins);
         /* convert this Virtual IP to corresponding Memory Index here */
-        DEBUG(2) printf("Adding %lx to instrumentation\n", ip);
+        DEBUG(3) printf("Adding %lx to instrumentation\n", ip);
 
         for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
             if (INS_MemoryOperandIsRead(ins, memOp)) {
