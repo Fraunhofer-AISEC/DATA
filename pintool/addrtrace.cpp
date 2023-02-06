@@ -1317,6 +1317,7 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     obj.callstack = callstack;
     calculate_sha1_hash(&obj);
 
+    /* Move allocmap to new addr */
     if (old_ptr && old_ptr != addr) {
         if (!allocmap.count(old_ptr)) {
             PT_ASSERT(false, "doalloc has a valid old_ptr, but no elements!");
