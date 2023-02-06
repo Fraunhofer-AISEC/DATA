@@ -1328,6 +1328,24 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
     }
     allocmap[addr].push_back(obj.hash.substr(32, 8));
 
+    /* Print the current obj into the heapfile */
+    heapfile << setw(15) << obj.type << " " << setw(15) << obj.size << " "
+             << setw(15) << obj.callsite << " " << setw(15) << obj.callstack
+             << " " << setw(15) << obj.hash.substr(32, 8) << ":" << obj.size
+             << " " << std::endl;
+
+    /* In case of reallocation in-place heap object in vector is edited */
+    if (old_ptr == addr) {
+        for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); it++) {
+            if (obj.base != it->base) {
+                continue;
+            }
+            it->size = obj.size;
+            return;
+        }
+        PT_ERROR("reallocation in-place failed");
+    }
+
     /* Keep heap vector sorted */
     HEAPVEC::iterator below = heap.begin();
     HEAPVEC::iterator above = heap.end();
@@ -1365,11 +1383,6 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
         PT_INFO("obj.size   " << obj.size);
         PT_ASSERT(false, "Corrupted heap?!");
     }
-    /* Print the current obj into the heapfile */
-    heapfile << setw(15) << obj.type << " " << setw(15) << obj.size << " "
-             << setw(15) << obj.callsite << " " << setw(15) << obj.callstack
-             << " " << setw(15) << obj.hash.substr(32, 8) << ":" << obj.size
-             << " " << std::endl;
 }
 
 /**
