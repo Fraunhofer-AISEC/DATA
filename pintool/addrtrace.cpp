@@ -248,7 +248,6 @@ FUNCVEC funcvec;
 /* Heap tracking */
 
 typedef struct {
-    uint32_t id;
     char const *type;
     size_t size;
     uint64_t base;
@@ -257,12 +256,11 @@ typedef struct {
     std::string hash;
 } memobj_t;
 
-uint32_t nextheapid = 1;
 typedef std::vector<memobj_t> HEAPVEC;
 HEAPVEC heap;
 
 std::unordered_map<std::string, std::vector<string>> hashmap;
-std::unordered_map<uint64_t, std::vector<string>> allocmap;
+std::unordered_map<uint64_t, uint64_t> allocmap;
 
 imgobj_t heaprange;
 
@@ -429,8 +427,9 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
                 continue;
             }
             auto offset = (uint64_t)virt_addr - i.base;
-            log_addr =
-                (uint64_t *)(getIndex(allocmap[i.base].front()) | offset);
+            log_addr = (uint64_t *)(allocmap[i.base] | offset);
+            PT_DEBUG(4, "found addr in heap vector, log_addr: "
+                            << std::hex << (uint64_t)log_addr);
             return log_addr;
         }
     }
@@ -1283,47 +1282,83 @@ ADDRINT get_callsite_offset(ADDRINT callsite) {
 }
 
 /**
+ * Handle calls to free by maintaining a list of all heap objects
+ * This function is not thread-safe. Lock first.
+ * The returned value is the logical base address of the freed heap object
+ */
+void dofree(ADDRINT addr) {
+    PT_DEBUG(1, "dofree 0x" << std::hex << addr);
+
+    if (!addr) {
+        PT_ERROR("dofree called with NULL");
+    }
+
+    if (allocmap.find(addr) == allocmap.end()) {
+        PT_ERROR("dofree didnot found an element in allocmap");
+    }
+    allocmap.erase(addr);
+
+    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
+        if (it->base != addr) {
+            continue;
+        }
+        heap.erase(it);
+        return;
+    }
+
+    std::stringstream unique_cs(ios_base::app | ios_base::out);
+    PT_ERROR("dofree didnot found an element in heap");
+}
+
+/**
  * Handle calls to [m|re|c]alloc by keeping a list of all heap objects
  * This function is not thread-safe. Lock first.
  */
-void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
-             char const *type, std::string callstack, ADDRINT old_ptr) {
+void doalloc(ADDRINT addr, ADDRINT size, ADDRINT callsite, char const *type,
+             std::string callstack, ADDRINT old_ptr) {
     PT_DEBUG(1,
              "doalloc " << std::hex << addr << " " << size << " type " << type);
 
     memobj_t obj;
-    obj.id = (objid) ? objid : nextheapid++;
     obj.base = addr;
     obj.size = size;
     obj.callsite = callsite;
     obj.type = type;
     obj.callstack = callstack;
-    calculate_sha1_hash(&obj);
 
-    /* Move allocmap to new addr */
-    if (old_ptr && old_ptr != addr) {
-        if (!allocmap.count(old_ptr)) {
-            PT_ASSERT(false, "doalloc has a valid old_ptr, but no elements!");
-        }
-        for (auto item : allocmap[old_ptr]) {
-            allocmap[addr].push_back(item);
-        }
-        allocmap.erase(old_ptr);
-    }
-    allocmap[addr].push_back(obj.hash.substr(32, 8));
-
-    /* In case of reallocation in-place heap object in vector is edited */
-    if (old_ptr == addr) {
+    /* Edit object in heap vector, if in-place reallocation */
+    /* allocmap does not require any update, as base address is not changed */
+    if (addr == old_ptr) {
         for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); it++) {
             if (obj.base != it->base) {
                 continue;
             }
             it->size = obj.size;
+            PT_DEBUG(2, "in-place reallocation addr " << std::hex << addr);
             return;
         }
-        PT_ERROR("reallocation in-place failed");
+        PT_ERROR("in-place reallocation failed");
     }
 
+    /* Write allocmap */
+    ADDRINT log_addr = 0;
+    if (!old_ptr) {
+        /* Create log_addr, if allocation */
+        calculate_sha1_hash(&obj);
+        log_addr = getIndex(obj.hash.substr(32, 8));
+    } else {
+        /* Read log_addr, if not in-place reallocation */
+        if (allocmap.find(old_ptr) == allocmap.end()) {
+            PT_ERROR("doalloc used invalid allocmap addr " << std::hex
+                                                           << old_ptr);
+        }
+        log_addr = allocmap[old_ptr];
+        dofree(old_ptr);
+    }
+    allocmap[addr] = log_addr;
+
+    /* Insert object into heap vector for allocation or not-inplace reallocation
+     */
     /* Keep heap vector sorted */
     HEAPVEC::iterator below = heap.begin();
     HEAPVEC::iterator above = heap.end();
@@ -1364,28 +1399,6 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
         PT_INFO("obj.size   " << obj.size);
         PT_ASSERT(false, "Corrupted heap?!");
     }
-}
-
-/**
- * Handle calls to free by maintaining a list of all heap objects
- * This function is not thread-safe. Lock first.
- */
-uint32_t dofree(ADDRINT addr) {
-    PT_DEBUG(1, "dofree 0x" << std::hex << addr);
-    if (!addr) {
-        return 0;
-    }
-    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        if (it->base != addr) {
-            continue;
-        }
-        heap.erase(it);
-        return it->id;
-    }
-    printheap();
-    std::stringstream unique_cs(ios_base::app | ios_base::out);
-    PT_ASSERT(false, "Invalid free!");
-    return 0;
 }
 
 /**
@@ -1430,7 +1443,7 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
               "Malloc returned but not called");
     alloc_state_t state = thread_state[threadid].malloc_state.back();
     thread_state[threadid].malloc_state.pop_back();
-    doalloc((ADDRINT)addr, state.size, 0, state.callsite, state.type,
+    doalloc((ADDRINT)addr, state.size, state.callsite, state.type,
             state.callstack, 0);
     // PIN_MutexUnlock(&lock);
 }
@@ -1477,11 +1490,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     realloc_state_t state = thread_state[threadid].realloc_state.back();
     thread_state[threadid].realloc_state.pop_back();
 
-    uint32_t objid = 0;
-    if (state.old && state.old != addr) {
-        objid = dofree(state.old);
-    }
-    doalloc((ADDRINT)addr, state.size, objid, state.callsite, state.type,
+    doalloc((ADDRINT)addr, state.size, state.callsite, state.type,
             state.callstack, state.old);
     // PIN_MutexUnlock(&lock);
 }
@@ -1530,9 +1539,8 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
               "calloc returned but not called");
     alloc_state_t state = thread_state[threadid].calloc_state.back();
     thread_state[threadid].calloc_state.pop_back();
-    doalloc(addr, state.size, 0, state.callsite, state.type, state.callstack,
-            0);
-    //  PIN_MutexUnlock(&lock);
+    doalloc(addr, state.size, state.callsite, state.type, state.callstack, 0);
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1650,8 +1658,7 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
     alloc_state_t state = thread_state[threadid].mmap_state.back();
     thread_state[threadid].mmap_state.pop_back();
 
-    doalloc(addr, state.size, 0, state.callsite, state.type, state.callstack,
-            0);
+    doalloc(addr, state.size, state.callsite, state.type, state.callstack, 0);
 
     //  PIN_MutexUnlock(&lock);
 }
@@ -1702,12 +1709,8 @@ VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret,
     realloc_state_t state = thread_state[threadid].mremap_state.back();
     thread_state[threadid].mremap_state.pop_back();
 
-    uint32_t objid = 0;
-    if (state.old && state.old != addr) {
-        objid = dofree(state.old);
-    }
-    doalloc(addr, state.size, objid, state.callsite, state.type,
-            state.callstack, state.old);
+    doalloc(addr, state.size, state.callsite, state.type, state.callstack,
+            state.old);
     // PIN_MutexUnlock(&lock);
 }
 
