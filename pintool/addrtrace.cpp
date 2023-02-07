@@ -292,11 +292,6 @@ int pid = PIN_GetPid();
 
 typedef struct {
     char const *type;
-    ADDRINT addr;
-} free_state_t;
-
-typedef struct {
-    char const *type;
     ADDRINT size;
     ADDRINT callsite;
     std::string callstack;
@@ -313,7 +308,6 @@ typedef struct {
 typedef struct {
     /* allocation routines sometimes call themselves in a nested way during
      * initialization */
-    std::vector<free_state_t> free_state;
     std::vector<alloc_state_t> malloc_state;
     std::vector<alloc_state_t> calloc_state;
     std::vector<realloc_state_t> realloc_state;
@@ -1553,28 +1547,7 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
         return;
     // PIN_MutexLock(&lock);
     PT_DEBUG(1, "free called with " << std::hex << addr << " at " << ip);
-    free_state_t state = {
-        .type = "free",
-        .addr = addr,
-    };
-    thread_state[threadid].free_state.push_back(state);
-    // PIN_MutexUnlock(&lock);
-}
-
-/**
- * Record free
- * @param threadid The thread
- * @param addr The heap pointer which is freed
- */
-VOID RecordFreeAfter(THREADID threadid, VOID *ip) {
-    if (!Record)
-        return;
-    // PIN_MutexLock(&lock);
-    PT_ASSERT(thread_state[threadid].free_state.size() != 0,
-              "free returned but not called");
-    free_state_t state = thread_state[threadid].free_state.back();
-    thread_state[threadid].free_state.pop_back();
-    dofree(state.addr);
+    dofree(addr);
     // PIN_MutexUnlock(&lock);
 }
 
@@ -2276,9 +2249,6 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                             freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
                             IARG_THREAD_ID, IARG_INST_PTR,
                             IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
-                        RTN_InsertCall(freeRtn, IPOINT_AFTER,
-                                       (AFUNPTR)RecordFreeAfter, IARG_THREAD_ID,
-                                       IARG_INST_PTR, IARG_END);
                         RTN_Close(freeRtn);
                     }
                 }
