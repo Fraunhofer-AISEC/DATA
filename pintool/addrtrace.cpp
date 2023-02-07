@@ -1564,12 +1564,9 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
  * @param threadid The thread
  * @param addr The heap pointer which is munmapped
  */
-VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len,
-                        bool force) {
+VOID RecordMunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len) {
     PT_DEBUG(1, "munmap called with " << std::hex << addr << "*" << len);
     DEBUG(2) print_callstack(threadid);
-    if (!Record && !force)
-        return;
     // PIN_MutexLock(&lock);
     dofree(addr);
     //  PIN_MutexUnlock(&lock);
@@ -1581,11 +1578,9 @@ VOID RecordmunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len,
  * @param ret           TODO
  * @param force
  */
-VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size, ADDRINT ret,
-                      bool force) {
+VOID RecordMmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
+                      ADDRINT ret) {
     PT_DEBUG(1, "mmap called with " << std::hex << size);
-    if (!Record && !force)
-        return;
     if (thread_state[threadid].mremap_state.size() != 0) {
         PT_DEBUG(1, "mmap ignored due to mremap_pending (size= "
                         << std::hex << size << ")");
@@ -1619,10 +1614,8 @@ VOID RecordmmapBefore(CHAR *name, THREADID threadid, ADDRINT size, ADDRINT ret,
  *@param threadid The thread
  * @param addr The allocated heap pointer
  */
-VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
+VOID RecordMmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     PT_DEBUG(1, "mmap returned " << std::hex << addr);
-    if (!Record && !force)
-        return;
     if (thread_state[threadid].mremap_state.size() != 0) {
         PT_DEBUG(1, "mmap ignored due to mremap_pending");
         return;
@@ -1651,11 +1644,8 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
  * @param size The size parameter passed to mremap
  */
 VOID RecordMremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
-                        ADDRINT old_size, ADDRINT new_size, ADDRINT ret,
-                        bool force) {
+                        ADDRINT old_size, ADDRINT new_size, ADDRINT ret) {
     PT_DEBUG(1, "mremap called with " << std::hex << addr << " " << new_size);
-    if (!Record && !force)
-        return;
     // PIN_MutexLock(&lock);
 
     SHA1 hash;
@@ -1678,11 +1668,8 @@ VOID RecordMremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
  * @param threadid The thread
  * @param addr The allocated heap pointer
  */
-VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret,
-                       bool force) {
+VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     PT_DEBUG(1, "mremap returned " << std::hex << addr);
-    if (!Record && !force)
-        return;
     // PIN_MutexLock(&lock);
     PT_ASSERT(thread_state[threadid].mremap_state.size() != 0,
               "mremap returned but not called");
@@ -1699,10 +1686,8 @@ VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret,
  *@param threadid The thread
  * @param addr The returned program break end address
  */
-VOID RecordBrkBefore(THREADID threadid, ADDRINT addr, bool force) {
+VOID RecordBrkBefore(THREADID threadid, ADDRINT addr) {
     PT_DEBUG(1, "brk called with " << std::hex << addr);
-    if (!Record && !force)
-        return;
     if (addr != 0) {
         return;
     }
@@ -1719,11 +1704,9 @@ VOID RecordBrkBefore(THREADID threadid, ADDRINT addr, bool force) {
  *@param threadid The thread
  * @param addr The returned program break end address
  */
-VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
+VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     PT_DEBUG(1, "brk returned from " << std::hex << ret << " with " << std::hex
                                      << addr);
-    if (!Record && !force)
-        return;
     // PIN_MutexLock(&lock);
 
     imgobj_t img;
@@ -2265,7 +2248,6 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
     }
 }
 
-//////// TEST
 // Print syscall number and arguments
 VOID SysBefore(ADDRINT ip, ADDRINT num, ADDRINT arg0, ADDRINT arg1,
                ADDRINT arg2, ADDRINT arg3, ADDRINT arg4, ADDRINT arg5) {
@@ -2313,18 +2295,18 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
             break;
         }
         PT_INFO("mmap syscall.");
-        RecordmmapBefore((char *)MMAP, threadid,
+        RecordMmapBefore((char *)MMAP, threadid,
                          PIN_GetSyscallArgument(ctxt, std, 1),
-                         PIN_GetContextReg(ctxt, REG_INST_PTR), true);
+                         PIN_GetContextReg(ctxt, REG_INST_PTR));
         break;
     case 11:
         PT_INFO("munmap syscall.");
-        RecordmunmapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0),
-                           PIN_GetSyscallArgument(ctxt, std, 1), true);
+        RecordMunmapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0),
+                           PIN_GetSyscallArgument(ctxt, std, 1));
         break;
     case 12:
         PT_INFO("brk syscall.");
-        RecordBrkBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0), true);
+        RecordBrkBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0));
         break;
     case 25:
         PT_INFO("mremap syscall.");
@@ -2332,7 +2314,7 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
                            PIN_GetSyscallArgument(ctxt, std, 0),
                            PIN_GetSyscallArgument(ctxt, std, 1),
                            PIN_GetSyscallArgument(ctxt, std, 2),
-                           PIN_GetContextReg(ctxt, REG_INST_PTR), true);
+                           PIN_GetContextReg(ctxt, REG_INST_PTR));
         break;
     default:
         syscall_number = -1;
@@ -2352,28 +2334,26 @@ VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
         // Syscall will be dropped, as its number is set to -1 in SyscallEntry
         break;
     case 9:
-        RecordmmapAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
-                        PIN_GetContextReg(ctxt, REG_INST_PTR), true);
+        RecordMmapAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
+                        PIN_GetContextReg(ctxt, REG_INST_PTR));
         break;
     case 11:
         break;
     case 12:
         PT_INFO("brk syscall returned.");
         RecordBrkAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
-                       PIN_GetContextReg(ctxt, REG_INST_PTR), true);
+                       PIN_GetContextReg(ctxt, REG_INST_PTR));
         break;
     case 25:
         RecordMremapAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
-                          PIN_GetContextReg(ctxt, REG_INST_PTR), true);
+                          PIN_GetContextReg(ctxt, REG_INST_PTR));
         break;
     default:
         PT_ERROR("syscall unknown. syscall number: " << syscall_number);
-        PT_ASSERT(false, "syscall");
         break;
     }
     syscall_number = -1;
 }
-//////// TEST
 
 /**
  * Instruments instructions operating on memory
