@@ -101,16 +101,6 @@ KNOB<string> KnobSyms(KNOB_MODE_WRITEONCE, "pintool", "syms", "",
 KNOB<string> KnobVDSO(KNOB_MODE_WRITEONCE, "pintool", "vdso", "vdso.so",
                       "Output file for the vdso shared library.");
 
-KNOB<string> KnobHeapData(KNOB_MODE_WRITEONCE, "pintool", "heapData", "",
-                          "Output file for storing heap related information.");
-
-KNOB<string> Knoblogaddr(KNOB_MODE_WRITEONCE, "pintool", "logaddr", "",
-                         "Output file for storing the logical address of the "
-                         "Instrumented instructions.");
-
-KNOB<string> Knoballocmap(KNOB_MODE_WRITEONCE, "pintool", "allocmap", "",
-                          "Output file for Realloc invariance.");
-
 KNOB<bool> KnobLeaks(KNOB_MODE_WRITEONCE, "pintool", "leaks", "0",
                      "Enable fast recording of leaks, provided via leakin.");
 
@@ -229,9 +219,6 @@ enum entry_type_t {
 
 std::vector<entry_t> trace; /* Contains all traced instructions */
 ofstream imgfile;           /* Holds memory layout with function symbols */
-ofstream heapfile;          /* Holds heap information */
-ofstream logaddrfile;       /* Holds heap information */
-ofstream allocmapfile;      /* Holds Realloc invariance information */
 ofstream vdsofile;          /* Holds vdso shared library */
 
 /***********************************************************************/
@@ -445,9 +432,6 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
             auto offset = (uint64_t)virt_addr - i.base;
             log_addr =
                 (uint64_t *)(getIndex(allocmap[i.base].front()) | offset);
-            logaddrfile << setw(25) << "HEAP"
-                        << " " << setw(25) << (uint64_t)virt_addr << " "
-                        << setw(25) << log_addr << " " << std::endl;
             return log_addr;
         }
     }
@@ -1328,12 +1312,6 @@ void doalloc(ADDRINT addr, ADDRINT size, uint32_t objid, ADDRINT callsite,
         allocmap.erase(old_ptr);
     }
     allocmap[addr].push_back(obj.hash.substr(32, 8));
-
-    /* Print the current obj into the heapfile */
-    heapfile << setw(15) << obj.type << " " << setw(15) << obj.size << " "
-             << setw(15) << obj.callsite << " " << setw(15) << obj.callstack
-             << " " << setw(15) << obj.hash.substr(32, 8) << ":" << obj.size
-             << " " << std::endl;
 
     /* In case of reallocation in-place heap object in vector is edited */
     if (old_ptr == addr) {
@@ -2721,14 +2699,6 @@ VOID Fini(INT32 code, VOID *v) {
         imgfile.close();
     }
 
-    if (heapfile.is_open()) {
-        heapfile.close();
-    }
-
-    if (logaddrfile.is_open()) {
-        logaddrfile.close();
-    }
-
     outFile << setw(23) << "Procedure"
             << " " << setw(15) << "Image"
             << " " << setw(18) << "Address"
@@ -2741,12 +2711,6 @@ VOID Fini(INT32 code, VOID *v) {
                     << " " << setw(18) << hex << rc->_address << dec << " "
                     << setw(12) << rc->_rtnCount << " " << setw(12)
                     << rc->_icount << endl;
-    }
-    for (auto j : allocmap) {
-        for (auto i : j.second) {
-            allocmapfile << i << " ";
-        }
-        allocmapfile << std::endl;
     }
 }
 
@@ -2780,40 +2744,6 @@ int main(int argc, char *argv[]) {
     }
     // Register Routine to be called to instrument rtn
     RTN_AddInstrumentFunction(Routine, 0);
-
-    if (!KnobHeapData.Value().empty()) {
-        heapfile.open(KnobHeapData.Value().c_str());
-        heapfile << hex;
-        heapfile.setf(ios::showbase);
-        heapfile << setw(15) << "TYPE"
-                 << " " << setw(15) << "SIZE"
-                 << " " << setw(15) << "Callsite"
-                 << " " << setw(15) << "Callstack"
-                 << " " << setw(15) << "Memory Index"
-                 << "\n"
-                 << endl;
-    }
-
-    if (!Knoblogaddr.Value().empty()) {
-        logaddrfile.open(Knoblogaddr.Value().c_str());
-        logaddrfile << hex;
-        logaddrfile.setf(ios::showbase);
-        logaddrfile << setw(25) << "Segment"
-                    << " " << setw(25) << "Instrumented Address"
-                    << " " << setw(35) << "Logical Address"
-                    << "\n"
-                    << endl;
-    }
-
-    if (!Knoballocmap.Value().empty()) {
-        allocmapfile.open(Knoballocmap.Value().c_str());
-        allocmapfile << hex;
-        allocmapfile.setf(ios::showbase);
-        allocmapfile << setw(25) << "Return address"
-                     << " " << setw(35) << "alloc map"
-                     << "\n"
-                     << endl;
-    }
 
     if (!KnobLeaks.Value()) {
         /* Traditional tracing */
