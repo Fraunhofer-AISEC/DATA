@@ -2764,7 +2764,7 @@ int main(int argc, char *argv[]) {
     PIN_AddSyscallEntryFunction(SyscallEntry, 0);
     PIN_AddSyscallExitFunction(SyscallExit, 0);
 
-    /* Getting the stack, heap and vvar address range for this process */
+    /* Getting the stack and vvar address range for this process */
     stack.baseaddr = execute_commands("stack", 1, " ");
     stack.endaddr = execute_commands("stack", 2, " ");
     PT_DEBUG(1, "stackBaseAddr is " << std::hex << stack.baseaddr);
@@ -2782,20 +2782,6 @@ int main(int argc, char *argv[]) {
     PT_DEBUG(1, "vvarEndAddr  is " << std::hex << imgdata.endaddr);
 
     imgvec.push_back(imgdata);
-
-    imgobj_t imgdataUnknown;
-    imgdataUnknown.name = "unknown1";
-    SHA1 hashUnknown;
-    hashUnknown.update(imgdataUnknown.name);
-    imgdataUnknown.hash = hashUnknown.final().substr(32, 8);
-
-    imgdataUnknown.baseaddr = execute_commands("-B 1 stack", 1, "| head -n 1");
-    PT_DEBUG(1, "Unknown1 is " << std::hex << imgdataUnknown.baseaddr);
-
-    imgdataUnknown.endaddr = execute_commands("-B 1 stack", 2, "| head -n 1");
-    PT_DEBUG(1, "Unknown1 is " << std::hex << imgdataUnknown.endaddr);
-
-    imgvec.push_back(imgdataUnknown);
 
     auto mngr = CALLSTACK::CallStackManager::get_instance();
     mngr->activate();
