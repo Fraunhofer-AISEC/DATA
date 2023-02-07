@@ -1308,21 +1308,31 @@ void dofree(ADDRINT addr) {
  * Handle calls to [m|re|c]alloc by keeping a list of all heap objects
  * This function is not thread-safe. Lock first.
  */
-void doalloc(ADDRINT addr, ADDRINT size, ADDRINT callsite, char const *type,
-             std::string callstack, ADDRINT old_ptr) {
-    PT_DEBUG(1,
-             "doalloc " << std::hex << addr << " " << size << " type " << type);
+void doalloc(ADDRINT addr, alloc_state_t *alloc_state,
+             realloc_state_t *realloc_state) {
+    if (alloc_state == nullptr && realloc_state == nullptr) {
+        PT_ERROR("doalloc failed as only NULL states were passed");
+    }
+    if (alloc_state != nullptr && realloc_state != nullptr) {
+        PT_ERROR("doalloc failed as multiple states were passed");
+    }
 
+    /* Convert (re)alloc_state to memobj */
     memobj_t obj;
     obj.base = addr;
-    obj.size = size;
-    obj.callsite = callsite;
-    obj.type = type;
-    obj.callstack = callstack;
+    obj.size = (alloc_state) ? alloc_state->size : realloc_state->size;
+    obj.callsite =
+        (alloc_state) ? alloc_state->callsite : realloc_state->callsite;
+    obj.type = (alloc_state) ? alloc_state->type : realloc_state->type;
+    obj.callstack =
+        (alloc_state) ? alloc_state->callstack : realloc_state->callstack;
+
+    PT_DEBUG(1, "doalloc " << std::hex << addr << " " << obj.size << " type "
+                           << obj.type);
 
     /* Edit object in heap vector, if in-place reallocation */
     /* allocmap does not require any update, as base address is not changed */
-    if (addr == old_ptr) {
+    if (realloc_state && addr == realloc_state->old) {
         for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); it++) {
             if (obj.base != it->base) {
                 continue;
@@ -1336,18 +1346,18 @@ void doalloc(ADDRINT addr, ADDRINT size, ADDRINT callsite, char const *type,
 
     /* Write allocmap */
     ADDRINT log_addr = 0;
-    if (!old_ptr) {
+    if (alloc_state) {
         /* Create log_addr, if allocation */
         calculate_sha1_hash(&obj);
         log_addr = getIndex(obj.hash.substr(32, 8));
     } else {
         /* Read log_addr, if not in-place reallocation */
-        if (allocmap.find(old_ptr) == allocmap.end()) {
-            PT_ERROR("doalloc used invalid allocmap addr " << std::hex
-                                                           << old_ptr);
+        if (allocmap.find(realloc_state->old) == allocmap.end()) {
+            PT_ERROR("doalloc used invalid allocmap addr "
+                     << std::hex << realloc_state->old);
         }
-        log_addr = allocmap[old_ptr];
-        dofree(old_ptr);
+        log_addr = allocmap[realloc_state->old];
+        dofree(realloc_state->old);
     }
     allocmap[addr] = log_addr;
 
@@ -1437,8 +1447,7 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
               "Malloc returned but not called");
     alloc_state_t state = thread_state[threadid].malloc_state.back();
     thread_state[threadid].malloc_state.pop_back();
-    doalloc((ADDRINT)addr, state.size, state.callsite, state.type,
-            state.callstack, 0);
+    doalloc(addr, &state, nullptr);
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1484,8 +1493,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     realloc_state_t state = thread_state[threadid].realloc_state.back();
     thread_state[threadid].realloc_state.pop_back();
 
-    doalloc((ADDRINT)addr, state.size, state.callsite, state.type,
-            state.callstack, state.old);
+    doalloc(addr, nullptr, &state);
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1533,7 +1541,7 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
               "calloc returned but not called");
     alloc_state_t state = thread_state[threadid].calloc_state.back();
     thread_state[threadid].calloc_state.pop_back();
-    doalloc(addr, state.size, state.callsite, state.type, state.callstack, 0);
+    doalloc(addr, &state, nullptr);
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1631,7 +1639,7 @@ VOID RecordmmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret, bool force) {
     alloc_state_t state = thread_state[threadid].mmap_state.back();
     thread_state[threadid].mmap_state.pop_back();
 
-    doalloc(addr, state.size, state.callsite, state.type, state.callstack, 0);
+    doalloc(addr, &state, nullptr);
 
     //  PIN_MutexUnlock(&lock);
 }
@@ -1682,8 +1690,7 @@ VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret,
     realloc_state_t state = thread_state[threadid].mremap_state.back();
     thread_state[threadid].mremap_state.pop_back();
 
-    doalloc(addr, state.size, state.callsite, state.type, state.callstack,
-            state.old);
+    doalloc(addr, nullptr, &state);
     // PIN_MutexUnlock(&lock);
 }
 
