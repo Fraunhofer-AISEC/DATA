@@ -338,8 +338,7 @@ void printheap() {
     }
     PT_INFO("heap:");
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        std::cout << std::setw(3) << std::hex << it->id << ":" << it->base
-                  << "-" << it->size << std::endl;
+        std::cout << it->base << "-" << it->size << std::endl;
     }
 }
 
