@@ -1505,7 +1505,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
                         ADDRINT size, ADDRINT ret) {
-    PT_DEBUG(1, "Calloc called with " << std::hex << nelem << " " << size);
+    PT_DEBUG(1, "calloc called with " << std::hex << nelem << " " << size);
     if (!Record)
         return;
     //  PIN_MutexLock(&lock);
@@ -1551,10 +1551,11 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
  * @param addr The heap pointer which is freed
  */
 VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
+    PT_DEBUG(1, "free called with " << std::hex << addr << " at " << ip);
+    DEBUG(2) print_callstack(threadid);
     if (!Record)
         return;
     // PIN_MutexLock(&lock);
-    PT_DEBUG(1, "free called with " << std::hex << addr << " at " << ip);
     dofree(addr);
     // PIN_MutexUnlock(&lock);
 }
@@ -1688,6 +1689,7 @@ VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
  */
 VOID RecordBrkBefore(THREADID threadid, ADDRINT addr) {
     PT_DEBUG(1, "brk called with " << std::hex << addr);
+    DEBUG(2) print_callstack(threadid);
     if (addr != 0) {
         return;
     }
