@@ -471,8 +471,8 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
     PT_WARN("not found addr " << std::hex << (uint64_t)virt_addr);
     PT_ASSERT(fast_recording == false,
               "virt_addr was not found despite being in fast_recording mode");
-    DEBUG(1) printheap();
-    DEBUG(2) print_proc_map();
+    DEBUG(3) printheap();
+    DEBUG(4) print_proc_map();
     return virt_addr;
 }
 
