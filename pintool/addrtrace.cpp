@@ -1422,7 +1422,7 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
         alloc_state_t state = {
             .type = "malloc",
             .size = size,
-            .callsite = 0,
+            .callsite = get_callsite_offset((ADDRINT) ip),
             .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
         };
         thread_state[threadid].malloc_state.push_back(state);
@@ -1471,7 +1471,7 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
         .type = "realloc",
         .old = addr,
         .size = size,
-        .callsite = 0,
+        .callsite = get_callsite_offset((ADDRINT) ip),
         .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
     };
     thread_state[threadid].realloc_state.push_back(state);
