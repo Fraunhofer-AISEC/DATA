@@ -152,6 +152,7 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
     {                                                                          \
         if (!(x)) {                                                            \
             printheap();                                                       \
+            print_allocmap();                                                       \
             print_proc_map();                                                  \
             MESSAGE("[pt-error] ", msg);                                       \
             ASSERT(false, "pintool failed.");                                  \
@@ -323,6 +324,16 @@ std::vector<thread_state_t> thread_state;
 /**Calculating the Logical Address from the Virtual Address
  * Every Logical Address is 64 bit = 32 bit MemoryIndex + 32 bit Offset*/
 /***********************************************************************/
+
+void print_allocmap() {
+    if (allocmap.size() == 0) {
+        return;
+    }
+    PT_INFO("allocmap:");
+    for (auto& it: allocmap) {
+        cout << it.first << " - " << it.second << endl;;
+    }
+}
 
 void printheap() {
     if (heap.size() == 0) {
