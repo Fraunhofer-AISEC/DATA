@@ -405,7 +405,7 @@ ADDRINT execute_commands(const std::string command, short pos,
 }
 
 void *getLogicalAddress(void *virt_addr, void *ip) {
-    PT_DEBUG(2, "get log_addr for virt_addr of " << virt_addr);
+    PT_DEBUG(3, "get log_addr for virt_addr of " << virt_addr);
 
     if (virt_addr == nullptr) {
         // TODO assert false?
@@ -419,8 +419,8 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
          heaprange.endaddr != heap.back().base + heap.back().size)) {
         heaprange.baseaddr = heap.front().base;
         heaprange.endaddr = heap.back().base + heap.back().size;
-        PT_DEBUG(2, "heap.baseaddr: " << heaprange.baseaddr);
-        PT_DEBUG(2, "heap.endaddr: " << heaprange.endaddr);
+        PT_DEBUG(3, "heap.baseaddr: " << heaprange.baseaddr);
+        PT_DEBUG(3, "heap.endaddr: " << heaprange.endaddr);
     }
     // Does the Virtual Address belong to any heap object?
     if ((uint64_t)virt_addr >= heaprange.baseaddr &&
@@ -540,7 +540,7 @@ class DataLeak {
      */
     void append(uint64_t d) {
         PT_ASSERT(ip, "IP not set");
-        DEBUG(2)
+        DEBUG(3)
         printf("[pt-info] DLEAK@%" PRIx64 ": %" PRIx64 " appended\n", ip, d);
         data.push_back(d);
     }
@@ -639,7 +639,7 @@ class Context {
         if (dleaks.find(ip) == dleaks.end()) {
             dleaks.insert(std::pair<uint64_t, DataLeak>(ip, DataLeak(ip)));
         } else {
-            DEBUG(2)
+            DEBUG(3)
             printf("[pintool] Warning: DLEAK: %" PRIx64 " not created\n", ip);
         }
     }
@@ -654,7 +654,7 @@ class Context {
         if (cfleaks.find(ip) == cfleaks.end()) {
             cfleaks.insert(std::pair<uint64_t, CFLeak>(ip, CFLeak(ip)));
         } else {
-            DEBUG(2)
+            DEBUG(3)
             printf("[pintool] Warning: CFLEAK: %" PRIx64 " not created\n", ip);
         }
     }
@@ -667,7 +667,7 @@ class Context {
      */
     virtual void dleak_append(uint64_t ip, uint64_t data) {
         if (dleaks.find(ip) == dleaks.end()) {
-            DEBUG(2)
+            DEBUG(3)
             printf("[pintool] Warning: DLEAK: %" PRIx64 " not appended\n", ip);
         } else {
             dleaks[ip].append(data);
@@ -681,7 +681,7 @@ class Context {
      */
     virtual void cfleak_append(uint64_t bbl, uint64_t target) {
         if (cfleaks.find(bbl) == cfleaks.end()) {
-            DEBUG(2)
+            DEBUG(3)
             printf("[pintool] Warning: CFLEAK: %" PRIx64 " not appended\n",
                    bbl);
         } else {
@@ -1015,7 +1015,7 @@ class CallStack : public AbstractLeakContainer {
 
     void call_create(uint64_t caller, uint64_t callee) {
         PT_ASSERT(use_callstack, "Wrong usage of callstack");
-        DEBUG(2)
+        DEBUG(3)
         printf("[pintool] Building callstack %" PRIx64 " --> %" PRIx64 "\n",
                caller, callee);
         uint64_t id = get_call_id(caller, callee);
@@ -1038,14 +1038,14 @@ class CallStack : public AbstractLeakContainer {
         PT_ASSERT(use_callstack, "Wrong usage of callstack");
         PT_ASSERT(currentContext, "Callstack is not initialized");
         DEBUG(3) print_all();
-        DEBUG(2)
+        DEBUG(3)
         printf("[pintool] Calling %" PRIx64 " --> %" PRIx64 "\n", caller,
                callee);
         uint64_t id = get_call_id(caller, callee);
         CallContext *top = static_cast<CallContext *>(currentContext);
         if (!top->used) {
             if (top->caller == caller && top->callee == callee) {
-                DEBUG(2) printf("[pintool] Entered first leaking callstack\n");
+                DEBUG(3) printf("[pintool] Entered first leaking callstack\n");
                 top->used = true;
             }
         } else {
@@ -1063,7 +1063,7 @@ class CallStack : public AbstractLeakContainer {
     void ret_consume(uint64_t ip) {
         PT_ASSERT(use_callstack, "Wrong usage of callstack");
         PT_ASSERT(currentContext, "Callstack is not initialized");
-        DEBUG(2) printf("[pintool] Returning %" PRIx64 "\n", ip);
+        DEBUG(3) printf("[pintool] Returning %" PRIx64 "\n", ip);
         CallContext *top = static_cast<CallContext *>(currentContext);
         if (top->unknown_child_depth) {
             top->unknown_child_depth--;
@@ -1072,7 +1072,7 @@ class CallStack : public AbstractLeakContainer {
                 PT_ASSERT(top->parent, "Callstack parent is empty");
                 currentContext = top = top->parent;
             } else {
-                DEBUG(2) printf("[pintool] Warning: Ignoring return\n");
+                DEBUG(3) printf("[pintool] Warning: Ignoring return\n");
             }
         }
     }
@@ -1834,7 +1834,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
                    const CONTEXT *ctxt) {
     if (!Record)
         return;
-    PT_DEBUG(2, "ip in memread is   " << (uint64_t)ip);
+    PT_DEBUG(3, "ip in memread is   " << (uint64_t)ip);
     // PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = READ;
@@ -1868,7 +1868,7 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_STACK_PTR) : 0;
     PT_DEBUG(4, " TOP from WRITE is " << target);
-    PT_DEBUG(2, "ip in memwrite is   " << (uint64_t)ip);
+    PT_DEBUG(3, "ip in memwrite is   " << (uint64_t)ip);
     entry.ip = ip;
     entry.data = getLogicalAddress(addr, ip);
     DEBUG(3)
@@ -2481,7 +2481,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
 
     if (leaks->get_erase_dleak(l) || leaks->was_erased_dleak(l)) {
         /* Instrument dataleaking instruction */
-        DEBUG(2) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int)ip);
+        DEBUG(3) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int)ip);
         bool found = instrumentMemIns(ins, true);
         PT_ASSERT(found, "Memory instruction to instument not found. "
                          "Have you provided the flag -mem?");
@@ -2495,7 +2495,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
                            IARG_ADDRINT, INS_Address(ins), IARG_BOOL,
                            INS_IS_INDIRECT(ins), IARG_BRANCH_TARGET_ADDR,
                            IARG_BOOL, false, IARG_END);
-            DEBUG(1)
+            DEBUG(3)
             printf("[pintool] Instrumented call stack call@%lx\n",
                    (long unsigned int)INS_Address(ins));
         } else if (INS_IsRet(ins)) {
@@ -2506,7 +2506,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
                 ins, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordFunctionExit),
                 IARG_THREAD_ID, IARG_ADDRINT, INS_Address(ins), IARG_ADDRINT,
                 INS_Address(ins), IARG_CONTEXT, IARG_BOOL, false, IARG_END);
-            DEBUG(1)
+            DEBUG(3)
             printf("[pintool] Instrumented call stack ret@%lx\n",
                    (long unsigned int)INS_Address(ins));
         }
@@ -2514,7 +2514,7 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
 
     if (leaks->get_erase_cfleak(l) || leaks->was_erased_cfleak(l)) {
         /* Instrument cfleaking instruction */
-        DEBUG(2)
+        DEBUG(3)
         printf("[pintool] Tracing CFLEAK %lx\n", (long unsigned int)ip);
 
         /* Need to find actual branch inside BBL, since ins is start address of
@@ -2525,11 +2525,11 @@ VOID instrumentLeakingInstructions(INS ins, VOID *v) {
         INS bp = ins;
         bool found = false;
         while (bp != INS_Invalid()) {
-            DEBUG(2)
+            DEBUG(3)
             printf("[pintool] Testing ins %lx\n",
                    (long unsigned int)INS_Address(bp));
             if (INS_HAS_TAKEN_BRANCH(bp)) {
-                DEBUG(2)
+                DEBUG(3)
                 printf("[pintool] Found bp %lx\n",
                        (long unsigned int)INS_Address(bp));
                 /* We instrument the actual branch point (bp) but report leaks
@@ -2641,14 +2641,14 @@ VOID Fini(INT32 code, VOID *v) {
         }
         /* KnobLeaks is set */
     } else {
-        DEBUG(2) leaks->print_all();
-        DEBUG(2)
+        DEBUG(3) leaks->print_all();
+        DEBUG(3)
         printf("[pintool] Number of uninstrumented data leaks: %zu\n",
                leaks->get_uninstrumented_dleak_size());
-        DEBUG(2)
+        DEBUG(3)
         printf("[pintool] Number of uninstrumented cflow leaks: %zu\n",
                leaks->get_uninstrumented_cfleak_size());
-        DEBUG(2) leaks->print_uninstrumented_leaks();
+        DEBUG(3) leaks->print_uninstrumented_leaks();
 
         if (!KnobLeakOut.Value().empty()) {
             PT_ASSERT(!KnobLeakIn.Value().empty(), "leakout requires leakin");
