@@ -312,7 +312,8 @@ void CallStack::emit_stack(UINT32 depth, vector<string> &out,
         o << right << dec << setw(2) << id << "# ";
         o << "0x" << hex << setw(width) << setfill('0') << iter->target()
           << " ";
-        o << setw(20) << setfill(' ') << left << info.func_name;
+        o << setw(20) << setfill(' ') << left
+          << PIN_UndecorateSymbolName(info.func_name, UNDECORATION_COMPLETE);
         o << setw(20) << info.image_name;
         if (_source_location && info.file_name) {
             o << " at " << info.file_name << ":" << dec << info.line;
