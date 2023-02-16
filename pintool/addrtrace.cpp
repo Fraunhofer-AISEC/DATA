@@ -1406,8 +1406,6 @@ void doalloc(ADDRINT addr, alloc_state_t *alloc_state,
  */
 VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
     PT_DEBUG(1, "malloc called with 0x" << std::hex << size << " at " << ip);
-    if (!Record)
-        return;
     // PIN_MutexLock(&lock);
     if (thread_state[threadid].realloc_state.size() == 0) {
         SHA1 hash;
@@ -1433,8 +1431,6 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
  */
 VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     PT_DEBUG(1, "malloc returned " << std::hex << addr);
-    if (!Record)
-        return;
     // PIN_MutexLock(&lock);
     PT_ASSERT(thread_state[threadid].malloc_state.size() > 0,
               "Malloc returned but not called");
@@ -1454,8 +1450,6 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
                          ADDRINT size) {
     PT_DEBUG(1, "realloc called with " << std::hex << addr << " " << size
                                        << " at " << ip);
-    if (!Record)
-        return;
     // PIN_MutexLock(&lock);
     SHA1 hash;
     hash.update(getcallstack(
@@ -1477,8 +1471,6 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
  */
 VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     PT_DEBUG(1, "realloc returned " << std::hex << addr << " at " << ip);
-    if (!Record)
-        return;
     // PIN_MutexLock(&lock);
     PT_ASSERT(thread_state[threadid].realloc_state.size() > 0,
               "realloc returned but not called");
@@ -1498,9 +1490,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
 VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
                         ADDRINT size, ADDRINT ret) {
     PT_DEBUG(1, "calloc called with " << std::hex << nelem << " " << size);
-    if (!Record)
-        return;
-    //  PIN_MutexLock(&lock);
+    // PIN_MutexLock(&lock);
     if (thread_state[threadid].calloc_state.size() == 0) {
         SHA1 hash;
         hash.update(getcallstack(threadid)); /* calculate the hash of the set of
@@ -1523,10 +1513,6 @@ VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
  */
 VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     PT_DEBUG(1, "calloc returned " << std::hex << addr);
-    if (!Record) {
-        PT_DEBUG(1, "ignoring");
-        return;
-    }
     // PIN_MutexLock(&lock);
     PT_ASSERT(thread_state[threadid].calloc_state.size() != 0,
               "calloc returned but not called");
@@ -1544,8 +1530,6 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
 VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
     PT_DEBUG(1, "free called with " << std::hex << addr << " at " << ip);
     DEBUG(2) print_callstack(threadid);
-    if (!Record)
-        return;
     // PIN_MutexLock(&lock);
     dofree(addr);
     // PIN_MutexUnlock(&lock);
