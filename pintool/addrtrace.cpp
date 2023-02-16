@@ -261,7 +261,7 @@ typedef struct {
 typedef std::vector<memobj_t> HEAPVEC;
 HEAPVEC heap;
 
-std::unordered_map<std::string, std::vector<string>> hashmap;
+std::unordered_map<std::string, uint64_t> hashmap;
 std::unordered_map<uint64_t, uint64_t> allocmap;
 
 imgobj_t heaprange;
@@ -1210,24 +1210,28 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v) {
  * calculate sha1-hash and use the 4 bytes of the hash as the memory Index
  */
 void calculate_sha1_hash(memobj_t *obj) {
+    /* Hash shall be unique wrt. calling location */
     std::stringstream to_hash(obj->type, ios_base::app | ios_base::out);
     to_hash << obj->size << obj->callsite << obj->callstack;
 
-    SHA1 hash;
-    if (hashmap.count(to_hash.str())) {
-        hash.update(hashmap[to_hash.str()].back());
-    } else {
-        hash.update(to_hash.str());
-    }
-    obj->hash = hash.final();
-    hashmap[to_hash.str()].push_back(obj->hash);
+    /**
+     * A hash, i.e. logical base address, shall only occur once.
+     * For variation the occurence of a hash is counted within hashmap.
+     * This count is used together with the calling location to create an
+     * unique hash.
+     */
+    std::stringstream count;
+    count << hex << hashmap[to_hash.str()];
+    hashmap[to_hash.str()] += 1;
 
-    DEBUG(1) {
-        PT_DEBUG(1, "HashMap for    " << to_hash.str());
-        for (auto &i : hashmap[to_hash.str()]) {
-            PT_DEBUG(1, "HashMap Value: " << i);
-        }
-    }
+    SHA1 hash;
+    to_hash << count.str();
+    hash.update(to_hash.str());
+    obj->hash = hash.final();
+
+    PT_DEBUG(1, "HashMap for    " << to_hash.str());
+    PT_DEBUG(1, "HashMap count  0x" << count.str());
+    PT_DEBUG(1, "Object hash    " << hex << obj->hash);
 }
 
 /**
