@@ -253,7 +253,6 @@ typedef struct {
     char const *type;
     size_t size;
     uint64_t base;
-    ADDRINT callsite;
     std::string callstack;
     std::string hash;
 } memobj_t;
@@ -1212,7 +1211,7 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v) {
 void calculate_sha1_hash(memobj_t *obj) {
     /* Hash shall be unique wrt. calling location */
     std::stringstream to_hash(obj->type, ios_base::app | ios_base::out);
-    to_hash << obj->callsite << obj->callstack;
+    to_hash << obj->callstack;
 
     /**
      * A hash, i.e. logical base address, shall only occur once.
@@ -1337,8 +1336,6 @@ void doalloc(ADDRINT addr, alloc_state_t *alloc_state,
     memobj_t obj;
     obj.base = addr;
     obj.size = (alloc_state) ? alloc_state->size : realloc_state->size;
-    obj.callsite =
-        (alloc_state) ? alloc_state->callsite : realloc_state->callsite;
     obj.type = (alloc_state) ? alloc_state->type : realloc_state->type;
     obj.callstack =
         (alloc_state) ? alloc_state->callstack : realloc_state->callstack;
@@ -1438,7 +1435,6 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
         alloc_state_t state = {
             .type = "malloc",
             .size = size,
-            .callsite = get_callsite_offset((ADDRINT) ip),
             .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
         };
         thread_state[threadid].malloc_state.push_back(state);
@@ -1487,7 +1483,6 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
         .type = "realloc",
         .old = addr,
         .size = size,
-        .callsite = get_callsite_offset((ADDRINT) ip),
         .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
     };
     thread_state[threadid].realloc_state.push_back(state);
@@ -1532,7 +1527,6 @@ VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
         alloc_state_t state = {
             .type = name,
             .size = nelem * size,
-            .callsite = get_callsite_offset(ret),
             .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
         };
 
@@ -1618,7 +1612,6 @@ VOID RecordMmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
     alloc_state_t state = {
         .type = name,
         .size = size,
-        .callsite = get_callsite_offset(ret),
         .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
     };
 
@@ -1672,7 +1665,6 @@ VOID RecordMremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
         .type = name,
         .old = addr,
         .size = new_size,
-        .callsite = get_callsite_offset(ret),
         .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
     };
     thread_state[threadid].mremap_state.push_back(state);
