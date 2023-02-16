@@ -2090,8 +2090,6 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         hash.update(imgdata.name);
         imgdata.hash = hash.final().substr(32, 8);
 
-        imgvec.push_back(imgdata);
-
         for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec)) {
             string sec_name = SEC_Name(sec);
             low = SEC_Address(sec);
@@ -2104,18 +2102,13 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                 PT_INFO("unmapped sec dropped: " << sec_name);
                 continue;
             }
-
-            imgobj_t imgdata;
-            imgdata.name = sec_name;
-            imgdata.baseaddr = low;
-            imgdata.endaddr = high;
-
-            SHA1 hash;
-            hash.update(imgdata.name);
-            imgdata.hash = hash.final().substr(32, 8);
-
-            imgvec.push_back(imgdata);
+            imgdata.baseaddr = (imgdata.baseaddr > low) ? low : imgdata.baseaddr;
+            imgdata.endaddr = (imgdata.endaddr < high) ? high : imgdata.endaddr;
         }
+
+        PT_DEBUG(1, "image low:  0x " << std::hex << imgdata.baseaddr);
+        PT_DEBUG(1, "image high: 0x " << std::hex << imgdata.endaddr);
+        imgvec.push_back(imgdata);
 
         for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
              sym = SYM_Next(sym)) {
