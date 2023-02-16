@@ -1212,7 +1212,7 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v) {
 void calculate_sha1_hash(memobj_t *obj) {
     /* Hash shall be unique wrt. calling location */
     std::stringstream to_hash(obj->type, ios_base::app | ios_base::out);
-    to_hash << obj->size << obj->callsite << obj->callstack;
+    to_hash << obj->callsite << obj->callstack;
 
     /**
      * A hash, i.e. logical base address, shall only occur once.
