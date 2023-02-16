@@ -1209,6 +1209,8 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v) {
  * calculate sha1-hash and use the 4 bytes of the hash as the memory Index
  */
 void calculate_sha1_hash(memobj_t *obj) {
+    PT_DEBUG(2, "HashMap callstack " << obj->callstack);
+
     /* Hash shall be unique wrt. calling location */
     std::stringstream to_hash(obj->type, ios_base::app | ios_base::out);
     to_hash << obj->callstack;
@@ -1263,31 +1265,10 @@ std::string getcallstack(THREADID threadid) {
     std::stringstream unique_cs(ios_base::app | ios_base::out);
 
     for (auto i : ipvec) {
-        string path = i.name;
-        size_t imgpos = path.find_last_of("/\\");
-        string imgname = path.substr(imgpos + 1);
-        size_t pos = imgname.find_last_of(":");
-        string name = imgname.substr(0, pos);
-        for (auto j : imgvec) {
-            if (name == (j.name)) {
-                unique_cs << i.ipaddr - j.baseaddr;
-                PT_DEBUG(1, name << " " << j.baseaddr << " " << unique_cs.str()
-                                 << " " << i.ipaddr);
-            }
-        }
+        unique_cs << " 0x"<< hex << i.ipaddr;
     }
+    PT_DEBUG(2, "callstack " << unique_cs.str());
     return unique_cs.str();
-}
-
-ADDRINT get_callsite_offset(ADDRINT callsite) {
-    for (auto i : imgvec) {
-        if (callsite >= i.baseaddr && callsite <= i.endaddr) {
-            return callsite - i.baseaddr;
-        }
-    }
-    PT_WARN("callsite does not belong to image space?");
-    PT_WARN("callsite " << std::hex << callsite);
-    return 0;
 }
 
 /**
