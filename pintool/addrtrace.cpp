@@ -1773,7 +1773,7 @@ VOID Routine(RTN rtn, VOID *v) {
 
     // The RTN goes away when the image is unloaded, so save it now
     // because we need it in the fini
-    rc->_name = RTN_Name(rtn);
+    rc->_name = PIN_UndecorateSymbolName(RTN_Name(rtn), UNDECORATION_NAME_ONLY);
     rc->_image = StripPath(IMG_Name(SEC_Img(RTN_Sec(rtn))).c_str());
     rc->_address = RTN_Address(rtn);
     rc->_icount = 0;
