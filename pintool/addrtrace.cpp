@@ -296,7 +296,6 @@ int pid = PIN_GetPid();
 typedef struct {
     char const *type;
     ADDRINT size;
-    ADDRINT callsite;
     std::string callstack;
 } alloc_state_t;
 
@@ -304,7 +303,6 @@ typedef struct {
     char const *type;
     ADDRINT old;
     ADDRINT size;
-    ADDRINT callsite;
     std::string callstack;
 } realloc_state_t;
 
