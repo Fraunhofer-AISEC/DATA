@@ -36,6 +36,17 @@ from datastub.utils import debug
 """
 
 
+def getdebugelf(fname):
+    command = f"gdb -ex quit {fname}"
+    output = subprocess.check_output(command.split(" ")).decode("utf-8")
+    lines = output.splitlines()
+    assert lines[-2].find(fname) != -1
+    if lines[-1].find("No debugging symbols found") != -1:
+        return None
+    assert lines[-2].find("Reading symbols from") != -1
+    return lines[-1].split(" ")[-1].split("...")[0]
+
+
 def readelfsyms(fname, image):
     try:
         command = "objdump --demangle -f %s" % (fname)
@@ -53,7 +64,13 @@ def readelfsyms(fname, image):
         return None
 
     if lines is None or len(lines) == 0:
-        return None
+        debug(0, f"No symbols found in {fname}")
+        fname = getdebugelf(fname)
+        if fname is None:
+            debug(0, "GDB didnot found any debug file")
+            return None
+        debug(0, f"GDB found debug file: {fname}")
+        return readelfsyms(fname, image)
 
     syms = []
     for line in lines:
