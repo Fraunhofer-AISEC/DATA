@@ -307,6 +307,11 @@ typedef struct {
 } realloc_state_t;
 
 typedef struct {
+    ADDRINT old;
+    ADDRINT addr;
+} vector_realloc_state_t;
+
+typedef struct {
     /* allocation routines sometimes call themselves in a nested way during
      * initialization */
     std::vector<alloc_state_t> malloc_state;
@@ -314,6 +319,7 @@ typedef struct {
     std::vector<realloc_state_t> realloc_state;
     std::vector<alloc_state_t> mmap_state;
     std::vector<realloc_state_t> mremap_state;
+    std::vector<vector_realloc_state_t> vector_realloc_state;
     ADDRINT RetIP;
     int newbbl;
 } thread_state_t;
@@ -1438,6 +1444,13 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     alloc_state_t state = thread_state[threadid].malloc_state.back();
     thread_state[threadid].malloc_state.pop_back();
     doalloc(addr, &state, nullptr);
+    if (thread_state[threadid].vector_realloc_state.size()) {
+        PT_DEBUG(1, "malloc nested within vector relocate");
+        vector_realloc_state_t state = thread_state[threadid].vector_realloc_state.back();
+        thread_state[threadid].vector_realloc_state.pop_back();
+        state.addr = addr;
+        thread_state[threadid].vector_realloc_state.push_back(state);
+    }
     Trace = true;
     // PIN_MutexUnlock(&lock);
 }
@@ -1517,13 +1530,20 @@ VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
  * @param addr The allocated heap pointer
  */
 VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
-    PT_DEBUG(1, "calloc returned " << std::hex << addr);
+    PT_DEBUG(1, "calloc returned " << hex << addr);
     // PIN_MutexLock(&lock);
     PT_ASSERT(thread_state[threadid].calloc_state.size() != 0,
               "calloc returned but not called");
     alloc_state_t state = thread_state[threadid].calloc_state.back();
     thread_state[threadid].calloc_state.pop_back();
     doalloc(addr, &state, nullptr);
+    if (thread_state[threadid].vector_realloc_state.size()) {
+        PT_DEBUG(1, "calloc nested within vector relocate");
+        vector_realloc_state_t state = thread_state[threadid].vector_realloc_state.back();
+        thread_state[threadid].vector_realloc_state.pop_back();
+        state.addr = addr;
+        thread_state[threadid].vector_realloc_state.push_back(state);
+    }
     Trace = true;
     // PIN_MutexUnlock(&lock);
 }
@@ -1537,6 +1557,16 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
     PT_DEBUG(1, "free called with " << std::hex << addr << " at " << ip);
     DEBUG(2) print_callstack(threadid);
     // PIN_MutexLock(&lock);
+    if (thread_state[threadid].vector_realloc_state.size()) {
+        PT_DEBUG(1, "free nested within vector relocate");
+        vector_realloc_state_t state = thread_state[threadid].vector_realloc_state.back();
+        thread_state[threadid].vector_realloc_state.pop_back();
+        state.old = addr;
+        thread_state[threadid].vector_realloc_state.push_back(state);
+
+        PT_DEBUG(1, "replace addr 0x" << hex << allocmap[state.addr] << " with old 0x" << hex << allocmap[state.old]);
+        allocmap[state.addr] = allocmap[state.old];
+    }
     dofree(addr);
     if (StopTrace) Trace = false;
     // PIN_MutexUnlock(&lock);
@@ -1736,6 +1766,28 @@ VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     // PIN_MutexUnlock(&lock);
 }
 
+/**
+ * Detect C++ vector relocate
+ */
+VOID RelocateBefore(THREADID threadid) {
+    PT_DEBUG(1, "relocate called");
+    DEBUG(2) print_callstack(threadid);
+    // PIN_MutexLock(&lock);
+    vector_realloc_state_t state {
+        .old = 0,
+        .addr = 0,
+    };
+    thread_state[threadid].vector_realloc_state.push_back(state);
+    // PIN_MutexUnlock(&lock);
+}
+
+VOID RelocateAfter(THREADID threadid) {
+    PT_DEBUG(1, "relocate returned");
+    // PIN_MutexLock(&lock);
+    thread_state[threadid].vector_realloc_state.pop_back();
+    // PIN_MutexUnlock(&lock);
+}
+
 std::ofstream outFile;
 
 // Holds instruction count for a single procedure
@@ -1793,6 +1845,25 @@ VOID Routine(RTN rtn, VOID *v) {
         // this rtn
         INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)docount, IARG_PTR,
                        &(rc->_icount), IARG_END);
+    }
+
+    // Add special tracking for C++ vector tracking
+    // TODO move to other alloc functions
+    size_t pos = rc->_name.find("_M_default_append");
+    if (pos != string::npos) {
+        PT_DEBUG(1, "found _M_default_append in " << rc->_name);
+        RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)RelocateBefore,
+                       IARG_THREAD_ID, IARG_END);
+        RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR)RelocateAfter,
+                       IARG_THREAD_ID, IARG_END);
+    }
+    pos = rc->_name.find("_M_realloc_insert");
+    if (pos != string::npos) {
+        PT_DEBUG(1, "found _M_realloc_insert in " << rc->_name);
+        RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)RelocateBefore,
+                       IARG_THREAD_ID, IARG_END);
+        RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR)RelocateAfter,
+                       IARG_THREAD_ID, IARG_END);
     }
 
     RTN_Close(rtn);
