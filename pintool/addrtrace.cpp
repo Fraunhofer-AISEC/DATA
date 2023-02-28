@@ -152,7 +152,7 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
     {                                                                          \
         if (!(x)) {                                                            \
             printheap();                                                       \
-            print_allocmap();                                                       \
+            print_allocmap();                                                  \
             print_proc_map();                                                  \
             MESSAGE("[pt-error] ", msg);                                       \
             ASSERT(false, "pintool failed.");                                  \
@@ -336,8 +336,8 @@ void print_allocmap() {
         return;
     }
     PT_INFO("allocmap:");
-    for (auto& it: allocmap) {
-        cout << it.first << " - " << it.second << endl;;
+    for (auto &it : allocmap) {
+        cout << it.first << " - " << it.second << endl;
     }
 }
 
@@ -1271,7 +1271,7 @@ std::string getcallstack(THREADID threadid) {
     std::stringstream unique_cs(ios_base::app | ios_base::out);
 
     for (auto i : ipvec) {
-        unique_cs << " 0x"<< hex << i.ipaddr;
+        unique_cs << " 0x" << hex << i.ipaddr;
     }
     PT_DEBUG(2, "callstack " << unique_cs.str());
     return unique_cs.str();
@@ -1429,7 +1429,8 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
         PT_DEBUG(1, "malloc ignored due to realloc_pending (size= "
                         << std::hex << size << ") at " << ip);
     }
-    if (StopTrace) Trace = false;
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1448,7 +1449,8 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     doalloc(addr, &state, nullptr);
     if (thread_state[threadid].vector_realloc_state.size()) {
         PT_DEBUG(1, "malloc nested within vector relocate");
-        vector_realloc_state_t state = thread_state[threadid].vector_realloc_state.back();
+        vector_realloc_state_t state =
+            thread_state[threadid].vector_realloc_state.back();
         thread_state[threadid].vector_realloc_state.pop_back();
         state.addr = addr;
         thread_state[threadid].vector_realloc_state.push_back(state);
@@ -1478,7 +1480,8 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
         .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
     };
     thread_state[threadid].realloc_state.push_back(state);
-    if (StopTrace) Trace = false;
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1522,7 +1525,8 @@ VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
 
         thread_state[threadid].calloc_state.push_back(state);
     }
-    if (StopTrace) Trace = false;
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1541,7 +1545,8 @@ VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
     doalloc(addr, &state, nullptr);
     if (thread_state[threadid].vector_realloc_state.size()) {
         PT_DEBUG(1, "calloc nested within vector relocate");
-        vector_realloc_state_t state = thread_state[threadid].vector_realloc_state.back();
+        vector_realloc_state_t state =
+            thread_state[threadid].vector_realloc_state.back();
         thread_state[threadid].vector_realloc_state.pop_back();
         state.addr = addr;
         thread_state[threadid].vector_realloc_state.push_back(state);
@@ -1561,16 +1566,20 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
     // PIN_MutexLock(&lock);
     if (thread_state[threadid].vector_realloc_state.size()) {
         PT_DEBUG(1, "free nested within vector relocate");
-        vector_realloc_state_t state = thread_state[threadid].vector_realloc_state.back();
+        vector_realloc_state_t state =
+            thread_state[threadid].vector_realloc_state.back();
         thread_state[threadid].vector_realloc_state.pop_back();
         state.old = addr;
         thread_state[threadid].vector_realloc_state.push_back(state);
 
-        PT_DEBUG(1, "replace addr 0x" << hex << allocmap[state.addr] << " with old 0x" << hex << allocmap[state.old]);
+        PT_DEBUG(1, "replace addr 0x" << hex << allocmap[state.addr]
+                                      << " with old 0x" << hex
+                                      << allocmap[state.old]);
         allocmap[state.addr] = allocmap[state.old];
     }
     dofree(addr);
-    if (StopTrace) Trace = false;
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1775,7 +1784,7 @@ VOID RelocateBefore(THREADID threadid) {
     PT_DEBUG(1, "relocate called");
     DEBUG(2) print_callstack(threadid);
     // PIN_MutexLock(&lock);
-    vector_realloc_state_t state {
+    vector_realloc_state_t state{
         .old = 0,
         .addr = 0,
     };
@@ -2192,7 +2201,8 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
                 PT_INFO("unmapped sec dropped: " << sec_name);
                 continue;
             }
-            imgdata.baseaddr = (imgdata.baseaddr > low) ? low : imgdata.baseaddr;
+            imgdata.baseaddr =
+                (imgdata.baseaddr > low) ? low : imgdata.baseaddr;
             imgdata.endaddr = (imgdata.endaddr < high) ? high : imgdata.endaddr;
         }
 
@@ -2203,8 +2213,8 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
              sym = SYM_Next(sym)) {
             imgfile << std::hex << SYM_Address(sym)
-                    << ":" + PIN_UndecorateSymbolName(
-                                 SYM_Name(sym), UNDECORATION_NAME_ONLY)
+                    << ":" + PIN_UndecorateSymbolName(SYM_Name(sym),
+                                                      UNDECORATION_NAME_ONLY)
                     << std::endl;
         }
     }
@@ -2216,12 +2226,11 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
             PT_DEBUG(1, "KnobMain is valid");
             RTN_Open(mainRtn);
             RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
-                           IARG_THREAD_ID, IARG_ADDRINT,
-                           RTN_Address(mainRtn), IARG_END, IARG_CONTEXT,
-                           IARG_END);
+                           IARG_THREAD_ID, IARG_ADDRINT, RTN_Address(mainRtn),
+                           IARG_END, IARG_CONTEXT, IARG_END);
             RTN_InsertCall(mainRtn, IPOINT_AFTER, (AFUNPTR)RecordMainEnd,
-                           IARG_THREAD_ID, IARG_ADDRINT,
-                           RTN_Address(mainRtn), IARG_END);
+                           IARG_THREAD_ID, IARG_ADDRINT, RTN_Address(mainRtn),
+                           IARG_END);
             RTN_Close(mainRtn);
         }
     } else {
@@ -2243,7 +2252,7 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 
     if (alloc_instrumented == 0 &&
         (name.find("alloc.so") != std::string::npos ||
-        name.find("libc.so") != std::string::npos)) {
+         name.find("libc.so") != std::string::npos)) {
         /* If alloc.so is pre-loaded, it will always be before libc
          * We only instrument once
          */
@@ -2253,12 +2262,10 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
             PT_DEBUG(1, "malloc found in " << IMG_Name(img));
             RTN_Open(mallocRtn);
             RTN_InsertCall(mallocRtn, IPOINT_BEFORE,
-                           (AFUNPTR)RecordMallocBefore,
-                           IARG_THREAD_ID, IARG_INST_PTR,
-                           IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                           (AFUNPTR)RecordMallocBefore, IARG_THREAD_ID,
+                           IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
                            IARG_END);
-            RTN_InsertCall(mallocRtn, IPOINT_AFTER,
-                           (AFUNPTR)RecordMallocAfter,
+            RTN_InsertCall(mallocRtn, IPOINT_AFTER, (AFUNPTR)RecordMallocAfter,
                            IARG_THREAD_ID, IARG_INST_PTR,
                            IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
             RTN_Close(mallocRtn);
@@ -2268,15 +2275,14 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         if (reallocRtn.is_valid()) {
             PT_DEBUG(1, "realloc found in " << IMG_Name(img));
             RTN_Open(reallocRtn);
-            RTN_InsertCall(
-                reallocRtn, IPOINT_BEFORE,
-                (AFUNPTR)RecordReallocBefore, IARG_THREAD_ID,
-                IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+            RTN_InsertCall(reallocRtn, IPOINT_BEFORE,
+                           (AFUNPTR)RecordReallocBefore, IARG_THREAD_ID,
+                           IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                           IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
             RTN_InsertCall(reallocRtn, IPOINT_AFTER,
-                           (AFUNPTR)RecordReallocAfter,
-                           IARG_THREAD_ID, IARG_INST_PTR,
-                           IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
+                           (AFUNPTR)RecordReallocAfter, IARG_THREAD_ID,
+                           IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE,
+                           IARG_END);
             RTN_Close(reallocRtn);
         }
 
@@ -2285,15 +2291,13 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
             PT_DEBUG(1, "calloc found in " << IMG_Name(img));
             RTN_Open(callocRtn);
             RTN_InsertCall(callocRtn, IPOINT_BEFORE,
-                           (AFUNPTR)RecordCallocBefore,
-                           IARG_ADDRINT, CALLOC, IARG_THREAD_ID,
-                           IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                           IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+                           (AFUNPTR)RecordCallocBefore, IARG_ADDRINT, CALLOC,
+                           IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                           IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_RETURN_IP,
+                           IARG_END);
+            RTN_InsertCall(callocRtn, IPOINT_AFTER, (AFUNPTR)RecordCallocAfter,
+                           IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
                            IARG_RETURN_IP, IARG_END);
-            RTN_InsertCall(
-                callocRtn, IPOINT_AFTER, (AFUNPTR)RecordCallocAfter,
-                IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
-                IARG_RETURN_IP, IARG_END);
             PT_DEBUG(1, "after Calloc insert ");
             RTN_Close(callocRtn);
         }
@@ -2302,12 +2306,11 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         if (freeRtn.is_valid()) {
             PT_DEBUG(1, "free found in " << IMG_Name(img));
             RTN_Open(freeRtn);
-            RTN_InsertCall(
-                freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
-                IARG_THREAD_ID, IARG_INST_PTR,
-                IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
-            RTN_InsertCall(
-                freeRtn, IPOINT_AFTER, (AFUNPTR)RecordFreeAfter, IARG_END);
+            RTN_InsertCall(freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
+                           IARG_THREAD_ID, IARG_INST_PTR,
+                           IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
+            RTN_InsertCall(freeRtn, IPOINT_AFTER, (AFUNPTR)RecordFreeAfter,
+                           IARG_END);
             RTN_Close(freeRtn);
         }
         alloc_instrumented = 1;
