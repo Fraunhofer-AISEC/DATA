@@ -1327,7 +1327,7 @@ void doalloc(ADDRINT addr, alloc_state_t *alloc_state,
     obj.callstack =
         (alloc_state) ? alloc_state->callstack : realloc_state->callstack;
 
-    PT_DEBUG(1, "doalloc " << std::hex << addr << " " << obj.size << " type "
+    PT_DEBUG(1, "doalloc " << hex << addr << " " << hex << obj.size << " type "
                            << obj.type);
 
     /* Edit object in heap vector, if in-place reallocation */
@@ -1403,6 +1403,8 @@ void doalloc(ADDRINT addr, alloc_state_t *alloc_state,
         PT_INFO("obj.size   " << obj.size);
         PT_ASSERT(false, "Corrupted heap?!");
     }
+    DEBUG(3) printheap();
+    DEBUG(3) print_allocmap();
 }
 
 /**
@@ -1506,7 +1508,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
                         ADDRINT size, ADDRINT ret) {
-    PT_DEBUG(1, "calloc called with " << std::hex << nelem << " " << size);
+    PT_DEBUG(1, "calloc called with " << hex << nelem << "*" << hex << size);
     // PIN_MutexLock(&lock);
     if (thread_state[threadid].calloc_state.size() == 0) {
         SHA1 hash;
@@ -1709,7 +1711,7 @@ VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
  */
 VOID RecordBrkBefore(THREADID threadid, ADDRINT addr) {
     PT_DEBUG(1, "brk called with " << std::hex << addr);
-    DEBUG(2) print_callstack(threadid);
+    DEBUG(3) print_callstack(threadid);
     if (addr != 0) {
         return;
     }
