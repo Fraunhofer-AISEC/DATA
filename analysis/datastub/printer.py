@@ -210,7 +210,7 @@ class XmlLeakPrinter:
                     else:
                         node = f"{node_plain} origin='fixed' {str(evidence[0].key)}"
                     self.startNode(node)
-                    for (key, value) in entries.items():
+                    for (key, value) in sorted(entries.items()):
                         self.doprint_line(f"{format(key, 'x')}: {value}")
                     self.endNode(node_plain)
 
