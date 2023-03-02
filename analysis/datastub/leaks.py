@@ -492,12 +492,12 @@ class LeakStatus:
     def max_leak(self):
         max_leak = None
         if self.is_generic_leak():
-            max_leak_ns = max(self.nsleak, key=lambda l: l.normalized())
+            max_leak_ns = max(self.nsleak, key=lambda leak: leak.normalized())
             # Remove M_pos, as it does not work properly
             # normalized = max(normalized, max(self.nsleak, key=lambda l: 0 if l.nstype == NSPType.Type3 else l.normalized()).normalized())
             max_leak = max_leak_ns
         if self.is_specific_leak():
-            max_leak_sp = max(self.spleak, key=lambda l: l.normalized())
+            max_leak_sp = max(self.spleak, key=lambda leak: leak.normalized())
             # Remove M_pos, as it does not work properly
             # normalized = max(normalized, max(self.spleak, key=lambda l: 0 if l.sptype == NSPType.Type3 else l.normalized()).normalized())
             max_leak = max_leak_sp if max_leak_sp.normalized() > max_leak.normalized() else max_leak
