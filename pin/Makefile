@@ -28,7 +28,6 @@ PROJ := DATA - Pin
 
 # Pin Version and Source
 
-#VER_STRING=pin-3.7-97619-g0d0c92f4f-gcc-linux
 VER_STRING=pin-3.11-97998-g7ecce2dac-gcc-linux
 
 TAR=$(VER_STRING).tar.gz

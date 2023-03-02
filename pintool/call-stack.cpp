@@ -30,6 +30,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 END_LEGAL */
 
 #include "call-stack.H"
+#include "pin-macros.H"
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -113,9 +114,9 @@ static void i_trace(TRACE trace, void *v) {
             continue;
         }
 #endif
-        if (INS_IsDirectBranchOrCall(tail)) {
+        if (INS_IS_DIRECT(tail)) {
             // check if direct or indirect call and take the target accordingly
-            ADDRINT target = INS_DirectBranchOrCallTargetAddress(tail);
+            ADDRINT target = INS_DIRECT(tail);
             INS_InsertCall(tail, IPOINT_BEFORE, (AFUNPTR)a_process_call,
                            IARG_ADDRINT, target, IARG_REG_VALUE, REG_STACK_PTR,
                            IARG_REG_VALUE, vreg, IARG_END);
@@ -127,7 +128,7 @@ static void i_trace(TRACE trace, void *v) {
                                IARG_END);
             }
         }
-        if (INS_IsIndirectBranchOrCall(tail) && !INS_IsRet(tail)) {
+        if (INS_IS_INDIRECT(tail) && !INS_IsRet(tail)) {
             INS_InsertCall(tail, IPOINT_TAKEN_BRANCH, (AFUNPTR)a_process_call,
                            IARG_BRANCH_TARGET_ADDR, IARG_REG_VALUE,
                            REG_STACK_PTR, IARG_REG_VALUE, vreg, IARG_END);

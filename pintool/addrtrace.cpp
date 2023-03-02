@@ -25,6 +25,7 @@
 
 /***********************************************************************/
 
+#include "pin-macros.H"
 #include "pin.H"
 #include <fcntl.h>
 #include <fstream>
@@ -41,25 +42,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <vector>
-
-/**
- * Pin 3.11 Documentation:
- * https://software.intel.com/sites/landingpage/pintool/docs/97998/Pin/html
- */
-
-// Pin above 3.7.97720 deprecates some functions
-#if (PIN_PRODUCT_VERSION_MAJOR > 3) ||                                         \
-    (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR > 7) ||       \
-    (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR == 7 &&       \
-     PIN_BUILD_NUMBER > 97720)
-#define INS_IS_INDIRECT INS_IsIndirectControlFlow
-#define INS_HAS_TAKEN_BRANCH INS_IsValidForIpointTakenBranch
-#define INS_HAS_IPOINT_AFTER INS_IsValidForIpointAfter
-#else
-#define INS_IS_INDIRECT INS_IsIndirectBranchOrCall
-#define INS_HAS_TAKEN_BRANCH INS_IsBranchOrCall
-#define INS_HAS_IPOINT_AFTER INS_HasFallThrough
-#endif
 
 using namespace std;
 
