@@ -27,6 +27,7 @@
 
 #include "pin-macros.H"
 #include "pin.H"
+#include "utils.H"
 #include <fcntl.h>
 #include <fstream>
 #include <getopt.h>
@@ -44,6 +45,8 @@
 #include <vector>
 
 using namespace std;
+
+int DEBUG_LEVEL;
 
 /***********************************************************************/
 
@@ -112,7 +115,6 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
 #define REALLOC "realloc"
 #define CALLOC "calloc"
 #define FREE "free"
-#define DEBUG(x) if (KnobDebug.Value() >= x)
 
 int alloc_instrumented = 0;
 
@@ -1959,6 +1961,8 @@ int main(int argc, char *argv[]) {
         return Usage();
 
     PIN_InitSymbols();
+
+    DEBUG_LEVEL = KnobDebug.Value();
 
     if (KnobLeaks.Value() && KnobCallstack.Value()) {
         leaks = new CallStack();
