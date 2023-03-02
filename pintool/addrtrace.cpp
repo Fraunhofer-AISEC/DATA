@@ -1286,7 +1286,8 @@ void dofree(ADDRINT addr) {
     PT_DEBUG(1, "dofree 0x" << std::hex << addr);
 
     if (!addr) {
-        PT_ERROR("dofree called with NULL");
+        PT_DEBUG(3, "dofree called with NULL");
+        return;
     }
 
     if (allocmap.find(addr) == allocmap.end()) {
