@@ -27,6 +27,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import os
 import gzip
 import subprocess
+import shlex
 import pickle
 from datastub.DataFS import DataFS
 from datastub.IpInfoShort import IpInfoShort, IP_INFO_FILE
@@ -103,6 +104,38 @@ def loadpickle(pfile):
 """
 
 
+def getGdbSourceFileInfo(addr, binary_path):
+    command = f"gdb -ex 'set print asm-demangle on' -ex 'info line *{addr}' -ex quit {binary_path}"
+    output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+    tmp = "No line number information available"
+    if tmp not in output:
+        return None, 0
+    tmp = output.split(tmp)[1]
+    tmp = tmp.split("<", 1)[1]
+    tmp = tmp[::-1].split(">", 1)[1]
+    output = tmp[::-1]
+
+    tmp = "@plt"
+    if tmp not in output:
+        return None, 0
+    fn_name = output.split(tmp)[0]
+
+    command = f"gdb -ex 'set print asm-demangle on' -ex 'info line {fn_name}' -ex quit {binary_path}"
+    output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+    tmp = "Line"
+    if tmp not in output:
+        return None, 0
+    linenr, _, rel_filepath = output.split(tmp)[-1].splitlines()[0].lstrip().split(" ")
+    linenr = int(linenr)
+    rel_filepath = rel_filepath.strip('"')
+    basepath = "/".join(binary_path.split("/")[:-1])
+    filepath = f"{basepath}/{rel_filepath}"
+
+    debug(2, "[SRC] available via gdb for %s in %s", (addr, binary_path))
+    debug(2, f"[SRC] in {filepath}:{linenr}")
+    return filepath, linenr
+
+
 def getSourceFileInfo(addr, binary_path):
     # e.g., addr2line 0x42d4b9 -e openssl
     #   -> file_name:line_nr
@@ -116,14 +149,10 @@ def getSourceFileInfo(addr, binary_path):
         infos = output.split(":")
         source_file_path, source_line_number = infos[0], infos[1]
         if "??" == source_file_path:
-            raise subprocess.CalledProcessError
+            raise subprocess.CalledProcessError(1, "addr2line")
     except subprocess.CalledProcessError:
         debug(2, "[SRC] unavailable for %s in %s", (addr, binary_path))
-        return None, 0
-    except Exception as error:
-        debug(0, f"lookup: {error} not catched!")
-        debug(2, "[SRC] unavailable for %s in %s", (addr, binary_path))
-        return None, 0
+        return getGdbSourceFileInfo(addr, binary_path)
 
     if "discriminator" in source_line_number:
         source_line_number = source_line_number.split()[0]
@@ -131,9 +160,6 @@ def getSourceFileInfo(addr, binary_path):
     try:
         source_line_number = int(source_line_number)
     except ValueError:
-        source_line_number = 0
-    except Exception as error:
-        debug(0, f"lookup: {error} not catched!")
         source_line_number = 0
 
     return source_file_path, source_line_number
