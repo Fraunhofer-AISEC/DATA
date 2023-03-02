@@ -120,7 +120,11 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
 #define MALLOC "malloc"
 #define REALLOC "realloc"
 #define CALLOC "calloc"
+#define MMAP "mmap"
+#define MREMAP "mremap"
+#define MUNMAP "munmap"
 #define FREE "free"
+#define BRK "brk"
 
 int alloc_instrumented = 0;
 
