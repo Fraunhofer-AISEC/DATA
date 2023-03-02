@@ -216,7 +216,11 @@ def searchSourceInPackages(bin_file_path, ip):
         # Download source package
         command = f"apt-get source {package}"
         debug(4, f"exec: {command}")
-        subprocess.check_output(shlex.split(command))
+        try:
+            subprocess.check_output(shlex.split(command))
+        except subprocess.CalledProcessError:
+            debug(0, f"Download sources failed for {package}")
+            return None, 0
 
         DOWNLOADED_PACKAGE_SOURCES.append(bin_file_path)
 

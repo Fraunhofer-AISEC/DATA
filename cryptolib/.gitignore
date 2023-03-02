@@ -1,1 +1,6 @@
-test_results
+# Ignore everything
+/*
+
+# Except for DATA general directories
+!common/
+!selftest-*/
