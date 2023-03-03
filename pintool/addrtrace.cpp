@@ -50,6 +50,7 @@
 using namespace std;
 
 int DEBUG_LEVEL;
+int SYSCALL_NUMBER = -1;
 
 /***********************************************************************/
 
@@ -1841,6 +1842,77 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
 }
 
 /**
+ * Handle syscall entry
+ * We only trace allocation-related syscalls.
+ * If syscall is not traced SYSCALL_NUMBER is set to -1.
+ */
+VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
+                  VOID *v) {
+    SYSCALL_NUMBER = PIN_GetSyscallNumber(ctxt, std);
+
+    PT_DEBUG(1, "syscall " << hex << PIN_GetContextReg(ctxt, REG_INST_PTR)
+                           << " " << hex << SYSCALL_NUMBER << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 0) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 1) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 2) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 3) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 4) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 5));
+
+    // https://filippo.io/linux-syscall-table/
+    switch (SYSCALL_NUMBER) {
+    case 9:
+        // MMAP
+        break;
+    case 11:
+        // MUNMAP
+        break;
+    case 12:
+        // BRK
+        break;
+    case 25:
+        // MREMAP
+        break;
+    default:
+        SYSCALL_NUMBER = -1;
+        PT_INFO("Syscall not catched. syscall number: "
+                << std::hex << PIN_GetSyscallNumber(ctxt, std));
+        break;
+    }
+}
+
+/**
+ * Handle syscall exit
+ */
+VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
+                 VOID *v) {
+    PT_DEBUG(1, "returns: " << hex << PIN_GetSyscallReturn(ctxt, std));
+
+    // https://filippo.io/linux-syscall-table/
+    switch (SYSCALL_NUMBER) {
+    case -1:
+        // Syscall will be dropped, as its number is set to -1 in SyscallEntry
+        break;
+    case 9:
+        // MMAP
+        break;
+    case 11:
+        // MUNMAP
+        break;
+    case 12:
+        // BRK
+        break;
+    case 25:
+        // MREMAP
+        break;
+    default:
+        PT_ERROR("syscall unknown. syscall number: " << SYSCALL_NUMBER);
+        break;
+    }
+    SYSCALL_NUMBER = -1;
+}
+
+/**
  * Instruments instructions operating on memory
  * @param ins The instruction
  * @param fast_recording Fast recording
@@ -2234,6 +2306,10 @@ int main(int argc, char *argv[]) {
         PIN_AddApplicationStartFunction(loadLeaks, 0);
         INS_AddInstrumentFunction(instrumentLeakingInstructions, 0);
     }
+
+    /* Syscall tracing */
+    PIN_AddSyscallEntryFunction(SyscallEntry, 0);
+    PIN_AddSyscallExitFunction(SyscallExit, 0);
 
     /* Getting the stack and vvar address range for this process */
     stack.baseaddr = getAddrFromProcMap("stack", 1);
