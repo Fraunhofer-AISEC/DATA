@@ -1510,8 +1510,13 @@ VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins,
  * @param v UNUSED
  */
 VOID instrumentMainAndAlloc(IMG img, VOID *v) {
+    if (!IMG_Valid(img)) {
+        PT_ERROR("loaded image is invalid");
+    }
+
     string name = IMG_Name(img);
-    DEBUG(1) std::cout << "[pintool] Instrumenting " << name << std::endl;
+    PT_DEBUG(1, "instrumenting " << name);
+
     if (imgfile.is_open()) {
         uint64_t high = IMG_HighAddress(img);
         uint64_t low = IMG_LowAddress(img);
@@ -1522,138 +1527,124 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
              * with IMG_SizeMapped instead.
              */
             high = low + IMG_SizeMapped(img);
-            DEBUG(1)
-            std::cout << "[pintool] VDSO low:   0x" << std::hex << low
-                      << std::endl;
-            DEBUG(1)
-            std::cout << "[pintool] VDSO high:  0x" << std::hex << high
-                      << std::endl;
-            DEBUG(1)
-            std::cout << "[pintool] VDSO size mapped:  0x" << std::hex
-                      << IMG_SizeMapped(img) << std::endl;
+            PT_DEBUG(1, "vdso low:   0x" << hex << low);
+            PT_DEBUG(1, "vdso high:  0x" << hex << high);
+            PT_DEBUG(1, "vdso size mapped:  0x" << hex << IMG_SizeMapped(img));
             vdsofile.write((const char *)low, IMG_SizeMapped(img));
             vdsofile.close();
             name = KnobVDSO.Value();
         }
 
-        imgfile << "Image:" << std::endl;
-        imgfile << name << std::endl;
-        imgfile << std::hex << low << ":" << high << std::endl;
+        PT_DEBUG(1, "image name: " << name);
+        PT_DEBUG(1, "image low:  0x " << hex << low);
+        PT_DEBUG(1, "image high: 0x " << hex << high);
+        imgfile << "Image:" << endl;
+        imgfile << name << endl;
+        imgfile << hex << low << ":" << hex << high << endl;
+
+        for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
+             sym = SYM_Next(sym)) {
+            imgfile << hex << SYM_Address(sym)
+                    << ":" + PIN_UndecorateSymbolName(SYM_Name(sym),
+                                                      UNDECORATION_NAME_ONLY)
+                    << endl;
+        }
     }
 
-    if (IMG_Valid(img)) {
-        if (imgfile.is_open()) {
-            for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
-                 sym = SYM_Next(sym)) {
-                imgfile << std::hex << SYM_Address(sym) << ":" + SYM_Name(sym)
-                        << std::endl;
-            }
+    PT_DEBUG(1, "KnobMain: " << KnobMain.Value());
+    if (KnobMain.Value().compare("ALL") != 0) {
+        RTN mainRtn = RTN_FindByName(img, KnobMain.Value().c_str());
+        if (mainRtn.is_valid()) {
+            PT_DEBUG(1, "KnobMain is valid");
+            RTN_Open(mainRtn);
+            RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
+                           IARG_THREAD_ID, IARG_ADDRINT, RTN_Address(mainRtn),
+                           IARG_END);
+            RTN_InsertCall(mainRtn, IPOINT_AFTER, (AFUNPTR)RecordMainEnd,
+                           IARG_THREAD_ID, IARG_ADDRINT, RTN_Address(mainRtn),
+                           IARG_END);
+            RTN_Close(mainRtn);
         }
-        DEBUG(1)
-        std::cout << "[pintool] KnobMain: " << KnobMain.Value() << std::endl;
-        if (KnobMain.Value().compare("ALL") != 0) {
-            RTN mainRtn = RTN_FindByName(img, KnobMain.Value().c_str());
-            if (mainRtn.is_valid()) {
-                RTN_Open(mainRtn);
-                RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
-                               IARG_THREAD_ID, IARG_ADDRINT,
-                               RTN_Address(mainRtn), IARG_END);
-                RTN_InsertCall(mainRtn, IPOINT_AFTER, (AFUNPTR)RecordMainEnd,
-                               IARG_THREAD_ID, IARG_ADDRINT,
-                               RTN_Address(mainRtn), IARG_END);
-                RTN_Close(mainRtn);
-            }
-        } else {
-            DEBUG(1) std::cout << "[pintool] Recording all" << std::endl;
-            if (!Record) {
-                WaitForFirstFunction = true;
-            }
+    } else {
+        PT_DEBUG(1, "recording all");
+        if (!Record) {
+            WaitForFirstFunction = true;
         }
-
-        if (name.find("alloc.so") != std::string::npos ||
-            name.find("libc.so") != std::string::npos) {
-            /* If alloc.so is pre-loaded, it will always be before libc
-             * We only instrument once
-             */
-            if (alloc_instrumented) {
-                DEBUG(1)
-                std::cout << "[pintool] Allocation already instrumented"
-                          << std::endl;
-            } else {
-                DEBUG(1)
-                std::cout << "[pintool] Instrumenting allocation" << std::endl;
-                if (KnobTrackHeap.Value()) {
-                    RTN mallocRtn = RTN_FindByName(img, MALLOC);
-                    if (mallocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Malloc found in "
-                                  << IMG_Name(img) << std::endl;
-                        RTN_Open(mallocRtn);
-                        RTN_InsertCall(mallocRtn, IPOINT_BEFORE,
-                                       (AFUNPTR)RecordMallocBefore,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                                       IARG_END);
-                        RTN_InsertCall(mallocRtn, IPOINT_AFTER,
-                                       (AFUNPTR)RecordMallocAfter,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-                        RTN_Close(mallocRtn);
-                    }
-
-                    RTN reallocRtn = RTN_FindByName(img, REALLOC);
-                    if (reallocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Realloc found in "
-                                  << IMG_Name(img) << std::endl;
-                        RTN_Open(reallocRtn);
-                        RTN_InsertCall(
-                            reallocRtn, IPOINT_BEFORE,
-                            (AFUNPTR)RecordReallocBefore, IARG_THREAD_ID,
-                            IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
-                        RTN_InsertCall(reallocRtn, IPOINT_AFTER,
-                                       (AFUNPTR)RecordReallocAfter,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-                        RTN_Close(reallocRtn);
-                    }
-
-                    RTN callocRtn = RTN_FindByName(img, CALLOC);
-                    if (callocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Calloc found in "
-                                  << IMG_Name(img) << std::endl;
-                        RTN_Open(callocRtn);
-                        RTN_InsertCall(
-                            callocRtn, IPOINT_BEFORE,
-                            (AFUNPTR)RecordCallocBefore, IARG_THREAD_ID,
-                            IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
-                        RTN_InsertCall(callocRtn, IPOINT_AFTER,
-                                       (AFUNPTR)RecordCallocAfter,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-                        RTN_Close(callocRtn);
-                    }
-
-                    RTN freeRtn = RTN_FindByName(img, FREE);
-                    if (freeRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Free found in " << IMG_Name(img)
-                                  << std::endl;
-                        RTN_Open(freeRtn);
-                        RTN_InsertCall(
-                            freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
-                            IARG_THREAD_ID, IARG_INST_PTR,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
-                        RTN_Close(freeRtn);
-                    }
-                }
-                alloc_instrumented = 1;
-            }
-        } /* alloc.so or libc */
     }
+
+    if (!KnobTrackHeap.Value()) {
+        PT_INFO("heap tracking inactive");
+        return;
+    }
+
+    if (alloc_instrumented) {
+        PT_DEBUG(1, "allocation already instrumented");
+        return;
+    }
+
+    if (name.find("alloc.so") == std::string::npos &&
+        name.find("libc.so") == std::string::npos) {
+        PT_DEBUG(3, "image (" << name << ") is not named alloc.so or libc.so");
+        return;
+    }
+    /* If alloc.so is pre-loaded, it will always be before libc
+     * We only instrument once
+     */
+    PT_DEBUG(1, "instrumenting allocation in " << name);
+    alloc_instrumented = 1;
+
+    RTN mallocRtn = RTN_FindByName(img, MALLOC);
+    if (!mallocRtn.is_valid()) {
+        PT_ERROR("malloc not found");
+    }
+    PT_DEBUG(1, "malloc found in " << IMG_Name(img));
+    RTN_Open(mallocRtn);
+    RTN_InsertCall(mallocRtn, IPOINT_BEFORE, (AFUNPTR)RecordMallocBefore,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                   0, IARG_END);
+    RTN_InsertCall(mallocRtn, IPOINT_AFTER, (AFUNPTR)RecordMallocAfter,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE,
+                   IARG_END);
+    RTN_Close(mallocRtn);
+
+    RTN reallocRtn = RTN_FindByName(img, REALLOC);
+    if (!reallocRtn.is_valid()) {
+        PT_ERROR("realloc not found");
+    }
+    PT_DEBUG(1, "realloc found in " << IMG_Name(img));
+    RTN_Open(reallocRtn);
+    RTN_InsertCall(reallocRtn, IPOINT_BEFORE, (AFUNPTR)RecordReallocBefore,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                   0, IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+    RTN_InsertCall(reallocRtn, IPOINT_AFTER, (AFUNPTR)RecordReallocAfter,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE,
+                   IARG_END);
+    RTN_Close(reallocRtn);
+
+    RTN callocRtn = RTN_FindByName(img, CALLOC);
+    if (!callocRtn.is_valid()) {
+        PT_ERROR("calloc not found");
+    }
+    PT_DEBUG(1, "calloc found in " << IMG_Name(img));
+    RTN_Open(callocRtn);
+    RTN_InsertCall(callocRtn, IPOINT_BEFORE, (AFUNPTR)RecordCallocBefore,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                   0, IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+    RTN_InsertCall(callocRtn, IPOINT_AFTER, (AFUNPTR)RecordCallocAfter,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE,
+                   IARG_END);
+    RTN_Close(callocRtn);
+
+    RTN freeRtn = RTN_FindByName(img, FREE);
+    if (!freeRtn.is_valid()) {
+        PT_ERROR("free not found");
+    }
+    PT_DEBUG(1, "free found in " << IMG_Name(img));
+    RTN_Open(freeRtn);
+    RTN_InsertCall(freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                   0, IARG_END);
+    RTN_Close(freeRtn);
 }
 
 /**
