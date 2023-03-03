@@ -200,6 +200,10 @@ typedef std::vector<memobj_t> HEAPVEC;
 HEAPVEC heap;
 
 /***********************************************************************/
+/* Stack tracking*/
+imgobj_t stack;
+
+/***********************************************************************/
 /* Multithreading */
 
 /* Global lock to protect trace buffer */
@@ -2006,6 +2010,21 @@ int main(int argc, char *argv[]) {
         PIN_AddApplicationStartFunction(loadLeaks, 0);
         INS_AddInstrumentFunction(instrumentLeakingInstructions, 0);
     }
+
+    /* Getting the stack and vvar address range for this process */
+    stack.baseaddr = getAddrFromProcMap("stack", 1);
+    stack.endaddr = getAddrFromProcMap("stack", 2);
+    PT_DEBUG(1, "stack.baseaddr is " << hex << stack.baseaddr);
+    PT_DEBUG(1, "stack.endaddr  is " << hex << stack.endaddr);
+
+    imgobj_t imgdata = {
+        .name = "vvar",
+        .baseaddr = getAddrFromProcMap("vvar", 1),
+        .endaddr = getAddrFromProcMap("vvar", 2),
+    };
+    imgvec.push_back(imgdata);
+    PT_DEBUG(1, "vvar.baseaddr is " << hex << imgdata.baseaddr);
+    PT_DEBUG(1, "vvar.endaddr  is " << hex << imgdata.endaddr);
 
     PIN_AddThreadStartFunction(ThreadStart, 0);
     PIN_AddThreadFiniFunction(ThreadFini, 0);

@@ -87,5 +87,5 @@ $(OBJDIR)proc-map$(OBJ_SUFFIX): proc-map.cpp proc-map.H
 	$(CXX) $(TOOL_CXXFLAGS) $(COMP_OBJ)$@ $<
 
 # Build the tool as a dll (shared object).
-$(OBJDIR)addrtrace$(PINTOOL_SUFFIX): $(OBJDIR)call-stack$(OBJ_SUFFIX) $(OBJDIR)sha1$(OBJ_SUFFIX) $(OBJDIR)addrtrace$(OBJ_SUFFIX)
+$(OBJDIR)addrtrace$(PINTOOL_SUFFIX): $(OBJDIR)call-stack$(OBJ_SUFFIX) $(OBJDIR)sha1$(OBJ_SUFFIX) $(OBJDIR)proc-map$(OBJ_SUFFIX) $(OBJDIR)addrtrace$(OBJ_SUFFIX)
 	$(LINKER) $(TOOL_LDFLAGS) $(LINK_EXE)$@ $(^:%.h=) $(TOOL_LPATHS) $(TOOL_LIBS)
