@@ -28,6 +28,7 @@
 #include "call-stack.H"
 #include "pin-macros.H"
 #include "pin.H"
+#include "sha1.H"
 #include "utils.H"
 #include <fcntl.h>
 #include <fstream>
@@ -1541,6 +1542,32 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
         imgfile << "Image:" << endl;
         imgfile << name << endl;
         imgfile << hex << low << ":" << hex << high << endl;
+
+        imgobj_t imgdata;
+        imgdata.name = name;
+        imgdata.baseaddr = low;
+        imgdata.endaddr = high;
+
+        for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec)) {
+            string sec_name = SEC_Name(sec);
+            low = SEC_Address(sec);
+            high = SEC_Address(sec) + SEC_Size(sec);
+
+            PT_DEBUG(1, "sec name: " << sec_name);
+            PT_DEBUG(1, "sec low:  0x " << hex << low);
+            PT_DEBUG(1, "sec high: 0x " << hex << high);
+            if (!SEC_Mapped(sec)) {
+                PT_INFO("unmapped sec dropped: " << sec_name);
+                continue;
+            }
+            imgdata.baseaddr =
+                (imgdata.baseaddr > low) ? low : imgdata.baseaddr;
+            imgdata.endaddr = (imgdata.endaddr < high) ? high : imgdata.endaddr;
+        }
+
+        PT_DEBUG(1, "image low:  0x " << hex << imgdata.baseaddr);
+        PT_DEBUG(1, "image high: 0x " << hex << imgdata.endaddr);
+        imgvec.push_back(imgdata);
 
         for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
              sym = SYM_Next(sym)) {
