@@ -105,6 +105,9 @@ KNOB<string> KnobMain(KNOB_MODE_WRITEONCE, "pintool", "main", "main",
                       "Main method to start tracing. Defaults to 'main'. "
                       "Provide ALL to trace from the beginning.");
 
+KNOB<bool> KnobStopTrace(KNOB_MODE_WRITEONCE, "pintool", "stop_trace", "1",
+                         "Stop tracing within memory allocations");
+
 KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
                     "Enable debugging output.");
 
@@ -125,6 +128,10 @@ int alloc_instrumented = 0;
 bool WaitForFirstFunction = false;
 bool Record = false;
 bool use_callstack = false;
+
+/* Stop tracing within memory allocations */
+bool StopTrace = true;
+bool Trace = true;
 
 /**
  * Traces are stored in a binary format, containing a sequence of
@@ -1295,6 +1302,8 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
         PT_DEBUG(1, "malloc ignored due to realloc_pending (size= "
                         << std::hex << size << ") at " << ip);
     }
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1311,6 +1320,7 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     alloc_state_t state = thread_state[threadid].malloc_state.back();
     thread_state[threadid].malloc_state.pop_back();
     doalloc(addr, &state, nullptr);
+    Trace = true;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1335,6 +1345,8 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
         .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
     };
     thread_state[threadid].realloc_state.push_back(state);
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1352,6 +1364,7 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     thread_state[threadid].realloc_state.pop_back();
 
     doalloc(addr, nullptr, &state);
+    Trace = true;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1378,6 +1391,8 @@ VOID RecordCallocBefore(THREADID threadid, VOID *ip, ADDRINT nelem,
 
         thread_state[threadid].calloc_state.push_back(state);
     }
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1394,6 +1409,7 @@ VOID RecordCallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
     alloc_state_t state = thread_state[threadid].calloc_state.back();
     thread_state[threadid].calloc_state.pop_back();
     doalloc(addr, &state, nullptr);
+    Trace = true;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1407,6 +1423,8 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
     DEBUG(2) printCallStack(threadid);
     // PIN_MutexLock(&lock);
     dofree(addr);
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1415,7 +1433,10 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
  * @param threadid The thread
  * @param addr The heap pointer which is freed
  */
-VOID RecordFreeAfter(VOID) { PT_DEBUG(1, "free returned"); }
+VOID RecordFreeAfter(VOID) {
+    PT_DEBUG(1, "free returned");
+    Trace = true;
+}
 
 /***********************************************************************/
 /** Instruction recording                                              */
@@ -1430,7 +1451,7 @@ VOID RecordFreeAfter(VOID) { PT_DEBUG(1, "free returned"); }
  */
 VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr,
                    bool fast_recording) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     // PIN_MutexLock(&lock);
     entry_t entry;
@@ -1457,7 +1478,7 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr,
  */
 VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
                     bool fast_recording) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     // PIN_MutexLock(&lock);
     entry_t entry;
@@ -1484,7 +1505,7 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
  * @param target The next instruction (e.g. branch target)
  */
 VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     entry_t entry;
     entry.type = BRANCH;
@@ -1548,7 +1569,7 @@ VOID RecordRep(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT *ctxt,
  */
 VOID RecordFunctionEntry_unlocked(THREADID threadid, ADDRINT ins, BOOL indirect,
                                   ADDRINT target) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     entry_t entry;
     entry.type = FUNC_ENTRY;
@@ -1577,7 +1598,7 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
         Record = true;
         WaitForFirstFunction = false;
     }
-    if (!Record)
+    if (!Record || !Trace)
         return;
     // PIN_MutexLock(&lock);
     if (indirect) {
@@ -1603,7 +1624,7 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
  */
 VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins,
                                  ADDRINT target) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     entry_t entry;
     entry.type = FUNC_EXIT;
@@ -1627,7 +1648,7 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins,
  */
 VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins,
                         const CONTEXT *ctxt, bool fast_recording) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR) : 0;
@@ -2176,6 +2197,7 @@ int main(int argc, char *argv[]) {
     PIN_InitSymbols();
 
     DEBUG_LEVEL = KnobDebug.Value();
+    StopTrace = KnobStopTrace.Value();
 
     if (KnobLeaks.Value() && KnobCallstack.Value()) {
         leaks = new CallStack();
