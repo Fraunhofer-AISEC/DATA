@@ -174,6 +174,17 @@ ofstream imgfile;           /* Holds memory layout with function symbols */
 ofstream vdsofile;          /* Holds vdso shared library */
 
 /***********************************************************************/
+/* Image tracking*/
+typedef struct {
+    string name;
+    uint64_t baseaddr;
+    uint64_t endaddr;
+} imgobj_t;
+
+typedef std::vector<imgobj_t> IMGVEC;
+IMGVEC imgvec;
+
+/***********************************************************************/
 /* Heap tracking */
 
 typedef struct {
