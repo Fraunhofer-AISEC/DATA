@@ -25,6 +25,7 @@
 
 /***********************************************************************/
 
+#include "call-stack.H"
 #include "pin-macros.H"
 #include "pin.H"
 #include "utils.H"
@@ -2025,6 +2026,9 @@ int main(int argc, char *argv[]) {
     imgvec.push_back(imgdata);
     PT_DEBUG(1, "vvar.baseaddr is " << hex << imgdata.baseaddr);
     PT_DEBUG(1, "vvar.endaddr  is " << hex << imgdata.endaddr);
+
+    auto mngr = CALLSTACK::CallStackManager::get_instance();
+    mngr->activate();
 
     PIN_AddThreadStartFunction(ThreadStart, 0);
     PIN_AddThreadFiniFunction(ThreadFini, 0);
