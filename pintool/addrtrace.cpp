@@ -1004,6 +1004,44 @@ void record_heap_op(memobj_t *obj, ADDRINT addr) {
 }
 
 /**
+ * Fetch callstack for debugging purpose and to diversify the logical base
+ * addresses.
+ */
+
+void fetchCallStack(THREADID threadid, vector<string> &out,
+                    CALLSTACK::IPVEC &ipvec) {
+    auto mngr = CALLSTACK::CallStackManager::get_instance();
+    auto cs = mngr->get_stack(threadid);
+    cs.emit_stack(cs.depth(), out, ipvec);
+}
+
+void printCallStack(THREADID threadid) {
+    vector<string> out;
+    CALLSTACK::IPVEC ipvec;
+    fetchCallStack(threadid, out, ipvec);
+
+    for (uint32_t i = 0; i < out.size(); i++) {
+        cout << out[i];
+    }
+}
+
+string getCallStack(THREADID threadid) {
+    vector<string> out;
+    CALLSTACK::IPVEC ipvec;
+    fetchCallStack(threadid, out, ipvec);
+
+    DEBUG(2) for (uint32_t i = 0; i < out.size(); i++) { cout << out[i]; }
+
+    stringstream unique_cs(ios_base::app | ios_base::out);
+    for (auto i : ipvec) {
+        unique_cs << " 0x" << hex << i.ipaddr;
+    }
+    PT_DEBUG(2, "callstack " << unique_cs.str());
+
+    return unique_cs.str();
+}
+
+/**
  * Handle calls to [m|re|c]alloc by keeping a list of all heap objects
  * This function is not thread-safe. Lock first.
  */
