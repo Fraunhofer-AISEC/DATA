@@ -2050,16 +2050,23 @@ VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
     // https://filippo.io/linux-syscall-table/
     switch (SYSCALL_NUMBER) {
     case 9:
-        // MMAP
+        if (PIN_GetSyscallArgument(ctxt, std, 0)) {
+            PT_INFO("mmap syscall dropped.");
+            SYSCALL_NUMBER = -1;
+            break;
+        }
+        RecordMmapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 1));
         break;
     case 11:
-        // MUNMAP
+        RecordMunmapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0));
         break;
     case 12:
-        // BRK
+        RecordBrkBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0));
         break;
     case 25:
-        // MREMAP
+        RecordMremapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0),
+                           PIN_GetSyscallArgument(ctxt, std, 1),
+                           PIN_GetSyscallArgument(ctxt, std, 2));
         break;
     default:
         SYSCALL_NUMBER = -1;
@@ -2082,16 +2089,17 @@ VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
         // Syscall will be dropped, as its number is set to -1 in SyscallEntry
         break;
     case 9:
-        // MMAP
+        RecordMmapAfter(threadid, PIN_GetSyscallReturn(ctxt, std));
         break;
     case 11:
-        // MUNMAP
+        // Handling of munmap exit is not needed.
         break;
     case 12:
-        // BRK
+        RecordBrkAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
+                       PIN_GetContextReg(ctxt, REG_INST_PTR));
         break;
     case 25:
-        // MREMAP
+        RecordMremapAfter(threadid, PIN_GetSyscallReturn(ctxt, std));
         break;
     default:
         PT_ERROR("syscall unknown. syscall number: " << SYSCALL_NUMBER);
