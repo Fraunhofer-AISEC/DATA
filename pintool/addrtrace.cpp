@@ -1445,6 +1445,192 @@ VOID RecordFreeAfter(VOID) {
     Trace = true;
 }
 
+/**
+ * Record mmap
+ * @param threadid      thread
+ * @param size          size parameter passed to mmap
+ * @param ret           TODO
+ * @param force
+ */
+VOID RecordMmapBefore(THREADID threadid, ADDRINT size) {
+    PT_DEBUG(1, "mmap called with " << std::hex << size);
+    if (thread_state[threadid].mremap_state.size() != 0) {
+        PT_DEBUG(1, "mmap ignored due to mremap_pending (size= "
+                        << std::hex << size << ")");
+        return;
+    }
+    if (thread_state[threadid].malloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap stemming from pending malloc"
+                        << " (size= " << std::hex << size << ")");
+    }
+    if (thread_state[threadid].realloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap stemming from pending realloc"
+                        << " (size= " << std::hex << size << ")");
+    }
+    // PIN_MutexLock(&lock);
+    SHA1 hash;
+    hash.update(getCallStack(threadid)); /* calculate the hash of the set of
+                                            IPs in the Callstack */
+    alloc_state_t state = {
+        .type = MMAP,
+        .size = size,
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
+
+    thread_state[threadid].mmap_state.push_back(state);
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mmap's result
+ *@param threadid The thread
+ * @param addr The allocated heap pointer
+ */
+VOID RecordMmapAfter(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "mmap returned " << std::hex << addr);
+    if (thread_state[threadid].mremap_state.size() != 0) {
+        PT_DEBUG(1, "mmap ignored due to mremap_pending");
+        return;
+    }
+    if (thread_state[threadid].malloc_state.size() != 0 ||
+        thread_state[threadid].realloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap due to [m,re]alloc pending");
+    }
+    // PIN_MutexLock(&lock);
+
+    PT_ASSERT(thread_state[threadid].mmap_state.size() != 0,
+              "mmap returned but not called");
+
+    alloc_state_t state = thread_state[threadid].mmap_state.back();
+    thread_state[threadid].mmap_state.pop_back();
+
+    doalloc(addr, &state, nullptr);
+
+    //  PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mremap
+ * @param threadid The thread
+ * @param addr The heap pointer param of mremap
+ * @param size The size parameter passed to mremap
+ */
+VOID RecordMremapBefore(THREADID threadid, ADDRINT addr, ADDRINT old_size,
+                        ADDRINT new_size) {
+    PT_DEBUG(1, "mremap called with " << std::hex << addr << " " << new_size);
+    // PIN_MutexLock(&lock);
+
+    SHA1 hash;
+    hash.update(getCallStack(
+        threadid)); /* calculte the hash of the set of IPs in the Callstack */
+    realloc_state_t state = {
+        .type = MREMAP,
+        .old = addr,
+        .size = new_size,
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
+    thread_state[threadid].mremap_state.push_back(state);
+
+    //  PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mremap's result
+ * @param threadid The thread
+ * @param addr The allocated heap pointer
+ */
+VOID RecordMremapAfter(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "mremap returned " << std::hex << addr);
+    // PIN_MutexLock(&lock);
+    PT_ASSERT(thread_state[threadid].mremap_state.size() != 0,
+              "mremap returned but not called");
+
+    realloc_state_t state = thread_state[threadid].mremap_state.back();
+    thread_state[threadid].mremap_state.pop_back();
+
+    doalloc(addr, nullptr, &state);
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record munmap
+ * @param threadid The thread
+ * @param addr The heap pointer which is munmapped
+ */
+VOID RecordMunmapBefore(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "munmap called with " << std::hex << addr);
+    DEBUG(2) printCallStack(threadid);
+    // PIN_MutexLock(&lock);
+    dofree(addr);
+    //  PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record brk's call
+ *@param threadid The thread
+ * @param addr The returned program break end address
+ */
+VOID RecordBrkBefore(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "brk called with " << std::hex << addr);
+    DEBUG(3) printCallStack(threadid);
+
+    // In case addr == 0 a new image "owns" brk
+    if (addr != 0) {
+        return;
+    }
+    // PIN_MutexLock(&lock);
+
+    program_break_obj_t program_break;
+    brk_vec.push_back(program_break);
+
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record brk's result
+ *@param threadid The thread
+ * @param addr The returned program break end address
+ */
+VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
+    PT_DEBUG(1, "brk returned from " << std::hex << ret << " with " << std::hex
+                                     << addr);
+    // PIN_MutexLock(&lock);
+
+    imgobj_t img;
+    for (auto i : imgvec) {
+        if ((uint64_t)ret < i.baseaddr || (uint64_t)ret >= i.endaddr) {
+            continue;
+        }
+        img = i;
+        break;
+    }
+
+    program_break_obj_t program_break = brk_vec.back();
+    brk_vec.pop_back();
+
+    program_break.high = addr;
+    brk_range.endaddr = addr;
+    if (program_break.image.name.empty()) {
+        program_break.image = img;
+        program_break.low = addr;
+        PT_INFO("new brk owned by image: " << img.name);
+        PT_DEBUG(1, "ranging from " << program_break.low << " to "
+                                    << program_break.high);
+    } else if (program_break.image.name.compare(img.name) != 0) {
+        PT_INFO("brk called before from image: " << program_break.image.name);
+        PT_INFO("brk called now from image: " << img.name);
+        PT_ASSERT(false, "brk syscalls called within different images");
+    }
+
+    if (brk_range.baseaddr == 0) {
+        brk_range.baseaddr = addr;
+    }
+
+    brk_vec.push_back(program_break);
+
+    // PIN_MutexUnlock(&lock);
+}
+
 /***********************************************************************/
 /** Instruction recording                                              */
 /***********************************************************************/
