@@ -158,14 +158,6 @@ enum entry_type_t {
     FUNC_EXIT = MASK_BRANCH | C,
     FUNC_BBL = MASK_BRANCH | D,
 
-    MASK_HEAP = 8,
-    /* Instructions doing memory reads/writes on heap objects */
-    HREAD = MASK_HEAP | READ,
-    HWRITE = MASK_HEAP | WRITE,
-    /* Heap alloc/free calls */
-    HALLOC = MASK_HEAP | C,
-    HFREE = MASK_HEAP | D,
-
     MASK_LEAK = 16,
     /* Dataleaks and Controlflow leaks, used for fast recording */
     DLEAK = MASK_LEAK | A,
