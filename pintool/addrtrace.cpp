@@ -254,6 +254,8 @@ typedef struct {
     std::vector<alloc_state_t> malloc_state;
     std::vector<alloc_state_t> calloc_state;
     std::vector<realloc_state_t> realloc_state;
+    std::vector<alloc_state_t> mmap_state;
+    std::vector<realloc_state_t> mremap_state;
     ADDRINT RetIP;
     int newbbl;
 } thread_state_t;
