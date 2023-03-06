@@ -51,6 +51,7 @@ using namespace std;
 
 int DEBUG_LEVEL;
 int SYSCALL_NUMBER = -1;
+bool PHASE_1 = true;
 
 /***********************************************************************/
 
@@ -1077,10 +1078,7 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
     }
 
     PT_WARN("not found addr " << std::hex << (uint64_t)virt_addr);
-    // TODO
-    // PT_ASSERT(fast_recording == false,
-    //           "virt_addr was not found despite being in fast_recording
-    //           mode");
+    PT_ASSERT(PHASE_1, "virt_addr was not found despite being not in phase 1");
     DEBUG(3) printHeap();
     DEBUG(4) printProcMap();
     return virt_addr;
@@ -2469,6 +2467,7 @@ int main(int argc, char *argv[]) {
     PIN_InitSymbols();
 
     DEBUG_LEVEL = KnobDebug.Value();
+    PHASE_1 = KnobLeaks.Value() == false;
     StopTrace = KnobStopTrace.Value();
 
     if (KnobLeaks.Value() && KnobCallstack.Value()) {
