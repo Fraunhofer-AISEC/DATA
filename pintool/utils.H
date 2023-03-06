@@ -15,14 +15,16 @@ extern int DEBUG_LEVEL;
     {                                                                          \
         if (!(x)) {                                                            \
             printProcMap();                                                    \
+            printHeap();                                                       \
+            printAllocmap();                                                   \
             MESSAGE("[pt-error] ", msg);                                       \
             ASSERT(false, "pintool failed.");                                  \
         }                                                                      \
     }
 #define PT_ERROR(msg) PT_ASSERT(false, msg)
 
-// TODO PT_ASSERT
-//            printheap();
-//            print_allocmap();
+void printHeap();
+
+void printAllocmap();
 
 #endif
