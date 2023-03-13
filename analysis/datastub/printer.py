@@ -71,14 +71,15 @@ class XmlLeakPrinter:
         self.outstream.write(" " * self.depth)
         if len(text) > 0:
             self.outstream.write(text + " ")
+
+        sym = None
         if SymbolInfo.isopen():
             sym = SymbolInfo.lookup(ip)
-            if sym is not None:
-                self.outstream.write(escape(sym.strat(ip)))
-            else:
-                self.outstream.write(hex(ip))
-        else:
+        if sym is None:
             self.outstream.write(hex(ip))
+        else:
+            self.outstream.write(escape(sym.strat(ip)))
+
         self.outstream.write("\n")
         if leak is not None:
             leak.doprint(self)
@@ -209,7 +210,7 @@ class XmlLeakPrinter:
                     else:
                         node = f"{node_plain} origin='fixed' {str(evidence[0].key)}"
                     self.startNode(node)
-                    for key, value in entries.items():
+                    for key, value in sorted(entries.items()):
                         self.doprint_line(f"{format(key, 'x')}: {value}")
                     self.endNode(node_plain)
 
