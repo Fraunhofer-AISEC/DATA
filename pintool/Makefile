@@ -26,15 +26,12 @@
 # Project Name
 PROJ := DATA - Pintool
 
-# Pintool Name
-TEST_TOOL_ROOTS := addrtrace
-
 #------------------------------------------------------------------------
 # Targets
 #------------------------------------------------------------------------
 .PHONY: all clean clean2 i386 x86_64 32 64
 
-all: i386 x86_64 32 64
+all: x86_64 64
 
 # Pin Root
 ifneq ($(MAKECMDGOALS),help)
@@ -44,6 +41,7 @@ ifneq ($(MAKECMDGOALS),clean)
   endif
   CONFIG_ROOT := $(PIN_ROOT)/source/tools/Config
   include $(CONFIG_ROOT)/makefile.config
+  include makefile.rules
   include $(TOOLS_ROOT)/Config/makefile.default.rules
 endif
 endif
