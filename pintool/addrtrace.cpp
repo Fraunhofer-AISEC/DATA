@@ -200,6 +200,7 @@ typedef struct {
     size_t size;
     uint64_t base;
     string callstack;
+    uint64_t count;
     string hash;
 } memobj_t;
 
@@ -1090,13 +1091,10 @@ void *getLogicalAddress(void *virt_addr, void *ip) {
 
 /**
  * Calculate sha1-hash and use the 4 bytes of the hash as the memory Index
+ * Hash shall be unique wrt. calling location
  */
 void calculateSha1Hash(memobj_t *obj) {
-    PT_DEBUG(2, "HashMap callstack " << obj->callstack);
-
-    /* Hash shall be unique wrt. calling location */
     std::stringstream to_hash(obj->type, ios_base::app | ios_base::out);
-    to_hash << obj->callstack;
 
     /**
      * A hash, i.e. logical base address, shall only occur once.
@@ -1104,18 +1102,17 @@ void calculateSha1Hash(memobj_t *obj) {
      * This count is used together with the calling location to create an
      * unique hash.
      */
-    std::stringstream count;
-    count << hex << hashmap[to_hash.str()];
-    hashmap[to_hash.str()] += 1;
+    obj->count = hashmap[obj->callstack];
+    hashmap[obj->callstack] += 1;
 
     SHA1 hash;
-    to_hash << count.str();
+    to_hash << obj->callstack << hex << obj->count;
     hash.update(to_hash.str());
     obj->hash = hash.final();
 
-    PT_DEBUG(1, "HashMap for    " << to_hash.str());
-    PT_DEBUG(1, "HashMap count  0x" << count.str());
-    PT_DEBUG(1, "Object hash    " << hex << obj->hash);
+    PT_DEBUG(1, "HashMap callstack 0x" << hex << obj->callstack);
+    PT_DEBUG(1, "HashMap count     0x" << hex << obj->count);
+    PT_DEBUG(1, "Object hash       0x" << hex << obj->hash);
 }
 
 /**
@@ -1176,6 +1173,12 @@ void dofree(ADDRINT addr) {
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
         if (it->base != addr) {
             continue;
+        }
+
+        if ((it->count + 1) == hashmap[it->callstack]) {
+            PT_DEBUG(2,
+                     "stack-like heap tracing for 0x" << hex << it->callstack);
+            hashmap[it->callstack] -= 1;
         }
         heap.erase(it);
         return;
