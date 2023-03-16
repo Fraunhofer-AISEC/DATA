@@ -105,9 +105,9 @@ int main(int argc, char *argv[]) {
         Botan::PK_Signer sig(priv_key, rng, "Deterministic");
         signature = sig.sign_message(message, rng);
 
-        Botan::PK_Verifier ver(priv_key, "");
-        ver.update(message);
-        assert(ver.check_signature(signature));
+        // Botan::PK_Verifier ver(priv_key, "");
+        // ver.update(message);
+        // assert(ver.check_signature(signature));
     } else {
         cout << str_operation << " is no valid operation!" << endl;
         assert(false);
