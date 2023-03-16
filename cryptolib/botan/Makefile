@@ -14,6 +14,9 @@ configure:
 
 build:
 	$(MAKE) -C botan botan
+	$(MAKE) -C algo_dilithium
+	$(MAKE) -C algo_kyber
+	$(MAKE) -C algo_xmss
 
 clean:
 	make -C botan clean
