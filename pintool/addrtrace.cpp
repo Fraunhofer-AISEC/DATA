@@ -25,8 +25,11 @@
 
 /***********************************************************************/
 
+#include "call-stack.H"
 #include "pin-macros.H"
 #include "pin.H"
+#include "sha1.H"
+#include "utils.H"
 #include <fcntl.h>
 #include <fstream>
 #include <getopt.h>
@@ -41,9 +44,14 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 using namespace std;
+
+int DEBUG_LEVEL;
+int SYSCALL_NUMBER = -1;
+bool PHASE_1 = true;
 
 /***********************************************************************/
 
@@ -99,6 +107,9 @@ KNOB<string> KnobMain(KNOB_MODE_WRITEONCE, "pintool", "main", "main",
                       "Main method to start tracing. Defaults to 'main'. "
                       "Provide ALL to trace from the beginning.");
 
+KNOB<bool> KnobStopTrace(KNOB_MODE_WRITEONCE, "pintool", "stop_trace", "1",
+                         "Stop tracing within memory allocations");
+
 KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
                     "Enable debugging output.");
 
@@ -111,8 +122,11 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
 #define MALLOC "malloc"
 #define REALLOC "realloc"
 #define CALLOC "calloc"
+#define MMAP "mmap"
+#define MREMAP "mremap"
+#define MUNMAP "munmap"
 #define FREE "free"
-#define DEBUG(x) if (KnobDebug.Value() >= x)
+#define BRK "brk"
 
 int alloc_instrumented = 0;
 
@@ -120,6 +134,10 @@ int alloc_instrumented = 0;
 bool WaitForFirstFunction = false;
 bool Record = false;
 bool use_callstack = false;
+
+/* Stop tracing within memory allocations */
+bool StopTrace = true;
+bool Trace = true;
 
 /**
  * Traces are stored in a binary format, containing a sequence of
@@ -153,14 +171,6 @@ enum entry_type_t {
     FUNC_EXIT = MASK_BRANCH | C,
     FUNC_BBL = MASK_BRANCH | D,
 
-    MASK_HEAP = 8,
-    /* Instructions doing memory reads/writes on heap objects */
-    HREAD = MASK_HEAP | READ,
-    HWRITE = MASK_HEAP | WRITE,
-    /* Heap alloc/free calls */
-    HALLOC = MASK_HEAP | C,
-    HFREE = MASK_HEAP | D,
-
     MASK_LEAK = 16,
     /* Dataleaks and Controlflow leaks, used for fast recording */
     DLEAK = MASK_LEAK | A,
@@ -172,19 +182,51 @@ ofstream imgfile;           /* Holds memory layout with function symbols */
 ofstream vdsofile;          /* Holds vdso shared library */
 
 /***********************************************************************/
+/* Image tracking*/
+typedef struct {
+    string name;
+    uint64_t baseaddr;
+    uint64_t endaddr;
+} imgobj_t;
+
+typedef std::vector<imgobj_t> IMGVEC;
+IMGVEC imgvec;
+
+/***********************************************************************/
 /* Heap tracking */
 
 typedef struct {
-    uint32_t id;
+    char const *type;
     size_t size;
     uint64_t base;
-    bool used;
+    string callstack;
+    uint64_t count;
+    string hash;
 } memobj_t;
 
-uint32_t nextheapid = 1;
-memobj_t *heapcache;
 typedef std::vector<memobj_t> HEAPVEC;
 HEAPVEC heap;
+
+std::unordered_map<std::string, uint64_t> hashmap;
+std::unordered_map<uint64_t, uint64_t> allocmap;
+
+imgobj_t heaprange;
+
+/***********************************************************************/
+/* Brk tracking*/
+typedef struct {
+    imgobj_t image;
+    ADDRINT low;
+    ADDRINT high;
+} program_break_obj_t;
+
+typedef std::vector<program_break_obj_t> BRKVEC;
+BRKVEC brk_vec;
+imgobj_t brk_range;
+
+/***********************************************************************/
+/* Stack tracking*/
+imgobj_t stack;
 
 /***********************************************************************/
 /* Multithreading */
@@ -192,13 +234,20 @@ HEAPVEC heap;
 /* Global lock to protect trace buffer */
 // PIN_MUTEX lock;
 
+/***********************************************************************/
+/* Allocation tracking */
+
 typedef struct {
+    char const *type;
     ADDRINT size;
+    std::string callstack;
 } alloc_state_t;
 
 typedef struct {
+    char const *type;
     ADDRINT old;
     ADDRINT size;
+    std::string callstack;
 } realloc_state_t;
 
 typedef struct {
@@ -207,6 +256,8 @@ typedef struct {
     std::vector<alloc_state_t> malloc_state;
     std::vector<alloc_state_t> calloc_state;
     std::vector<realloc_state_t> realloc_state;
+    std::vector<alloc_state_t> mmap_state;
+    std::vector<realloc_state_t> mremap_state;
     ADDRINT RetIP;
     int newbbl;
 } thread_state_t;
@@ -923,156 +974,318 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v) {
 }
 
 /***********************************************************************/
+/**Calculating the Logical Address from the Virtual Address
+ * Every Logical Address is 64 bit = 32 bit MemoryIndex + 32 bit Offset*/
+/***********************************************************************/
+
+void printAllocmap() {
+    if (allocmap.size() == 0) {
+        return;
+    }
+    PT_INFO("allocmap:");
+    for (auto &it : allocmap) {
+        cout << it.first << " - " << it.second << endl;
+    }
+}
+
+void printHeap() {
+    if (heap.size() == 0) {
+        return;
+    }
+    PT_INFO("heap:");
+    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
+        std::cout << it->base << "-" << it->size << std::endl;
+    }
+}
+
+uint64_t getIndex(string hash) {
+    uint64_t to_shift;
+    sscanf(hash.c_str(), "%llx", (long long unsigned int *)&to_shift);
+    return (to_shift << 32);
+}
+
+void *getLogicalAddress(void *virt_addr, void *ip) {
+    PT_DEBUG(3, "get log_addr for virt_addr of " << virt_addr);
+
+    if (virt_addr == nullptr) {
+        PT_WARN("dereferenced a nullptr");
+        return virt_addr;
+    }
+    // Is the Virtual Address in the Heap address space?
+    /* Set heap start and end markers */
+    if (heap.size() &&
+        (heaprange.baseaddr != heap.front().base ||
+         heaprange.endaddr != heap.back().base + heap.back().size)) {
+        heaprange.baseaddr = heap.front().base;
+        heaprange.endaddr = heap.back().base + heap.back().size;
+        PT_DEBUG(3, "heap.baseaddr: " << heaprange.baseaddr);
+        PT_DEBUG(3, "heap.endaddr: " << heaprange.endaddr);
+    }
+    // Does the Virtual Address belong to any heap object?
+    if ((uint64_t)virt_addr >= heaprange.baseaddr &&
+        (uint64_t)virt_addr <= heaprange.endaddr) {
+        uint64_t *log_addr = static_cast<uint64_t *>(virt_addr);
+        for (auto i : heap) {
+            if ((uint64_t)virt_addr < i.base ||
+                (uint64_t)virt_addr >= (i.base + i.size)) {
+                continue;
+            }
+            auto offset = (uint64_t)virt_addr - i.base;
+            log_addr = (uint64_t *)(allocmap[i.base] | offset);
+            PT_DEBUG(4, "found addr in heap vector, log_addr: "
+                            << std::hex << (uint64_t)log_addr);
+            return log_addr;
+        }
+    }
+    // Is the Virtual Address in the Stack address space?
+    if ((uint64_t)virt_addr >= stack.baseaddr &&
+        (uint64_t)virt_addr < stack.endaddr) {
+        PT_DEBUG(4, "found addr in stack " << std::hex << (uint64_t)virt_addr);
+        return virt_addr;
+    }
+    // Is the Virtual Address in the IMG/Code address space?
+    for (auto i : imgvec) {
+        if ((uint64_t)virt_addr < i.baseaddr ||
+            (uint64_t)virt_addr >= i.endaddr) {
+            continue;
+        }
+        PT_DEBUG(4, "found addr in image " << std::hex << (uint64_t)virt_addr);
+        return virt_addr;
+    }
+    // Is the Virtual Address in the Program Break address space?
+    if ((uint64_t)virt_addr >= brk_range.baseaddr &&
+        (uint64_t)virt_addr < brk_range.endaddr) {
+        PT_DEBUG(2, "found addr in brk " << std::hex << (uint64_t)virt_addr
+                                         << " called from " << std::hex
+                                         << (uint64_t)ip);
+        for (auto brk : brk_vec) {
+            if ((uint64_t)virt_addr < brk.low ||
+                (uint64_t)virt_addr >= brk.high) {
+                continue;
+            }
+            PT_ASSERT(((uint64_t)ip >= brk.image.baseaddr &&
+                       (uint64_t)ip < brk.image.endaddr),
+                      "brk access within different image than brk "
+                      "syscall originated.");
+            return virt_addr;
+        }
+        PT_WARN("found addr in brk " << std::hex << (uint64_t)virt_addr
+                                     << " called from " << std::hex
+                                     << (uint64_t)ip);
+        for (auto brk : brk_vec) {
+            PT_WARN("brk from " << brk.low << " to " << brk.high);
+        }
+        PT_ERROR("brk access cannot be matched to any brk section");
+    }
+
+    PT_WARN("not found addr " << std::hex << (uint64_t)virt_addr);
+    PT_ASSERT(PHASE_1, "virt_addr was not found despite being not in phase 1");
+    DEBUG(3) printHeap();
+    DEBUG(4) printProcMap();
+    return virt_addr;
+}
+
+/***********************************************************************/
 /** Heap recording                                                     */
 /***********************************************************************/
 
-void printheap() {
-    std::cout << "[pintool] Heap:" << std::endl;
-    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        std::cout << std::hex << it->id << ":" << it->base << "-" << it->size
-                  << " used:" << it->used << std::endl;
-    }
-}
+/**
+ * Calculate sha1-hash and use the 4 bytes of the hash as the memory Index
+ * Hash shall be unique wrt. calling location
+ */
+void calculateSha1Hash(memobj_t *obj) {
+    std::stringstream to_hash(obj->type, ios_base::app | ios_base::out);
 
-memobj_t *lookup_heap(uint64_t addr) {
-    uint64_t paddr = addr;
-    if (heapcache) {
-        ASSERT(heapcache->used, "[pintool] Error: Heapcache corrupt");
-        if (paddr >= heapcache->base &&
-            paddr < heapcache->base + heapcache->size) {
-            return heapcache;
-        }
-    }
+    /**
+     * A hash, i.e. logical base address, shall only occur once.
+     * For variation the occurence of a hash is counted within hashmap.
+     * This count is used together with the calling location to create an
+     * unique hash.
+     */
+    obj->count = hashmap[obj->callstack];
+    hashmap[obj->callstack] += 1;
 
-    for (HEAPVEC::reverse_iterator it = heap.rbegin(); it != heap.rend();
-         ++it) {
-        if (!it->used) {
-            continue;
-        }
-        if (paddr >= it->base) {
-            if (paddr < it->base + it->size) {
-                return heapcache = &(*it);
-            } else {
-                break;
-            }
-        }
-    }
-    return NULL;
-}
+    SHA1 hash;
+    to_hash << obj->callstack << hex << obj->count;
+    hash.update(to_hash.str());
+    obj->hash = hash.final();
 
-VOID test_mem_heap(entry_t *pentry) {
-    memobj_t *obj = lookup_heap(pentry->data);
-    if (obj) {
-        uint64_t pdata = pentry->data;
-        pdata -= obj->base;
-        ASSERT((pdata & 0xFFFFFFFF00000000ULL) == 0,
-               "[pintool] Error: Heap object too big");
-        pdata |= (uint64_t)obj->id << 32ULL;
-        pentry->data = pdata;
-        pentry->type |= MASK_HEAP;
-    }
+    PT_DEBUG(1, "HashMap callstack 0x" << hex << obj->callstack);
+    PT_DEBUG(1, "HashMap count     0x" << hex << obj->count);
+    PT_DEBUG(1, "Object hash       0x" << hex << obj->hash);
 }
 
 /**
- * Add alloc/free to the trace
- * This function is not thread-safe. Lock first.
+ * Fetch callstack for debugging purpose and to diversify the logical base
+ * addresses.
  */
-void record_heap_op(memobj_t *obj, ADDRINT addr) {
-    entry_t entry;
-    entry.type = obj->used ? HALLOC : HFREE;
-    entry.ip = (((uint64_t)obj->id << 32ULL) | obj->size);
-    entry.data = addr;
-    record_entry(entry);
+
+void fetchCallStack(THREADID threadid, vector<string> &out,
+                    CALLSTACK::IPVEC &ipvec) {
+    auto mngr = CALLSTACK::CallStackManager::get_instance();
+    auto cs = mngr->get_stack(threadid);
+    cs.emit_stack(cs.depth(), out, ipvec);
 }
 
-/**
- * Handle calls to [m|re|c]alloc by keeping a list of all heap objects
- * This function is not thread-safe. Lock first.
- */
-void domalloc(ADDRINT addr, ADDRINT size, uint32_t objid) {
-    heapcache = NULL;
-    memobj_t obj;
-    if (objid) {
-        obj.id = objid;
-    } else {
-        obj.id = nextheapid++;
-    }
+void printCallStack(THREADID threadid) {
+    vector<string> out;
+    CALLSTACK::IPVEC ipvec;
+    fetchCallStack(threadid, out, ipvec);
 
-    obj.base = addr;
-    obj.size = size;
-    obj.used = true;
-    record_heap_op(&obj, addr);
-
-    DEBUG(2)
-    std::cout << "[pintool] Domalloc " << std::hex << addr << " " << size
-              << std::endl;
-    /* Keep heap vector sorted */
-    HEAPVEC::iterator prev = heap.end();
-    HEAPVEC::iterator found = heap.end();
-    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        if (it->used) {
-            if (it->base >= obj.base) {
-                /* insert before*/
-                if (obj.base + obj.size > it->base) {
-                    DEBUG(2) printheap();
-                    DEBUG(2)
-                    std::cout << "[pintool] Inserting new object" << std::hex
-                              << obj.base << "-" << obj.size << std::endl;
-                    ASSERT(false, "[pintool] Error: Corrupted heap A?!");
-                }
-                found = it;
-                break;
-            }
-        }
-        prev = it;
+    for (uint32_t i = 0; i < out.size(); i++) {
+        cout << out[i];
     }
+}
 
-    if (found == heap.end()) {
-        /* no match found, append to the end */
-        heap.push_back(obj);
-    } else {
-        if (prev == heap.end()) {
-            heap.insert(found, obj);
-        } else if (prev->used) {
-            /* We cannot reuse prev, insert at 'found' */
-            if (prev->used && prev->base + prev->size > obj.base) {
-                DEBUG(2) printheap();
-                DEBUG(2)
-                std::cout << "[pintool] Inserting new object" << std::hex
-                          << obj.base << "-" << obj.size << std::endl;
-                ASSERT(false, "[pintool] Error: Corrupted heap B?!");
-            }
-            heap.insert(found, obj);
-        } else {
-            /* prev is unused, reuse it */
-            *prev = obj;
-        }
+string getCallStack(THREADID threadid) {
+    vector<string> out;
+    CALLSTACK::IPVEC ipvec;
+    fetchCallStack(threadid, out, ipvec);
+
+    DEBUG(2) for (uint32_t i = 0; i < out.size(); i++) { cout << out[i]; }
+
+    stringstream unique_cs(ios_base::app | ios_base::out);
+    for (auto i : ipvec) {
+        unique_cs << " 0x" << hex << i.ipaddr;
     }
+    PT_DEBUG(2, "callstack " << unique_cs.str());
+
+    return unique_cs.str();
 }
 
 /**
  * Handle calls to free by maintaining a list of all heap objects
  * This function is not thread-safe. Lock first.
  */
-uint32_t dofree(ADDRINT addr) {
-    heapcache = NULL;
-    DEBUG(2) std::cout << "[pintool] Dofree " << std::hex << addr << std::endl;
+void dofree(ADDRINT addr) {
+    PT_DEBUG(1, "dofree 0x" << std::hex << addr);
+
     if (!addr) {
-        return 0;
+        PT_DEBUG(3, "dofree called with NULL");
+        return;
     }
+
+    if (allocmap.find(addr) == allocmap.end()) {
+        PT_ERROR("dofree didnot found an element in allocmap");
+    }
+    allocmap.erase(addr);
+
     for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-        if (!it->used) {
+        if (it->base != addr) {
             continue;
         }
-        if (it->base == addr) {
-            it->used = false;
-            record_heap_op(it, addr);
-            return it->id;
+
+        if ((it->count + 1) == hashmap[it->callstack]) {
+            PT_DEBUG(2,
+                     "stack-like heap tracing for 0x" << hex << it->callstack);
+            hashmap[it->callstack] -= 1;
         }
+        heap.erase(it);
+        return;
     }
-    std::cout << "[pintool] Warning: Invalid free!" << std::endl;
-    DEBUG(2) printheap();
-    return 0;
+
+    PT_ERROR("dofree didnot found an element in heap");
+}
+
+/**
+ * Handle calls to [m|re|c]alloc by keeping a list of all heap objects
+ * This function is not thread-safe. Lock first.
+ */
+void doalloc(ADDRINT addr, alloc_state_t *alloc_state,
+             realloc_state_t *realloc_state) {
+    if (alloc_state == nullptr && realloc_state == nullptr) {
+        PT_ERROR("doalloc failed as only NULL states were passed");
+    }
+    if (alloc_state != nullptr && realloc_state != nullptr) {
+        PT_ERROR("doalloc failed as multiple states were passed");
+    }
+
+    /* Convert (re)alloc_state to memobj */
+    memobj_t obj;
+    obj.base = addr;
+    obj.size = (alloc_state) ? alloc_state->size : realloc_state->size;
+    obj.type = (alloc_state) ? alloc_state->type : realloc_state->type;
+    obj.callstack =
+        (alloc_state) ? alloc_state->callstack : realloc_state->callstack;
+
+    PT_DEBUG(1, "doalloc " << hex << addr << " " << hex << obj.size << " type "
+                           << obj.type);
+
+    /* Edit object in heap vector, if in-place reallocation */
+    /* allocmap does not require any update, as base address is not changed */
+    if (realloc_state && addr == realloc_state->old) {
+        for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); it++) {
+            if (obj.base != it->base) {
+                continue;
+            }
+            it->size = obj.size;
+            PT_DEBUG(2, "in-place reallocation addr " << std::hex << addr);
+            return;
+        }
+        PT_ERROR("in-place reallocation failed");
+    }
+
+    /* Write allocmap */
+    ADDRINT log_addr = 0;
+    if (alloc_state) {
+        /* Create log_addr, if allocation */
+        calculateSha1Hash(&obj);
+        log_addr = getIndex(obj.hash.substr(32, 8));
+    } else {
+        /* Read log_addr, if not in-place reallocation */
+        if (allocmap.find(realloc_state->old) == allocmap.end()) {
+            PT_ERROR("doalloc used invalid allocmap addr "
+                     << std::hex << realloc_state->old);
+        }
+        log_addr = allocmap[realloc_state->old];
+        dofree(realloc_state->old);
+    }
+    allocmap[addr] = log_addr;
+
+    /* Insert object into heap vector for allocation or not-inplace reallocation
+     */
+    /* Keep heap vector sorted */
+    HEAPVEC::iterator below = heap.begin();
+    HEAPVEC::iterator above = heap.end();
+    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); it++) {
+        if (obj.base < it->base) {
+            above = it;
+            break;
+        }
+        below = it;
+    }
+
+    if (!heap.size() || (below == &heap.back() &&
+                         obj.base >= heap.back().base + heap.back().size)) {
+        /* No inbetween slot found, thus append to the end */
+        PT_INFO("Push to heap end");
+        heap.push_back(obj);
+    } else if (
+        /* Insert in front, if obj does not overlap first element */
+        (above == heap.begin() && obj.base + obj.size <= above->base)
+        /* Valid inbetween slot found, thus insert before 'above' */
+        || (obj.base >= below->base + below->size &&
+            obj.base + obj.size <= above->base)) {
+        heap.insert(above, obj);
+    } else if (
+        /* Insert in front, if below is of type MMAP/MREMAP and spans over obj
+         */
+        (below->type == std::string(MMAP) ||
+         below->type == std::string(MREMAP)) &&
+        (obj.base >= below->base) &&
+        (obj.base + obj.size <= below->base + below->size)) {
+        heap.insert(below, obj);
+    } else {
+        /* Invalid inbetween slot found, thus quit */
+        printHeap();
+        PT_INFO("below.base " << below->base);
+        PT_INFO("above.base " << above->base);
+        PT_INFO("obj.base   " << obj.base);
+        PT_INFO("obj.size   " << obj.size);
+        PT_ASSERT(false, "Corrupted heap?!");
+    }
+    DEBUG(3) printHeap();
+    DEBUG(3) printAllocmap();
 }
 
 /**
@@ -1081,20 +1294,24 @@ uint32_t dofree(ADDRINT addr) {
  * @param size The size parameter passed to malloc
  */
 VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
-    if (!Record)
-        return;
+    PT_DEBUG(1, "malloc called with 0x" << std::hex << size << " at " << ip);
     // PIN_MutexLock(&lock);
     if (thread_state[threadid].realloc_state.size() == 0) {
-        DEBUG(1)
-        std::cout << "[pintool] Malloc called with " << std::hex << size
-                  << " at " << ip << std::endl;
-        alloc_state_t state = {.size = size};
+        SHA1 hash;
+        hash.update(getCallStack(threadid)); /* calculate the hash of the set of
+                                                IPs in the Callstack */
+        alloc_state_t state = {
+            .type = MALLOC,
+            .size = size,
+            .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+        };
         thread_state[threadid].malloc_state.push_back(state);
     } else {
-        DEBUG(1)
-        std::cout << "[pintool] Malloc ignored due to realloc_pending (size= "
-                  << std::hex << size << ") at " << ip << std::endl;
+        PT_DEBUG(1, "malloc ignored due to realloc_pending (size= "
+                        << std::hex << size << ") at " << ip);
     }
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1104,16 +1321,14 @@ VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
  * @param addr The allocated heap pointer
  */
 VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
-    if (!Record)
-        return;
+    PT_DEBUG(1, "malloc returned " << std::hex << addr);
     // PIN_MutexLock(&lock);
-    DEBUG(1)
-    std::cout << "[pintool] Malloc returned " << std::hex << addr << std::endl;
-    ASSERT(thread_state[threadid].malloc_state.size() > 0,
-           "[pintool] Error: Malloc returned but not called");
+    PT_ASSERT(thread_state[threadid].malloc_state.size() > 0,
+              "malloc returned but not called");
     alloc_state_t state = thread_state[threadid].malloc_state.back();
     thread_state[threadid].malloc_state.pop_back();
-    domalloc(addr, state.size, 0);
+    doalloc(addr, &state, nullptr);
+    Trace = true;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1125,16 +1340,21 @@ VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
                          ADDRINT size) {
-    if (!Record)
-        return;
+    PT_DEBUG(1, "realloc called with " << std::hex << addr << " " << size
+                                       << " at " << ip);
     // PIN_MutexLock(&lock);
-    DEBUG(1)
-    std::cout << "[pintool] Realloc called with " << std::hex << addr << " "
-              << size << " at " << ip << std::endl;
-    realloc_state_t state;
-    state.size = size;
-    state.old = addr;
+    SHA1 hash;
+    hash.update(getCallStack(
+        threadid)); /* calculate the hash of the set of IPs in the Callstack */
+    realloc_state_t state = {
+        .type = REALLOC,
+        .old = addr,
+        .size = size,
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
     thread_state[threadid].realloc_state.push_back(state);
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1144,22 +1364,15 @@ VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
  * @param addr The allocated heap pointer
  */
 VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
-    if (!Record)
-        return;
+    PT_DEBUG(1, "realloc returned " << std::hex << addr << " at " << ip);
     // PIN_MutexLock(&lock);
-    DEBUG(1)
-    std::cout << "[pintool] Realloc returned " << std::hex << addr << " at "
-              << ip << std::endl;
-    ASSERT(thread_state[threadid].realloc_state.size() > 0,
-           "[pintool] Error: Realloc returned but not called");
+    PT_ASSERT(thread_state[threadid].realloc_state.size() > 0,
+              "realloc returned but not called");
     realloc_state_t state = thread_state[threadid].realloc_state.back();
     thread_state[threadid].realloc_state.pop_back();
 
-    uint32_t objid = 0;
-    if (state.old) {
-        objid = dofree(state.old);
-    }
-    domalloc(addr, state.size, objid);
+    doalloc(addr, nullptr, &state);
+    Trace = true;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1171,14 +1384,23 @@ VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordCallocBefore(THREADID threadid, VOID *ip, ADDRINT nelem,
                         ADDRINT size) {
-    if (!Record)
-        return;
+    PT_DEBUG(1, "calloc called with " << std::hex << nelem << "*" << std::hex
+                                      << size);
     // PIN_MutexLock(&lock);
-    DEBUG(1)
-    std::cout << "[pintool] Calloc called with " << std::hex << nelem << " "
-              << size << " at " << ip << std::endl;
-    alloc_state_t state = {.size = size};
-    thread_state[threadid].calloc_state.push_back(state);
+    if (thread_state[threadid].calloc_state.size() == 0) {
+        SHA1 hash;
+        hash.update(getCallStack(threadid)); /* calculate the hash of the set of
+                                                IPs in the Callstack */
+        alloc_state_t state = {
+            .type = CALLOC,
+            .size = nelem * size,
+            .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+        };
+
+        thread_state[threadid].calloc_state.push_back(state);
+    }
+    if (StopTrace)
+        Trace = false;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1188,17 +1410,14 @@ VOID RecordCallocBefore(THREADID threadid, VOID *ip, ADDRINT nelem,
  * @param addr The allocated heap pointer
  */
 VOID RecordCallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
-    if (!Record)
-        return;
+    PT_DEBUG(1, "calloc returned " << std::hex << addr);
     // PIN_MutexLock(&lock);
-    DEBUG(1)
-    std::cout << "[pintool] Calloc returned " << std::hex << addr << " at "
-              << ip << std::endl;
-    ASSERT(thread_state[threadid].calloc_state.size() > 0,
-           "[pintool] Error: Calloc returned but not called");
+    PT_ASSERT(thread_state[threadid].calloc_state.size() != 0,
+              "calloc returned but not called");
     alloc_state_t state = thread_state[threadid].calloc_state.back();
     thread_state[threadid].calloc_state.pop_back();
-    domalloc(addr, state.size, 0);
+    doalloc(addr, &state, nullptr);
+    Trace = true;
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1208,13 +1427,208 @@ VOID RecordCallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
  * @param addr The heap pointer which is freed
  */
 VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
-    if (!Record)
-        return;
+    PT_DEBUG(1, "free called with " << std::hex << addr << " at " << ip);
+    DEBUG(2) printCallStack(threadid);
     // PIN_MutexLock(&lock);
-    DEBUG(1)
-    std::cout << "[pintool] Free called with " << std::hex << addr << " at "
-              << ip << std::endl;
     dofree(addr);
+    if (StopTrace)
+        Trace = false;
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record free
+ * @param threadid The thread
+ * @param addr The heap pointer which is freed
+ */
+VOID RecordFreeAfter(VOID) {
+    PT_DEBUG(1, "free returned");
+    Trace = true;
+}
+
+/**
+ * Record mmap
+ * @param threadid      thread
+ * @param size          size parameter passed to mmap
+ * @param ret           TODO
+ * @param force
+ */
+VOID RecordMmapBefore(THREADID threadid, ADDRINT size) {
+    PT_DEBUG(1, "mmap called with " << std::hex << size);
+    if (thread_state[threadid].mremap_state.size() != 0) {
+        PT_DEBUG(1, "mmap ignored due to mremap_pending (size= "
+                        << std::hex << size << ")");
+        return;
+    }
+    if (thread_state[threadid].malloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap stemming from pending malloc"
+                        << " (size= " << std::hex << size << ")");
+    }
+    if (thread_state[threadid].realloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap stemming from pending realloc"
+                        << " (size= " << std::hex << size << ")");
+    }
+    // PIN_MutexLock(&lock);
+    SHA1 hash;
+    hash.update(getCallStack(threadid)); /* calculate the hash of the set of
+                                            IPs in the Callstack */
+    alloc_state_t state = {
+        .type = MMAP,
+        .size = size,
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
+
+    thread_state[threadid].mmap_state.push_back(state);
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mmap's result
+ *@param threadid The thread
+ * @param addr The allocated heap pointer
+ */
+VOID RecordMmapAfter(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "mmap returned " << std::hex << addr);
+    if (thread_state[threadid].mremap_state.size() != 0) {
+        PT_DEBUG(1, "mmap ignored due to mremap_pending");
+        return;
+    }
+    if (thread_state[threadid].malloc_state.size() != 0 ||
+        thread_state[threadid].realloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap due to [m,re]alloc pending");
+    }
+    // PIN_MutexLock(&lock);
+
+    PT_ASSERT(thread_state[threadid].mmap_state.size() != 0,
+              "mmap returned but not called");
+
+    alloc_state_t state = thread_state[threadid].mmap_state.back();
+    thread_state[threadid].mmap_state.pop_back();
+
+    doalloc(addr, &state, nullptr);
+
+    //  PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mremap
+ * @param threadid The thread
+ * @param addr The heap pointer param of mremap
+ * @param size The size parameter passed to mremap
+ */
+VOID RecordMremapBefore(THREADID threadid, ADDRINT addr, ADDRINT old_size,
+                        ADDRINT new_size) {
+    PT_DEBUG(1, "mremap called with " << std::hex << addr << " " << new_size);
+    // PIN_MutexLock(&lock);
+
+    SHA1 hash;
+    hash.update(getCallStack(
+        threadid)); /* calculte the hash of the set of IPs in the Callstack */
+    realloc_state_t state = {
+        .type = MREMAP,
+        .old = addr,
+        .size = new_size,
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
+    thread_state[threadid].mremap_state.push_back(state);
+
+    //  PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mremap's result
+ * @param threadid The thread
+ * @param addr The allocated heap pointer
+ */
+VOID RecordMremapAfter(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "mremap returned " << std::hex << addr);
+    // PIN_MutexLock(&lock);
+    PT_ASSERT(thread_state[threadid].mremap_state.size() != 0,
+              "mremap returned but not called");
+
+    realloc_state_t state = thread_state[threadid].mremap_state.back();
+    thread_state[threadid].mremap_state.pop_back();
+
+    doalloc(addr, nullptr, &state);
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record munmap
+ * @param threadid The thread
+ * @param addr The heap pointer which is munmapped
+ */
+VOID RecordMunmapBefore(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "munmap called with " << std::hex << addr);
+    DEBUG(2) printCallStack(threadid);
+    // PIN_MutexLock(&lock);
+    dofree(addr);
+    //  PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record brk's call
+ *@param threadid The thread
+ * @param addr The returned program break end address
+ */
+VOID RecordBrkBefore(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "brk called with " << std::hex << addr);
+    DEBUG(3) printCallStack(threadid);
+
+    // In case addr == 0 a new image "owns" brk
+    if (addr != 0) {
+        return;
+    }
+    // PIN_MutexLock(&lock);
+
+    program_break_obj_t program_break;
+    brk_vec.push_back(program_break);
+
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record brk's result
+ *@param threadid The thread
+ * @param addr The returned program break end address
+ */
+VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
+    PT_DEBUG(1, "brk returned from " << std::hex << ret << " with " << std::hex
+                                     << addr);
+    // PIN_MutexLock(&lock);
+
+    imgobj_t img;
+    for (auto i : imgvec) {
+        if ((uint64_t)ret < i.baseaddr || (uint64_t)ret >= i.endaddr) {
+            continue;
+        }
+        img = i;
+        break;
+    }
+
+    program_break_obj_t program_break = brk_vec.back();
+    brk_vec.pop_back();
+
+    program_break.high = addr;
+    brk_range.endaddr = addr;
+    if (program_break.image.name.empty()) {
+        program_break.image = img;
+        program_break.low = addr;
+        PT_INFO("new brk owned by image: " << img.name);
+        PT_DEBUG(1, "ranging from " << program_break.low << " to "
+                                    << program_break.high);
+    } else if (program_break.image.name.compare(img.name) != 0) {
+        PT_INFO("brk called before from image: " << program_break.image.name);
+        PT_INFO("brk called now from image: " << img.name);
+        PT_ASSERT(false, "brk syscalls called within different images");
+    }
+
+    if (brk_range.baseaddr == 0) {
+        brk_range.baseaddr = addr;
+    }
+
+    brk_vec.push_back(program_break);
+
     // PIN_MutexUnlock(&lock);
 }
 
@@ -1231,14 +1645,13 @@ VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
  */
 VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr,
                    bool fast_recording) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     // PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = READ;
     entry.ip = (uint64_t)((uintptr_t)ip);
-    entry.data = (uint64_t)((uintptr_t)addr);
-    test_mem_heap(&entry);
+    entry.data = (uint64_t)((uintptr_t)getLogicalAddress(addr, ip));
     DEBUG(3)
     printf("[pintool] Read %" PRIx64 " to %" PRIx64 "\n", (uint64_t)entry.ip,
            (uint64_t)entry.data);
@@ -1259,14 +1672,13 @@ VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr,
  */
 VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
                     bool fast_recording) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     // PIN_MutexLock(&lock);
     entry_t entry;
     entry.type = WRITE;
     entry.ip = (uint64_t)((uintptr_t)ip);
-    entry.data = (uint64_t)((uintptr_t)addr);
-    test_mem_heap(&entry);
+    entry.data = (uint64_t)((uintptr_t)getLogicalAddress(addr, ip));
     DEBUG(3)
     printf("[pintool] Write %" PRIx64 " to %" PRIx64 "\n", (uint64_t)entry.ip,
            (uint64_t)entry.data);
@@ -1287,7 +1699,7 @@ VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
  * @param target The next instruction (e.g. branch target)
  */
 VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     entry_t entry;
     entry.type = BRANCH;
@@ -1351,7 +1763,7 @@ VOID RecordRep(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT *ctxt,
  */
 VOID RecordFunctionEntry_unlocked(THREADID threadid, ADDRINT ins, BOOL indirect,
                                   ADDRINT target) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     entry_t entry;
     entry.type = FUNC_ENTRY;
@@ -1380,7 +1792,7 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
         Record = true;
         WaitForFirstFunction = false;
     }
-    if (!Record)
+    if (!Record || !Trace)
         return;
     // PIN_MutexLock(&lock);
     if (indirect) {
@@ -1406,7 +1818,7 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
  */
 VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins,
                                  ADDRINT target) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     entry_t entry;
     entry.type = FUNC_EXIT;
@@ -1430,7 +1842,7 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins,
  */
 VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins,
                         const CONTEXT *ctxt, bool fast_recording) {
-    if (!Record)
+    if (!Record || !Trace)
         return;
     ADDRINT target =
         ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR) : 0;
@@ -1454,8 +1866,13 @@ VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins,
  * @param v UNUSED
  */
 VOID instrumentMainAndAlloc(IMG img, VOID *v) {
+    if (!IMG_Valid(img)) {
+        PT_ERROR("loaded image is invalid");
+    }
+
     string name = IMG_Name(img);
-    DEBUG(1) std::cout << "[pintool] Instrumenting " << name << std::endl;
+    PT_DEBUG(1, "instrumenting " << name);
+
     if (imgfile.is_open()) {
         uint64_t high = IMG_HighAddress(img);
         uint64_t low = IMG_LowAddress(img);
@@ -1466,138 +1883,230 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v) {
              * with IMG_SizeMapped instead.
              */
             high = low + IMG_SizeMapped(img);
-            DEBUG(1)
-            std::cout << "[pintool] VDSO low:   0x" << std::hex << low
-                      << std::endl;
-            DEBUG(1)
-            std::cout << "[pintool] VDSO high:  0x" << std::hex << high
-                      << std::endl;
-            DEBUG(1)
-            std::cout << "[pintool] VDSO size mapped:  0x" << std::hex
-                      << IMG_SizeMapped(img) << std::endl;
+            PT_DEBUG(1, "vdso low:   0x" << hex << low);
+            PT_DEBUG(1, "vdso high:  0x" << hex << high);
+            PT_DEBUG(1, "vdso size mapped:  0x" << hex << IMG_SizeMapped(img));
             vdsofile.write((const char *)low, IMG_SizeMapped(img));
             vdsofile.close();
             name = KnobVDSO.Value();
         }
 
-        imgfile << "Image:" << std::endl;
-        imgfile << name << std::endl;
-        imgfile << std::hex << low << ":" << high << std::endl;
-    }
+        PT_DEBUG(1, "image name: " << name);
+        PT_DEBUG(1, "image low:  0x " << hex << low);
+        PT_DEBUG(1, "image high: 0x " << hex << high);
+        imgfile << "Image:" << endl;
+        imgfile << name << endl;
+        imgfile << hex << low << ":" << hex << high << endl;
 
-    if (IMG_Valid(img)) {
-        if (imgfile.is_open()) {
-            for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
-                 sym = SYM_Next(sym)) {
-                imgfile << std::hex << SYM_Address(sym) << ":" + SYM_Name(sym)
-                        << std::endl;
+        imgobj_t imgdata;
+        imgdata.name = name;
+        imgdata.baseaddr = low;
+        imgdata.endaddr = high;
+
+        for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec)) {
+            string sec_name = SEC_Name(sec);
+            low = SEC_Address(sec);
+            high = SEC_Address(sec) + SEC_Size(sec);
+
+            PT_DEBUG(1, "sec name: " << sec_name);
+            PT_DEBUG(1, "sec low:  0x " << hex << low);
+            PT_DEBUG(1, "sec high: 0x " << hex << high);
+            if (!SEC_Mapped(sec)) {
+                PT_INFO("unmapped sec dropped: " << sec_name);
+                continue;
             }
-        }
-        DEBUG(1)
-        std::cout << "[pintool] KnobMain: " << KnobMain.Value() << std::endl;
-        if (KnobMain.Value().compare("ALL") != 0) {
-            RTN mainRtn = RTN_FindByName(img, KnobMain.Value().c_str());
-            if (mainRtn.is_valid()) {
-                RTN_Open(mainRtn);
-                RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
-                               IARG_THREAD_ID, IARG_ADDRINT,
-                               RTN_Address(mainRtn), IARG_END);
-                RTN_InsertCall(mainRtn, IPOINT_AFTER, (AFUNPTR)RecordMainEnd,
-                               IARG_THREAD_ID, IARG_ADDRINT,
-                               RTN_Address(mainRtn), IARG_END);
-                RTN_Close(mainRtn);
-            }
-        } else {
-            DEBUG(1) std::cout << "[pintool] Recording all" << std::endl;
-            if (!Record) {
-                WaitForFirstFunction = true;
-            }
+            imgdata.baseaddr =
+                (imgdata.baseaddr > low) ? low : imgdata.baseaddr;
+            imgdata.endaddr = (imgdata.endaddr < high) ? high : imgdata.endaddr;
         }
 
-        if (name.find("alloc.so") != std::string::npos ||
-            name.find("libc.so") != std::string::npos) {
-            /* If alloc.so is pre-loaded, it will always be before libc
-             * We only instrument once
-             */
-            if (alloc_instrumented) {
-                DEBUG(1)
-                std::cout << "[pintool] Allocation already instrumented"
-                          << std::endl;
-            } else {
-                DEBUG(1)
-                std::cout << "[pintool] Instrumenting allocation" << std::endl;
-                if (KnobTrackHeap.Value()) {
-                    RTN mallocRtn = RTN_FindByName(img, MALLOC);
-                    if (mallocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Malloc found in "
-                                  << IMG_Name(img) << std::endl;
-                        RTN_Open(mallocRtn);
-                        RTN_InsertCall(mallocRtn, IPOINT_BEFORE,
-                                       (AFUNPTR)RecordMallocBefore,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                                       IARG_END);
-                        RTN_InsertCall(mallocRtn, IPOINT_AFTER,
-                                       (AFUNPTR)RecordMallocAfter,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-                        RTN_Close(mallocRtn);
-                    }
+        PT_DEBUG(1, "image low:  0x " << hex << imgdata.baseaddr);
+        PT_DEBUG(1, "image high: 0x " << hex << imgdata.endaddr);
+        imgvec.push_back(imgdata);
 
-                    RTN reallocRtn = RTN_FindByName(img, REALLOC);
-                    if (reallocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Realloc found in "
-                                  << IMG_Name(img) << std::endl;
-                        RTN_Open(reallocRtn);
-                        RTN_InsertCall(
-                            reallocRtn, IPOINT_BEFORE,
-                            (AFUNPTR)RecordReallocBefore, IARG_THREAD_ID,
-                            IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
-                        RTN_InsertCall(reallocRtn, IPOINT_AFTER,
-                                       (AFUNPTR)RecordReallocAfter,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-                        RTN_Close(reallocRtn);
-                    }
-
-                    RTN callocRtn = RTN_FindByName(img, CALLOC);
-                    if (callocRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Calloc found in "
-                                  << IMG_Name(img) << std::endl;
-                        RTN_Open(callocRtn);
-                        RTN_InsertCall(
-                            callocRtn, IPOINT_BEFORE,
-                            (AFUNPTR)RecordCallocBefore, IARG_THREAD_ID,
-                            IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
-                        RTN_InsertCall(callocRtn, IPOINT_AFTER,
-                                       (AFUNPTR)RecordCallocAfter,
-                                       IARG_THREAD_ID, IARG_INST_PTR,
-                                       IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
-                        RTN_Close(callocRtn);
-                    }
-
-                    RTN freeRtn = RTN_FindByName(img, FREE);
-                    if (freeRtn.is_valid()) {
-                        DEBUG(1)
-                        std::cout << "[pintool] Free found in " << IMG_Name(img)
-                                  << std::endl;
-                        RTN_Open(freeRtn);
-                        RTN_InsertCall(
-                            freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
-                            IARG_THREAD_ID, IARG_INST_PTR,
-                            IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
-                        RTN_Close(freeRtn);
-                    }
-                }
-                alloc_instrumented = 1;
-            }
-        } /* alloc.so or libc */
+        for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
+             sym = SYM_Next(sym)) {
+            imgfile << hex << SYM_Address(sym)
+                    << ":" + PIN_UndecorateSymbolName(SYM_Name(sym),
+                                                      UNDECORATION_NAME_ONLY)
+                    << endl;
+        }
     }
+
+    PT_DEBUG(1, "KnobMain: " << KnobMain.Value());
+    if (KnobMain.Value().compare("ALL") != 0) {
+        RTN mainRtn = RTN_FindByName(img, KnobMain.Value().c_str());
+        if (mainRtn.is_valid()) {
+            PT_DEBUG(1, "KnobMain is valid");
+            RTN_Open(mainRtn);
+            RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
+                           IARG_THREAD_ID, IARG_ADDRINT, RTN_Address(mainRtn),
+                           IARG_END);
+            RTN_InsertCall(mainRtn, IPOINT_AFTER, (AFUNPTR)RecordMainEnd,
+                           IARG_THREAD_ID, IARG_ADDRINT, RTN_Address(mainRtn),
+                           IARG_END);
+            RTN_Close(mainRtn);
+        }
+    } else {
+        PT_DEBUG(1, "recording all");
+        if (!Record) {
+            WaitForFirstFunction = true;
+        }
+    }
+
+    if (!KnobTrackHeap.Value()) {
+        PT_INFO("heap tracking inactive");
+        return;
+    }
+
+    if (alloc_instrumented) {
+        PT_DEBUG(1, "allocation already instrumented");
+        return;
+    }
+
+    if (name.find("alloc.so") == std::string::npos &&
+        name.find("libc.so") == std::string::npos) {
+        PT_DEBUG(3, "image (" << name << ") is not named alloc.so or libc.so");
+        return;
+    }
+    /* If alloc.so is pre-loaded, it will always be before libc
+     * We only instrument once
+     */
+    PT_DEBUG(1, "instrumenting allocation in " << name);
+    alloc_instrumented = 1;
+
+    RTN mallocRtn = RTN_FindByName(img, MALLOC);
+    if (!mallocRtn.is_valid()) {
+        PT_ERROR("malloc not found");
+    }
+    PT_DEBUG(1, "malloc found in " << IMG_Name(img));
+    RTN_Open(mallocRtn);
+    RTN_InsertCall(mallocRtn, IPOINT_BEFORE, (AFUNPTR)RecordMallocBefore,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                   0, IARG_END);
+    RTN_InsertCall(mallocRtn, IPOINT_AFTER, (AFUNPTR)RecordMallocAfter,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE,
+                   IARG_END);
+    RTN_Close(mallocRtn);
+
+    RTN reallocRtn = RTN_FindByName(img, REALLOC);
+    if (!reallocRtn.is_valid()) {
+        PT_ERROR("realloc not found");
+    }
+    PT_DEBUG(1, "realloc found in " << IMG_Name(img));
+    RTN_Open(reallocRtn);
+    RTN_InsertCall(reallocRtn, IPOINT_BEFORE, (AFUNPTR)RecordReallocBefore,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                   0, IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+    RTN_InsertCall(reallocRtn, IPOINT_AFTER, (AFUNPTR)RecordReallocAfter,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE,
+                   IARG_END);
+    RTN_Close(reallocRtn);
+
+    RTN callocRtn = RTN_FindByName(img, CALLOC);
+    if (!callocRtn.is_valid()) {
+        PT_ERROR("calloc not found");
+    }
+    PT_DEBUG(1, "calloc found in " << IMG_Name(img));
+    RTN_Open(callocRtn);
+    RTN_InsertCall(callocRtn, IPOINT_BEFORE, (AFUNPTR)RecordCallocBefore,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                   0, IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+    RTN_InsertCall(callocRtn, IPOINT_AFTER, (AFUNPTR)RecordCallocAfter,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE,
+                   IARG_END);
+    RTN_Close(callocRtn);
+
+    RTN freeRtn = RTN_FindByName(img, FREE);
+    if (!freeRtn.is_valid()) {
+        PT_ERROR("free not found");
+    }
+    PT_DEBUG(1, "free found in " << IMG_Name(img));
+    RTN_Open(freeRtn);
+    RTN_InsertCall(freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
+                   IARG_THREAD_ID, IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE,
+                   0, IARG_END);
+    RTN_InsertCall(freeRtn, IPOINT_AFTER, (AFUNPTR)RecordFreeAfter, IARG_END);
+    RTN_Close(freeRtn);
+}
+
+/**
+ * Handle syscall entry
+ * We only trace allocation-related syscalls.
+ * If syscall is not traced SYSCALL_NUMBER is set to -1.
+ */
+VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
+                  VOID *v) {
+    SYSCALL_NUMBER = PIN_GetSyscallNumber(ctxt, std);
+
+    PT_DEBUG(1, "syscall " << hex << PIN_GetContextReg(ctxt, REG_INST_PTR)
+                           << " " << hex << SYSCALL_NUMBER << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 0) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 1) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 2) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 3) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 4) << " " << hex
+                           << PIN_GetSyscallArgument(ctxt, std, 5));
+
+    // https://filippo.io/linux-syscall-table/
+    switch (SYSCALL_NUMBER) {
+    case 9:
+        if (PIN_GetSyscallArgument(ctxt, std, 0)) {
+            PT_INFO("mmap syscall dropped.");
+            SYSCALL_NUMBER = -1;
+            break;
+        }
+        RecordMmapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 1));
+        break;
+    case 11:
+        RecordMunmapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0));
+        break;
+    case 12:
+        RecordBrkBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0));
+        break;
+    case 25:
+        RecordMremapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0),
+                           PIN_GetSyscallArgument(ctxt, std, 1),
+                           PIN_GetSyscallArgument(ctxt, std, 2));
+        break;
+    default:
+        SYSCALL_NUMBER = -1;
+        PT_INFO("Syscall not catched. syscall number: "
+                << std::hex << PIN_GetSyscallNumber(ctxt, std));
+        break;
+    }
+}
+
+/**
+ * Handle syscall exit
+ */
+VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
+                 VOID *v) {
+    PT_DEBUG(1, "returns: " << hex << PIN_GetSyscallReturn(ctxt, std));
+
+    // https://filippo.io/linux-syscall-table/
+    switch (SYSCALL_NUMBER) {
+    case -1:
+        // Syscall will be dropped, as its number is set to -1 in SyscallEntry
+        break;
+    case 9:
+        RecordMmapAfter(threadid, PIN_GetSyscallReturn(ctxt, std));
+        break;
+    case 11:
+        // Handling of munmap exit is not needed.
+        break;
+    case 12:
+        RecordBrkAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
+                       PIN_GetContextReg(ctxt, REG_INST_PTR));
+        break;
+    case 25:
+        RecordMremapAfter(threadid, PIN_GetSyscallReturn(ctxt, std));
+        break;
+    default:
+        PT_ERROR("syscall unknown. syscall number: " << SYSCALL_NUMBER);
+        break;
+    }
+    SYSCALL_NUMBER = -1;
 }
 
 /**
@@ -1960,6 +2469,10 @@ int main(int argc, char *argv[]) {
 
     PIN_InitSymbols();
 
+    DEBUG_LEVEL = KnobDebug.Value();
+    PHASE_1 = KnobLeaks.Value() == false;
+    StopTrace = KnobStopTrace.Value();
+
     if (KnobLeaks.Value() && KnobCallstack.Value()) {
         leaks = new CallStack();
         use_callstack = true;
@@ -1991,6 +2504,28 @@ int main(int argc, char *argv[]) {
         PIN_AddApplicationStartFunction(loadLeaks, 0);
         INS_AddInstrumentFunction(instrumentLeakingInstructions, 0);
     }
+
+    /* Syscall tracing */
+    PIN_AddSyscallEntryFunction(SyscallEntry, 0);
+    PIN_AddSyscallExitFunction(SyscallExit, 0);
+
+    /* Getting the stack and vvar address range for this process */
+    stack.baseaddr = getAddrFromProcMap("stack", 1);
+    stack.endaddr = getAddrFromProcMap("stack", 2);
+    PT_DEBUG(1, "stack.baseaddr is " << hex << stack.baseaddr);
+    PT_DEBUG(1, "stack.endaddr  is " << hex << stack.endaddr);
+
+    imgobj_t imgdata = {
+        .name = "vvar",
+        .baseaddr = getAddrFromProcMap("vvar", 1),
+        .endaddr = getAddrFromProcMap("vvar", 2),
+    };
+    imgvec.push_back(imgdata);
+    PT_DEBUG(1, "vvar.baseaddr is " << hex << imgdata.baseaddr);
+    PT_DEBUG(1, "vvar.endaddr  is " << hex << imgdata.endaddr);
+
+    auto mngr = CALLSTACK::CallStackManager::get_instance();
+    mngr->activate();
 
     PIN_AddThreadStartFunction(ThreadStart, 0);
     PIN_AddThreadFiniFunction(ThreadFini, 0);
