@@ -343,6 +343,12 @@ class Key:
         string = f"{label}='{value}'"
         return string
 
+    def __len__(self):
+        # length of the string representing the key
+        return len(self.value.decode())
+
+    def get_bytes(self):
+        return self.value
 
 """
 *************************************************************************

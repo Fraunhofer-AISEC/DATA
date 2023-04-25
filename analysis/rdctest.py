@@ -290,7 +290,7 @@ class RDC(object):
 
         # compute sigthres level
         level = 10000
-        v = numpy.zeros(level, dtype=numpy.float)
+        v = numpy.zeros(level, dtype=numpy.float64)
         for i in range(0, level):
             a = numpy.random.normal(size=N)
             b = numpy.random.normal(size=N)
@@ -428,10 +428,10 @@ class RDC(object):
 
         # init
         (n1, n2) = (X.size, Y.size)
-        t1 = numpy.ones((n1, 2), dtype=numpy.float)
-        t2 = numpy.ones((n2, 2), dtype=numpy.float)
-        t3 = numpy.ones((n1, k + 1), dtype=numpy.float)
-        t4 = numpy.ones((n2, k + 1), dtype=numpy.float)
+        t1 = numpy.ones((n1, 2), dtype=numpy.float64)
+        t2 = numpy.ones((n2, 2), dtype=numpy.float64)
+        t3 = numpy.ones((n1, k + 1), dtype=numpy.float64)
+        t4 = numpy.ones((n2, k + 1), dtype=numpy.float64)
 
         # normalized rank
         t1[:, 0] = rankdata(X) / float(n1)

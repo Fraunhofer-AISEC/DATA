@@ -868,7 +868,7 @@ def specific_leakage_test(random, callback, keys, LeaksOnly=True, mp=False):
             rdic_pos[c] = numpy.array(rdic_pos[c], dtype=numpy.int64)
 
         # Extract X in correct order
-        X = numpy.asarray([Xglob[k] for k in keys])
+        X = numpy.asarray([Xglob[k.get_bytes().decode().encode()] for k in keys])
         assert type(X) == numpy.ndarray
         assert len(X_labels) == X.shape[1]
 
