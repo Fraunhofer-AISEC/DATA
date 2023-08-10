@@ -193,10 +193,10 @@ class XmlLeakPrinter:
 
                 key_indxs = [e.key.index for e in obj.evidence]
                 evidences = [[] for _ in range(max(key_indxs) + 1)]
-                for (idx, key_indx) in enumerate(key_indxs):
+                for idx, key_indx in enumerate(key_indxs):
                     evidences[key_indx].append(obj.evidence[idx])
 
-                for (idx, evidence) in enumerate(evidences):
+                for idx, evidence in enumerate(evidences):
                     entries = Counter(
                         [entry for ee in evidence for entry in ee.entries]
                     )
@@ -209,7 +209,7 @@ class XmlLeakPrinter:
                     else:
                         node = f"{node_plain} origin='fixed' {str(evidence[0].key)}"
                     self.startNode(node)
-                    for (key, value) in entries.items():
+                    for key, value in entries.items():
                         self.doprint_line(f"{format(key, 'x')}: {value}")
                     self.endNode(node_plain)
 

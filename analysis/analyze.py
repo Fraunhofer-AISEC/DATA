@@ -392,7 +392,7 @@ def load_leaks(files, keys, source):
         # This parsing requires a naming scheme like: `key1.key`
         key_index = int(set(keys).pop().replace("key", "").replace(".", ""))
 
-    for (trace_file, key_file) in zip(files, keys):
+    for trace_file, key_file in zip(files, keys):
         with open(trace_file, "rb") as tf, open(key_file, "rb") as kf:
             trace = tf.read()
             key = kf.read()
@@ -508,7 +508,7 @@ def _glt_sort_and_map(mapping_table, data):
     # Sort data from big to little wrt to the counts
     data = sorted(data.items(), key=lambda kv: kv[1], reverse=True)
     # Map addr to new value
-    for (address, count) in data:
+    for address, count in data:
         if address not in mapping_table:
             mapping_table[address] = len(mapping_table.keys())
         tmp_data[mapping_table[address]] = count
@@ -612,7 +612,7 @@ def generic_leakage_test(fixed, random):
     # iterate over leaks
     debug(0, "Got %d trace differences.", (len(fixedleaks)))
     sys.stdout.flush()
-    for (idx, (fl, rl)) in enumerate(zip(fixedleaks, randomleaks)):
+    for idx, (fl, rl) in enumerate(zip(fixedleaks, randomleaks)):
         msg = {"warning": "", "leak": ""}
         assert fl.ip == rl.ip
 

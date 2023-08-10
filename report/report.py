@@ -223,7 +223,7 @@ def parse_leaks(lib_hierarchy):
 
         fl_entries = createLibFunctionItems(lib, lib_item)  # tuple (ip, fl_item)
 
-        for (addr, lib_tree_item) in fl_entries:
+        for addr, lib_tree_item in fl_entries:
             if addr not in short_info_map:
                 debug(0, "Cannot find addr in short_info_map")
                 debug(0, "(Could be a wrong combination of pickle and zip file?)")
@@ -429,7 +429,7 @@ class Report:
     def generate(self, leaks_docs, libs_leaks_docs):
         self.leak_overview_table(leaks_docs)
 
-        for (lib_name, leaks_docs) in libs_leaks_docs.items():
+        for lib_name, leaks_docs in libs_leaks_docs.items():
             with self.doc.create(Section(f"Binary: {lib_name}")):
                 self.leak_overview_table(leaks_docs)
 

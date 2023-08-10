@@ -2,7 +2,7 @@ name: lint
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ "**" ]
   push:
     branches: [ master ]
 
@@ -30,3 +30,11 @@ jobs:
       - run: |
           black --version
           black --check --diff .
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: sudo apt-get install clang-format
+      - run: |
+          clang-format -style="{IndentWidth: 4}" --dry-run --Werror -i *.cpp *.H
+        working-directory: pintool

@@ -49,7 +49,7 @@ def specific_leakage_callback(inputs):
     num_lines_per_input = len(input_to_lines(inputs[0]))
     result = numpy.ndarray((len(inputs), num_lines_per_input), dtype=numpy.int)
 
-    for (i, input) in enumerate(inputs):
+    for i, input in enumerate(inputs):
         result[i][:] = [v for k, v in input_to_lines(input)]
 
     return (result, labels)
