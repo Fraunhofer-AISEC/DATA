@@ -27,6 +27,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 import os
 import gzip
 import subprocess
+import shlex
 import pickle
 from datastub.DataFS import DataFS
 from datastub.IpInfoShort import IpInfoShort, IP_INFO_FILE
@@ -103,6 +104,38 @@ def loadpickle(pfile):
 """
 
 
+def getGdbSourceFileInfo(addr, binary_path):
+    command = f"gdb -ex 'set print asm-demangle on' -ex 'info line *{addr}' -ex quit {binary_path}"
+    output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+    tmp = "No line number information available"
+    if not tmp in output:
+        return None, 0
+    tmp = output.split(tmp)[1]
+    tmp = tmp.split("<", 1)[1]
+    tmp = tmp[::-1].split(">", 1)[1]
+    output = tmp[::-1]
+
+    tmp = "@plt"
+    if not tmp in output:
+        return None, 0
+    fn_name = output.split(tmp)[0]
+
+    command = f"gdb -ex 'set print asm-demangle on' -ex 'info line {fn_name}' -ex quit {binary_path}"
+    output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+    tmp = "Line"
+    if not tmp in output:
+        return None, 0
+    linenr, _, rel_filepath = output.split(tmp)[-1].splitlines()[0].lstrip().split(" ")
+    linenr = int(linenr)
+    rel_filepath = rel_filepath.strip('"')
+    basepath = "/".join(binary_path.split("/")[:-1])
+    filepath = f"{basepath}/{rel_filepath}"
+
+    debug(2, "[SRC] available via gdb for %s in %s", (addr, binary_path))
+    debug(2, f"[SRC] in {filepath}:{linenr}")
+    return filepath, linenr
+
+
 def getSourceFileInfo(addr, binary_path):
     # e.g., addr2line 0x42d4b9 -e openssl
     #   -> file_name:line_nr
@@ -116,14 +149,10 @@ def getSourceFileInfo(addr, binary_path):
         infos = output.split(":")
         source_file_path, source_line_number = infos[0], infos[1]
         if "??" == source_file_path:
-            raise subprocess.CalledProcessError
+            raise subprocess.CalledProcessError(1, "addr2line")
     except subprocess.CalledProcessError:
         debug(2, "[SRC] unavailable for %s in %s", (addr, binary_path))
-        return None, 0
-    except Exception as error:
-        debug(0, f"lookup: {error} not catched!")
-        debug(2, "[SRC] unavailable for %s in %s", (addr, binary_path))
-        return None, 0
+        return getGdbSourceFileInfo(addr, binary_path)
 
     if "discriminator" in source_line_number:
         source_line_number = source_line_number.split()[0]
@@ -131,9 +160,6 @@ def getSourceFileInfo(addr, binary_path):
     try:
         source_line_number = int(source_line_number)
     except ValueError:
-        source_line_number = 0
-    except Exception as error:
-        debug(0, f"lookup: {error} not catched!")
         source_line_number = 0
 
     return source_file_path, source_line_number
@@ -157,6 +183,96 @@ def getAsmFileInfo(addr, asm_dump):
 """
 *************************************************************************
 """
+
+DOWNLOADED_PACKAGE_SOURCES = list()
+
+def searchSourceInPackages(bin_file_path, ip):
+
+    def search_in_directory(filename, filepath):
+        command = f"find -iname {filename}"
+        debug(4, f"exec: {command}")
+        output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+        lines = output.splitlines()
+        filepath_chunks = 1
+        while len(lines) > 1:
+            filepath_chunks += 1
+            filename = "/".join(filepath.split("/")[-filepath_chunks:])
+            lines = [line for line in lines if filename in line]
+        if len(lines) == 1:
+            return lines[0]
+        else:
+            return None
+
+
+    if bin_file_path not in DOWNLOADED_PACKAGE_SOURCES:
+        # Identify source
+        command = f"dpkg -S {bin_file_path}"
+        debug(4, f"exec: {command}")
+        output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+        lines = output.splitlines()
+        assert len(lines) == 1
+        package = lines[0].split(":")[0]
+
+        # Download source package
+        command = f"apt-get source {package}"
+        debug(4, f"exec: {command}")
+        try:
+            subprocess.check_output(shlex.split(command))
+        except subprocess.CalledProcessError:
+            debug(0, f"Download sources failed for {package}")
+            return None, 0
+
+        DOWNLOADED_PACKAGE_SOURCES.append(bin_file_path)
+
+    # Use gdb to get filename for address
+    command = f"gdb -batch -ex 'set print asm-demangle on' -ex 'info line *{hex(ip)}' {bin_file_path}"
+    debug(4, f"exec: {command}")
+    output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+    lines = output.splitlines()
+    assert len(lines) == 1
+    if "No line number information available" in lines[0]:
+        return None, 0
+    line = lines[0].split("starts at address ")[1].split(" and ends at")[0]
+    line = line.split("<", 1)[1]
+    line = line[::-1].split(">", 1)[1]
+    if "+" in line:
+        line = line.split("+", 1)[1]
+    functionname = line[::-1]
+    filelinenumber = int(lines[0].split(" ")[1])
+
+    command = f"gdb -batch -ex 'set print asm-demangle on' -ex 'info line {functionname}' {bin_file_path}"
+    debug(4, f"exec: {command}")
+    output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+    lines = output.splitlines()
+    assert len(lines) == 1
+    filepath = lines[0].split('"')[1]
+    filename = filepath.split("/")[-1]
+
+    src_file_path = search_in_directory(filename, filepath)
+    if src_file_path is not None:
+        return src_file_path, filelinenumber
+
+    # Check if there are any tar.xz with the source code
+    command = f"ls **/*.tar.xz | xargs -n 1 -i bash -c 'tar -tf {str('{}')} | grep {filename} | wc -l | xargs echo {str('{}')}'"
+    debug(4, f"exec: {command}")
+    output = subprocess.check_output(command, shell=True).decode("utf-8")
+    lines = output.splitlines()
+    parts_list = [parts for line in lines if int((parts := line.split(" "))[1])]
+    assert len(parts_list) == 1
+    [tarball, cnt] = parts_list[0]
+
+    # Extract files and remove tarball
+    command = f"tar -xvf {tarball}"
+    debug(4, f"exec: {command}")
+    subprocess.check_output(shlex.split(command))
+
+    command = f"rm {tarball}"
+    debug(4, f"exec: {command}")
+    subprocess.check_output(shlex.split(command))
+
+    src_file_path = search_in_directory(filename, filepath)
+    assert src_file_path is not None
+    return src_file_path, filelinenumber
 
 
 def export_ip(ip, datafs, imgmap, info_map):
@@ -185,7 +301,6 @@ def export_ip(ip, datafs, imgmap, info_map):
             asm_dump = ""
             try:
                 debug(1, "[ASM] objdump %s", (str(bin_file_path)))
-                # asm_dump = subprocess.check_output(["objdump", "-Dj", ".text", bin_file_path], universal_newlines=True)
                 with datafs.create_file(asm_file_path) as f:
                     subprocess.call(
                         [
@@ -217,15 +332,19 @@ def export_ip(ip, datafs, imgmap, info_map):
                 debug(1, "[ASM] unavailable for %s in %s", (hex(addr), bin_file_path))
             # Search for leak in source code
             src_file_path, src_line_nr = getSourceFileInfo(hex(addr), bin_file_path)
+            if src_file_path is None:
+                src_file_path, src_line_nr = searchSourceInPackages(bin_file_path, addr)
+                debug(
+                    1, "[SRC] available in package sources for %s in %s", (hex(addr), bin_file_path)
+                )
             if src_file_path is not None and os.path.exists(src_file_path):
                 datafs.add_file(src_file_path)
+            elif src_file_path is None:
+               debug(
+                   1, "[SRC] unavailable for %s in %s", (hex(addr), bin_file_path)
+               )
             else:
-                if src_file_path is None:
-                    debug(
-                        1, "[SRC] unavailable for %s in %s", (hex(addr), bin_file_path)
-                    )
-                else:
-                    debug(1, "[SRC] source file %s missing", (src_file_path))
+                debug(1, "[SRC] source file %s missing", (src_file_path))
             ip_info = IpInfoShort(
                 asm_file_path, asm_line_nr, src_file_path, src_line_nr
             )

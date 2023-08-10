@@ -24,9 +24,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 # @version 0.3
 
 
-import sys
+import copy
 import os.path
+import shlex
 import subprocess
+import sys
 from operator import itemgetter
 from datastub.SortedCollection import SortedCollection
 from datastub.utils import debug
@@ -34,6 +36,38 @@ from datastub.utils import debug
 """
 *************************************************************************
 """
+
+DEBUG_SYMBOLS = dict()
+
+def getdebugsymbol(sym, address):
+    if address in DEBUG_SYMBOLS:
+        debug(3, f"found symbol {DEBUG_SYMBOLS[address]} at {hex(address)}")
+        return DEBUG_SYMBOLS[address]
+    offset = address - sym.img.lower
+    command = f"gdb -ex 'set print asm-demangle on' -ex 'x/i {hex(offset)}' -ex quit {sym.img.name}"
+    output = subprocess.check_output(shlex.split(command)).decode("utf-8")
+    line = str()
+    lines = output.splitlines()
+    for line in reversed(lines):
+        tmp = line.lstrip().split(" ", 1)[0]
+        if tmp == hex(offset):
+            break
+    line = line.split("<", 1)[1]
+    line = line[::-1].split(">", 1)[1]
+    line = line[::-1]
+    DEBUG_SYMBOLS[address] = line
+    return line
+
+
+def getdebugelf(fname):
+    command = f"gdb -ex quit {fname}"
+    output = subprocess.check_output(command.split(" ")).decode("utf-8")
+    lines = output.splitlines()
+    assert lines[-2].find(fname) != -1
+    if lines[-1].find("No debugging symbols found") != -1:
+        return None
+    assert lines[-2].find("Reading symbols from") != -1
+    return lines[-1].split(" ")[-1].split("...")[0]
 
 
 def readelfsyms(fname, image):
@@ -53,7 +87,13 @@ def readelfsyms(fname, image):
         return None
 
     if lines is None or len(lines) == 0:
-        return None
+        debug(0, f"No symbols found in {fname}")
+        fname = getdebugelf(fname)
+        if fname is None:
+            debug(0, f"GDB didnot found any debug file")
+            return None
+        debug(0, f"GDB found debug file: {fname}")
+        return readelfsyms(fname, image)
 
     syms = []
     for line in lines:
@@ -175,6 +215,11 @@ class SymbolInfo:
         assert cls.instance is not None
         try:
             (_, sym) = cls.instance.symbols.find_le(address)
+            if sym.name[0].find("_init") >= 0:
+                sym = copy.deepcopy(sym)
+                sym_name = getdebugsymbol(sym, address)
+                sym.name[0] = sym_name
+                return sym
             return sym
         except ValueError:
             return None

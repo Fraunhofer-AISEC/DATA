@@ -244,7 +244,7 @@ class CallStack:
                 (self.id, ctxt.callee, self.stack[size - 1].callee),
             )
         else:
-            debug(0, "[%d]Return from ctxt %08x to nowhere", (self.id, ctxt.callee))
+            debug(1, "[%d]Return from ctxt %08x to nowhere", (self.id, ctxt.callee))
             if size < 0:
                 size = 0
 
@@ -864,12 +864,12 @@ class Leak:
 
     def append(self, entry):
         if len(self.entries) == 0:
-            debug(0, f"Empty Leak @{hex(self.ip)}")
+            debug(1, f"Empty Leak @{hex(self.ip)}")
         if isinstance(entry, DataLeakEntry):
             location = f"addr={hex(entry.addr)}"
         else:
             location = f"  bp={hex(entry.bp.ip)}"
-        debug(0, f"New entry for Leak @{hex(self.ip)}: {location} count={hex(entry.count)}")
+        debug(1, f"New entry for Leak @{hex(self.ip)}: {location} count={hex(entry.count)}")
         self.entries.merge(entry)
 
     def __hash__(self):

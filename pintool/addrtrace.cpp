@@ -25,23 +25,25 @@
 
 /***********************************************************************/
 
-#include <vector>
-#include <string>
-#include <iostream>
+#include "call-stack.H"
+#include "pin.H"
+#include "sha1.hpp"
+#include <fcntl.h>
 #include <fstream>
+#include <getopt.h>
+#include <inttypes.h>
+#include <iostream>
 #include <map>
 #include <set>
-#include <sys/types.h>
-#include <unistd.h>
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <sys/stat.h>
+#include <string>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
-#include <getopt.h>
-#include "pin.H"
+#include <unordered_map>
+#include <vector>
 
 /**
  * Pin 3.11 Documentation:
@@ -49,69 +51,82 @@
  */
 
 // Pin above 3.7.97720 deprecates some functions
-#if (PIN_PRODUCT_VERSION_MAJOR > 3) || \
-    (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR > 7) || \
-    (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR == 7 && PIN_BUILD_NUMBER > 97720)
-  #define INS_IS_INDIRECT INS_IsIndirectControlFlow
-  #define INS_HAS_TAKEN_BRANCH INS_IsValidForIpointTakenBranch
-  #define INS_HAS_IPOINT_AFTER INS_IsValidForIpointAfter
+#if (PIN_PRODUCT_VERSION_MAJOR > 3) ||                                         \
+    (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR > 7) ||       \
+    (PIN_PRODUCT_VERSION_MAJOR == 3 && PIN_PRODUCT_VERSION_MINOR == 7 &&       \
+     PIN_BUILD_NUMBER > 97720)
+#define INS_DIRECT INS_DirectControlFlowTargetAddress
+#define INS_IS_DIRECT INS_IsDirectControlFlow
+#define INS_IS_INDIRECT INS_IsIndirectControlFlow
+#define INS_HAS_TAKEN_BRANCH INS_IsValidForIpointTakenBranch
+#define INS_HAS_IPOINT_AFTER INS_IsValidForIpointAfter
 #else
-  #define INS_IS_INDIRECT INS_IsIndirectBranchOrCall
-  #define INS_HAS_TAKEN_BRANCH INS_IsBranchOrCall
-  #define INS_HAS_IPOINT_AFTER INS_HasFallThrough
+#define INS_DIRECT INS_DirectBranchOrCallTargetAddress
+#define INS_IS_DIRECT INS_IsDirectBranchOrCall
+#define INS_IS_INDIRECT INS_IsIndirectBranchOrCall
+#define INS_HAS_TAKEN_BRANCH INS_IsBranchOrCall
+#define INS_HAS_IPOINT_AFTER INS_HasFallThrough
 #endif
 
 using namespace std;
 
 /***********************************************************************/
 
-VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT bp, BOOL indirect, ADDRINT target, bool report_as_cfleak);
-VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT* ctxt, bool report_as_cfleak);
+VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT bp,
+                         BOOL indirect, ADDRINT target, const CONTEXT *ctxt,
+                         bool report_as_cfleak);
+VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT bp,
+                        const CONTEXT *ctxt, bool report_as_cfleak);
 
 /***********************************************************************/
 
-KNOB<string> KnobRawFile(KNOB_MODE_WRITEONCE, "pintool",
-        "raw", "", "Raw output file.");
+KNOB<string> KnobRawFile(KNOB_MODE_WRITEONCE, "pintool", "raw", "",
+                         "Raw output file.");
 
-KNOB<bool> KnobFunc(KNOB_MODE_WRITEONCE, "pintool",
-        "func", "0", "Trace function calls and returns.");
+KNOB<bool> KnobFunc(KNOB_MODE_WRITEONCE, "pintool", "func", "0",
+                    "Trace function calls and returns.");
 
-KNOB<bool> KnobBbl(KNOB_MODE_WRITEONCE, "pintool",
-        "bbl", "0", "Trace basic blocks.");
+KNOB<bool> KnobBbl(KNOB_MODE_WRITEONCE, "pintool", "bbl", "0",
+                   "Trace basic blocks.");
 
-KNOB<bool> KnobMem(KNOB_MODE_WRITEONCE, "pintool",
-        "mem", "0", "Trace data memory accesses.");
+KNOB<bool> KnobMem(KNOB_MODE_WRITEONCE, "pintool", "mem", "0",
+                   "Trace data memory accesses.");
 
-KNOB<bool> KnobTrackHeap(KNOB_MODE_WRITEONCE, "pintool",
-        "heap", "0", "Track heap usage (malloc, free).");
+KNOB<bool> KnobTrackHeap(KNOB_MODE_WRITEONCE, "pintool", "heap", "0",
+                         "Track heap usage (malloc, free).");
 
-KNOB<string> KnobSyms(KNOB_MODE_WRITEONCE, "pintool",
-        "syms", "", "Output file for image information.");
+KNOB<string> KnobSyms(KNOB_MODE_WRITEONCE, "pintool", "syms", "",
+                      "Output file for image information.");
 
-KNOB<string> KnobVDSO(KNOB_MODE_WRITEONCE, "pintool",
-        "vdso", "vdso.so", "Output file for the vdso shared library.");
+KNOB<string> KnobVDSO(KNOB_MODE_WRITEONCE, "pintool", "vdso", "vdso.so",
+                      "Output file for the vdso shared library.");
 
-KNOB<bool> KnobLeaks(KNOB_MODE_WRITEONCE, "pintool",
-        "leaks", "0", "Enable fast recording of leaks, provided via leakin.");
+KNOB<bool> KnobLeaks(KNOB_MODE_WRITEONCE, "pintool", "leaks", "0",
+                     "Enable fast recording of leaks, provided via leakin.");
 
-KNOB<string> KnobLeakIn(KNOB_MODE_WRITEONCE, "pintool",
-        "leakin", "", "Binary input file containing all leaks to trace."
-                      "If empty, all selected instructions are traced. "
-                      "In any case specify -func, -bbl, -mem -heap accordingly!"
-                      "This means that instructions in the -bin file are only traced,"
-                      "if also the corresponding flag (e.g. -mem, -bbl) is set");
+KNOB<string>
+    KnobLeakIn(KNOB_MODE_WRITEONCE, "pintool", "leakin", "",
+               "Binary input file containing all leaks to trace."
+               "If empty, all selected instructions are traced. "
+               "In any case specify -func, -bbl, -mem -heap accordingly!"
+               "This means that instructions in the -bin file are only traced,"
+               "if also the corresponding flag (e.g. -mem, -bbl) is set");
 
-KNOB<string> KnobLeakOut(KNOB_MODE_WRITEONCE, "pintool",
-        "leakout", "", "Hierarchical output file of all leaks. Only useful with -bin option.");
+KNOB<string> KnobLeakOut(
+    KNOB_MODE_WRITEONCE, "pintool", "leakout", "",
+    "Hierarchical output file of all leaks. Only useful with -bin option.");
 
-KNOB<bool> KnobCallstack(KNOB_MODE_WRITEONCE, "pintool",
-        "cs", "0", "Take callstack into account and trace leaks only in the correct calling context. Only useful with -bin option.");
+KNOB<bool>
+    KnobCallstack(KNOB_MODE_WRITEONCE, "pintool", "cs", "0",
+                  "Take callstack into account and trace leaks only in the "
+                  "correct calling context. Only useful with -bin option.");
 
-KNOB<string> KnobMain(KNOB_MODE_WRITEONCE, "pintool",
-        "main", "main", "Main method to start tracing. Defaults to 'main'. Provide ALL to trace from the beginning.");
+KNOB<string> KnobMain(KNOB_MODE_WRITEONCE, "pintool", "main", "main",
+                      "Main method to start tracing. Defaults to 'main'. "
+                      "Provide ALL to trace from the beginning.");
 
-KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool",
-        "debug", "0", "Enable debugging output.");
+KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool", "debug", "0",
+                    "Enable debugging output.");
 
 /***********************************************************************/
 /** Recording                                                          */
@@ -122,62 +137,88 @@ KNOB<int> KnobDebug(KNOB_MODE_WRITEONCE, "pintool",
 #define MALLOC "malloc"
 #define REALLOC "realloc"
 #define CALLOC "calloc"
+#define MMAP "mmap"
+#define MREMAP "mremap"
+#define MUNMAP "munmap"
 #define FREE "free"
-#define DEBUG(x) if(KnobDebug.Value() >= x)
+#define BRK "brk"
+#define DEBUG(x) if (KnobDebug.Value() >= x)
+#define MESSAGE(x, y) std::cout << x << y << std::endl
+
+#define PT_DEBUG(x, msg) DEBUG(x) MESSAGE("[pt-dbg" << x << "] ", msg)
+#define PT_INFO(msg) MESSAGE("[pt-info] ", msg)
+#define PT_WARN(msg) MESSAGE("[pt-warn] ", msg)
+#define PT_ASSERT(x, msg)                                                      \
+    {                                                                          \
+        if (!(x)) {                                                            \
+            printheap();                                                       \
+            print_allocmap();                                                  \
+            print_proc_map();                                                  \
+            MESSAGE("[pt-error] ", msg);                                       \
+            ASSERT(false, "pintool failed.");                                  \
+        }                                                                      \
+    }
+#define PT_ERROR(msg) PT_ASSERT(false, msg)
+
+bool fast_recording = false;
 
 int alloc_instrumented = 0;
+int vector_alloc_instrumented = 0;
 
 /* When using '-main ALL', ensures recording starts at function call */
 bool WaitForFirstFunction = false;
 bool Record = false;
+bool StopTrace = true;
+bool Trace = true;
 bool use_callstack = false;
+
+/* Store the latest accessed SYSCALL */
+int syscall_number = -1;
 
 /**
  * Traces are stored in a binary format, containing a sequence of
  * entry_t entries.
  */
-typedef struct __attribute__((packed))
-{
-  uint8_t type; /* holds values of entry_type_t */
-  uint64_t ip;     /* instruction pointer */
-  uint64_t data;   /* additional data, depending on type */
-}
-entry_t;
+typedef struct __attribute__((packed)) {
+    uint8_t type; /* holds values of entry_type_t */
+    void *ip;     /* instruction pointer */
+    void *data;   /* additional data, depending on type */
+} entry_t;
 
 /**
  * Entry types.
  */
 enum entry_type_t {
-  /* Dummy types */
-  A = 0,
-  B = 1,
-  C = 2,
-  D = 3,
+    /* Dummy types */
+    A = 0,
+    B = 1,
+    C = 2,
+    D = 3,
 
-  MASK_NONE = 0,
-  /* Instructions doing memory reads/writes */
-  READ  = MASK_NONE | A,
-  WRITE = MASK_NONE | B,
+    MASK_NONE = 0,
+    /* Instructions doing memory reads/writes */
+    READ = MASK_NONE | A,
+    WRITE = MASK_NONE | B,
 
-  MASK_BRANCH = 4,
-  /* Branching instructions */
-  BRANCH     = MASK_BRANCH | A,
-  FUNC_ENTRY = MASK_BRANCH | B,
-  FUNC_EXIT  = MASK_BRANCH | C,
-  FUNC_BBL   = MASK_BRANCH | D,
+    MASK_BRANCH = 4,
+    /* Branching instructions */
+    BRANCH = MASK_BRANCH | A,
+    FUNC_ENTRY = MASK_BRANCH | B,
+    FUNC_EXIT = MASK_BRANCH | C,
+    FUNC_BBL = MASK_BRANCH | D,
 
-  MASK_HEAP = 8,
-  /* Instructions doing memory reads/writes on heap objects */
-  HREAD  = MASK_HEAP | READ,
-  HWRITE = MASK_HEAP | WRITE,
-  /* Heap alloc/free calls */
-  HALLOC = MASK_HEAP | C,
-  HFREE  = MASK_HEAP | D,
+    MASK_HEAP = 8,
+    /* Instructions doing memory reads/writes on heap objects */
+    HREAD = MASK_HEAP | READ,
+    HWRITE = MASK_HEAP | WRITE,
+    /* Heap alloc/free calls */
+    HALLOC = MASK_HEAP | C,
+    HFREE = MASK_HEAP | D,
 
-  MASK_LEAK = 16,
-  /* Dataleaks and Controlflow leaks, used for fast recording */
-  DLEAK  = MASK_LEAK | A,
-  CFLEAK = MASK_LEAK | B,
+    MASK_LEAK = 16,
+    /* Dataleaks and Controlflow leaks, used for fast recording */
+    DLEAK = MASK_LEAK | A,
+    CFLEAK = MASK_LEAK | B,
 };
 
 std::vector<entry_t> trace; /* Contains all traced instructions */
@@ -185,45 +226,272 @@ ofstream imgfile;           /* Holds memory layout with function symbols */
 ofstream vdsofile;          /* Holds vdso shared library */
 
 /***********************************************************************/
+/* Image tracking*/
+typedef struct {
+    string name;
+    uint64_t baseaddr;
+    uint64_t endaddr;
+    string hash;
+} imgobj_t;
+
+typedef std::vector<imgobj_t> IMGVEC;
+IMGVEC imgvec;
+
+/* Image to function mapping*/
+typedef struct {
+    string name;
+    uint64_t baseaddr;
+    uint64_t endaddr;
+    string funcname;
+} funcobj_t;
+
+typedef std::vector<funcobj_t> FUNCVEC;
+FUNCVEC funcvec;
+
+/***********************************************************************/
 /* Heap tracking */
 
 typedef struct {
-  uint32_t id;
-  size_t size;
-  uint64_t base;
-  bool used;
+    char const *type;
+    size_t size;
+    uint64_t base;
+    std::string callstack;
+    std::string hash;
 } memobj_t;
 
-uint32_t nextheapid = 1;
-memobj_t* heapcache;
 typedef std::vector<memobj_t> HEAPVEC;
 HEAPVEC heap;
+
+std::unordered_map<std::string, uint64_t> hashmap;
+std::unordered_map<uint64_t, uint64_t> allocmap;
+
+imgobj_t heaprange;
+
+int writecount = 0;
+
+/***********************************************************************/
+/* Brk tracking*/
+typedef struct {
+    imgobj_t image;
+    ADDRINT low;
+    ADDRINT high;
+} program_break_obj_t;
+
+typedef std::vector<program_break_obj_t> BRKVEC;
+BRKVEC brk_vec;
+imgobj_t brk_range;
+
+/***********************************************************************/
+/* Stack tracking*/
+imgobj_t stack;
+
+int pid = PIN_GetPid();
 
 /***********************************************************************/
 /* Multithreading */
 
 /* Global lock to protect trace buffer */
-//PIN_MUTEX lock;
+// PIN_MUTEX lock;
 
 typedef struct {
-  ADDRINT size;
+    char const *type;
+    ADDRINT size;
+    std::string callstack;
 } alloc_state_t;
 
 typedef struct {
-  ADDRINT old;
-  ADDRINT size;
+    char const *type;
+    ADDRINT old;
+    ADDRINT size;
+    std::string callstack;
 } realloc_state_t;
 
 typedef struct {
-  /* allocation routines sometimes call themselves in a nested way during initialization */
-  std::vector<alloc_state_t> malloc_state;
-  std::vector<alloc_state_t> calloc_state;
-  std::vector<realloc_state_t> realloc_state;
-  ADDRINT RetIP;
-  int newbbl;
+    ADDRINT old;
+    ADDRINT addr;
+} vector_realloc_state_t;
+
+typedef struct {
+    /* allocation routines sometimes call themselves in a nested way during
+     * initialization */
+    std::vector<alloc_state_t> malloc_state;
+    std::vector<alloc_state_t> calloc_state;
+    std::vector<realloc_state_t> realloc_state;
+    std::vector<alloc_state_t> mmap_state;
+    std::vector<realloc_state_t> mremap_state;
+    std::vector<vector_realloc_state_t> vector_realloc_state;
+    ADDRINT RetIP;
+    int newbbl;
 } thread_state_t;
 
 std::vector<thread_state_t> thread_state;
+
+/***********************************************************************/
+/**Calculating the Logical Address from the Virtual Address
+ * Every Logical Address is 64 bit = 32 bit MemoryIndex + 32 bit Offset*/
+/***********************************************************************/
+
+void print_allocmap() {
+    if (allocmap.size() == 0) {
+        return;
+    }
+    PT_INFO("allocmap:");
+    for (auto &it : allocmap) {
+        cout << it.first << " - " << it.second << endl;
+    }
+}
+
+void printheap() {
+    if (heap.size() == 0) {
+        return;
+    }
+    PT_INFO("heap:");
+    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
+        std::cout << it->base << "-" << it->size << std::endl;
+    }
+}
+
+uint64_t getIndex(string hash) {
+    uint64_t to_shift;
+    sscanf(hash.c_str(), "%llx", (long long unsigned int *)&to_shift);
+    /*std::cout << "shifted hash is " << (to_shift<<32) << std::endl;*/
+    return (to_shift << 32);
+}
+
+VOID print_proc_map(VOID) {
+    std::stringstream command_string;
+    command_string << "cat /proc/" << pid << "/maps";
+    const std::string to_pass(command_string.str());
+    PT_INFO("print_proc_map with " << to_pass.c_str());
+
+    FILE *fp;
+    char buffer[64];
+    const char *arg = to_pass.c_str();
+    fp = popen(arg, "r");
+    if (!fp) {
+        PT_ERROR("command failed");
+        return;
+    }
+    if (fp != NULL) {
+        while (fgets(buffer, 64, fp) != NULL) {
+            std::cout << buffer;
+        }
+        pclose(fp);
+    }
+}
+
+ADDRINT execute_commands(const std::string command, short pos,
+                         const std::string opt_command) {
+    std::stringstream command_string;
+    command_string << "cat /proc/" << pid << "/maps | grep '" << command
+                   << "' | awk '{print $1}' | cut -f" << pos << " -d-"
+                   << opt_command;
+    const std::string to_pass(command_string.str());
+    PT_DEBUG(1, "execute_commands " << to_pass.c_str());
+
+    FILE *fp;
+    char buffer[64];
+    const char *arg = to_pass.c_str();
+    fp = popen(arg, "r");
+    if (!fp) {
+        PT_ERROR("command failed");
+        return 0;
+    }
+    if (fp != NULL) {
+        while (fgets(buffer, 64, fp) != NULL) {
+            pclose(fp);
+        }
+    }
+    PT_DEBUG(3, " buf is " << buffer);
+    std::string tmp = "0x" + (std::string)buffer;
+    PT_DEBUG(3, " tmp is " << tmp);
+    PT_DEBUG(3, " func is " << std::hex << strtol(tmp.c_str(), NULL, 0));
+
+    return ((ADDRINT)strtol(tmp.c_str(), NULL, 0));
+}
+
+void *getLogicalAddress(void *virt_addr, void *ip) {
+    PT_DEBUG(3, "get log_addr for virt_addr of " << virt_addr);
+
+    if (virt_addr == nullptr) {
+        // TODO assert false?
+        PT_ERROR("dereferenced a nullptr");
+        return nullptr;
+    }
+    // Is the Virtual Address in the Heap address space?
+    /* Set heap start and end markers */
+    if (heap.size() &&
+        (heaprange.baseaddr != heap.front().base ||
+         heaprange.endaddr != heap.back().base + heap.back().size)) {
+        heaprange.baseaddr = heap.front().base;
+        heaprange.endaddr = heap.back().base + heap.back().size;
+        PT_DEBUG(3, "heap.baseaddr: " << heaprange.baseaddr);
+        PT_DEBUG(3, "heap.endaddr: " << heaprange.endaddr);
+    }
+    // Does the Virtual Address belong to any heap object?
+    if ((uint64_t)virt_addr >= heaprange.baseaddr &&
+        (uint64_t)virt_addr <= heaprange.endaddr) {
+        uint64_t *log_addr = static_cast<uint64_t *>(virt_addr);
+        for (auto i : heap) {
+            if ((uint64_t)virt_addr < i.base ||
+                (uint64_t)virt_addr >= (i.base + i.size)) {
+                continue;
+            }
+            auto offset = (uint64_t)virt_addr - i.base;
+            log_addr = (uint64_t *)(allocmap[i.base] | offset);
+            PT_DEBUG(4, "found addr in heap vector, log_addr: "
+                            << std::hex << (uint64_t)log_addr);
+            return log_addr;
+        }
+    }
+    // Is the Virtual Address in the Stack address space?
+    if ((uint64_t)virt_addr >= stack.baseaddr &&
+        (uint64_t)virt_addr < stack.endaddr) {
+        PT_DEBUG(4, "found addr in stack " << std::hex << (uint64_t)virt_addr);
+        return virt_addr;
+    }
+    // Is the Virtual Address in the IMG/Code address space?
+    for (auto i : imgvec) {
+        if ((uint64_t)virt_addr < i.baseaddr ||
+            (uint64_t)virt_addr >= i.endaddr) {
+            continue;
+        }
+        PT_DEBUG(4, "found addr in image " << std::hex << (uint64_t)virt_addr);
+        return virt_addr;
+    }
+    // Is the Virtual Address in the Program Break address space?
+    if ((uint64_t)virt_addr >= brk_range.baseaddr &&
+        (uint64_t)virt_addr < brk_range.endaddr) {
+        PT_DEBUG(2, "found addr in brk " << std::hex << (uint64_t)virt_addr
+                                         << " called from " << std::hex
+                                         << (uint64_t)ip);
+        for (auto brk : brk_vec) {
+            if ((uint64_t)virt_addr < brk.low ||
+                (uint64_t)virt_addr >= brk.high) {
+                continue;
+            }
+            PT_ASSERT(((uint64_t)ip >= brk.image.baseaddr &&
+                       (uint64_t)ip < brk.image.endaddr),
+                      "brk access within different image than brk "
+                      "syscall originated.");
+            return virt_addr;
+        }
+        PT_WARN("found addr in brk " << std::hex << (uint64_t)virt_addr
+                                     << " called from " << std::hex
+                                     << (uint64_t)ip);
+        for (auto brk : brk_vec) {
+            PT_WARN("brk from " << brk.low << " to " << brk.high);
+        }
+        PT_ERROR("brk access cannot be matched to any brk section");
+    }
+
+    PT_WARN("not found addr " << std::hex << (uint64_t)virt_addr);
+    PT_ASSERT(fast_recording == false,
+              "virt_addr was not found despite being in fast_recording mode");
+    DEBUG(3) printheap();
+    DEBUG(4) print_proc_map();
+    return virt_addr;
+}
 
 /***********************************************************************
  * FAST RECORDING
@@ -267,42 +535,43 @@ std::vector<thread_state_t> thread_state;
 class DataLeak {
   private:
     std::vector<uint64_t> data; /* Holds evidences */
-    uint64_t ip; /* The leaking instruction */
+    uint64_t ip;                /* The leaking instruction */
 
   public:
-    DataLeak(uint64_t ip = 0) : ip(ip) {
-    }
+    DataLeak(uint64_t ip = 0) : ip(ip) {}
 
     /**
      * Add evidence
      * @param d The evidence to add
      */
     void append(uint64_t d) {
-      ASSERT(ip, "[pintool] Error: IP not set");
-      DEBUG(1) printf("[pintool] DLEAK@%" PRIx64 ": %" PRIx64 " appended\n", ip, d);
-      data.push_back(d);
+        PT_ASSERT(ip, "IP not set");
+        DEBUG(3)
+        printf("[pt-info] DLEAK@%" PRIx64 ": %" PRIx64 " appended\n", ip, d);
+        data.push_back(d);
     }
 
     void print() {
-      for (std::vector<uint64_t>::iterator it = data.begin(); it != data.end(); it++) {
-        printf("         %" PRIx64 " ", *it);
-      }
-      printf("\n");
+        for (std::vector<uint64_t>::iterator it = data.begin();
+             it != data.end(); it++) {
+            printf("         %" PRIx64 " ", *it);
+        }
+        printf("\n");
     }
 
     /**
      * Export evidence to binary format
      * @param f The file to export to
      */
-    void doexport(FILE* f) {
-      uint8_t type = DLEAK;
-      uint64_t len = data.size();
-      uint8_t res = 0;
-      res += fwrite(&type, sizeof(type), 1, f) != 1;
-      res += fwrite(&ip, sizeof(ip), 1, f) != 1;
-      res += fwrite(&len, sizeof(len), 1, f) != 1;
-      res += fwrite(&data[0], sizeof(uint64_t), len, f) != len;
-      ASSERT(!res, "[pintool] Error: Unable to write file");
+    void doexport(FILE *f) {
+        uint8_t type = DLEAK;
+        uint64_t len = data.size();
+        uint8_t res = 0;
+        res += fwrite(&type, sizeof(type), 1, f) != 1;
+        res += fwrite(&ip, sizeof(ip), 1, f) != 1;
+        res += fwrite(&len, sizeof(len), 1, f) != 1;
+        res += fwrite(&data[0], sizeof(uint64_t), len, f) != len;
+        PT_ASSERT(!res, "Unable to write file");
     }
 };
 
@@ -311,44 +580,45 @@ class DataLeak {
  */
 class CFLeak {
   private:
-    std::vector<uint64_t> targets; /* Holds evidences */
+    std::vector<uint64_t> targets;     /* Holds evidences */
     std::vector<uint64_t> mergepoints; /* unused */
-    uint64_t bp; /* The leaking instruction */
+    uint64_t bp;                       /* The leaking instruction */
 
   public:
-    CFLeak(uint64_t bp = 0) : bp(bp) {
-    }
+    CFLeak(uint64_t bp = 0) : bp(bp) {}
 
     /**
      * Add evidence
      * @param ip The evidence to add
      */
     void append(uint64_t ip) {
-      ASSERT(bp, "[pintool] Error: BP not set");
-      DEBUG(1) printf("[pintool] CFLEAK@%" PRIx64 ": %" PRIx64 " appended\n", bp, ip);
-      targets.push_back(ip);
+        PT_ASSERT(bp, "BP not set");
+        DEBUG(3)
+        printf("[pt-info] CFLEAK@%" PRIx64 ": %" PRIx64 " appended\n", bp, ip);
+        targets.push_back(ip);
     }
 
     void print() {
-      for (std::vector<uint64_t>::iterator it = targets.begin(); it != targets.end(); it++) {
-        printf("         %" PRIx64 " ", *it);
-      }
-      printf("\n");
+        for (std::vector<uint64_t>::iterator it = targets.begin();
+             it != targets.end(); it++) {
+            printf("         %" PRIx64 " ", *it);
+        }
+        printf("\n");
     }
 
     /**
      * Export evidence to binary format
      * @param f The file to export to
      */
-    void doexport(FILE* f) {
-      uint8_t type = CFLEAK;
-      uint64_t len = targets.size();
-      uint8_t res = 0;
-      res += fwrite(&type, sizeof(type), 1, f) != 1;
-      res += fwrite(&bp, sizeof(bp), 1, f) != 1;
-      res += fwrite(&len, sizeof(len), 1, f) != 1;
-      res += fwrite(&targets[0], sizeof(uint64_t), len, f) != len;
-      ASSERT(!res, "[pintool] Error: Unable to write file");
+    void doexport(FILE *f) {
+        uint8_t type = CFLEAK;
+        uint64_t len = targets.size();
+        uint8_t res = 0;
+        res += fwrite(&type, sizeof(type), 1, f) != 1;
+        res += fwrite(&bp, sizeof(bp), 1, f) != 1;
+        res += fwrite(&len, sizeof(len), 1, f) != 1;
+        res += fwrite(&targets[0], sizeof(uint64_t), len, f) != len;
+        PT_ASSERT(!res, "Unable to write file");
     }
 };
 
@@ -365,19 +635,19 @@ class Context {
     cfleaks_t cfleaks;
 
   public:
-    Context() {
-    }
+    Context() {}
 
     /**
      * Add a new dataleak to trace during execution
      * @param ip The instruction to trace
      */
     virtual void dleak_create(uint64_t ip) {
-      if (dleaks.find(ip) == dleaks.end()) {
-        dleaks.insert(std::pair<uint64_t, DataLeak>(ip, DataLeak(ip)));
-      } else {
-        DEBUG(1) printf("[pintool] Warning: DLEAK: %" PRIx64 " not created\n", ip);
-      }
+        if (dleaks.find(ip) == dleaks.end()) {
+            dleaks.insert(std::pair<uint64_t, DataLeak>(ip, DataLeak(ip)));
+        } else {
+            DEBUG(3)
+            printf("[pintool] Warning: DLEAK: %" PRIx64 " not created\n", ip);
+        }
     }
 
     /**
@@ -386,12 +656,13 @@ class Context {
      * @param mp The merge point (unused)
      * @param len The length of the branch (branch point-> merge point) (unused)
      */
-    virtual void cfleak_create(uint64_t ip, uint64_t* mp, uint8_t len) {
-      if (cfleaks.find(ip) == cfleaks.end()) {
-        cfleaks.insert(std::pair<uint64_t, CFLeak>(ip, CFLeak(ip)));
-      } else {
-        DEBUG(1) printf("[pintool] Warning: CFLEAK: %" PRIx64 " not created\n", ip);
-      }
+    virtual void cfleak_create(uint64_t ip, uint64_t *mp, uint8_t len) {
+        if (cfleaks.find(ip) == cfleaks.end()) {
+            cfleaks.insert(std::pair<uint64_t, CFLeak>(ip, CFLeak(ip)));
+        } else {
+            DEBUG(3)
+            printf("[pintool] Warning: CFLEAK: %" PRIx64 " not created\n", ip);
+        }
     }
 
     /**
@@ -401,11 +672,12 @@ class Context {
      *             We do not (need to) distinguish between read and write here.
      */
     virtual void dleak_append(uint64_t ip, uint64_t data) {
-      if (dleaks.find(ip) == dleaks.end()) {
-        DEBUG(1) printf("[pintool] Warning: DLEAK: %" PRIx64 " not appended\n", ip);
-      } else {
-        dleaks[ip].append(data);
-      }
+        if (dleaks.find(ip) == dleaks.end()) {
+            DEBUG(3)
+            printf("[pintool] Warning: DLEAK: %" PRIx64 " not appended\n", ip);
+        } else {
+            dleaks[ip].append(data);
+        }
     }
 
     /**
@@ -414,106 +686,120 @@ class Context {
      * @param target The taken branch target (the evidence)
      */
     virtual void cfleak_append(uint64_t bbl, uint64_t target) {
-      if (cfleaks.find(bbl) == cfleaks.end()) {
-        DEBUG(1) printf("[pintool] Warning: CFLEAK: %" PRIx64 " not appended\n", bbl);
-      } else {
-        cfleaks[bbl].append(target);
-      }
+        if (cfleaks.find(bbl) == cfleaks.end()) {
+            DEBUG(3)
+            printf("[pintool] Warning: CFLEAK: %" PRIx64 " not appended\n",
+                   bbl);
+        } else {
+            cfleaks[bbl].append(target);
+        }
     }
 
     virtual void print() {
-      for (dleaks_t::iterator it = dleaks.begin(); it != dleaks.end(); it++) {
-        printf("[pintool]  DLEAK %" PRIx64 ": ", it->first);
-        it->second.print();
-      }
-      for (cfleaks_t::iterator it = cfleaks.begin(); it != cfleaks.end(); it++) {
-        printf("[pintool]  CFLEAK %" PRIx64 ": ", it->first);
-        it->second.print();
-      }
+        for (dleaks_t::iterator it = dleaks.begin(); it != dleaks.end(); it++) {
+            printf("[pintool]  DLEAK %" PRIx64 ": ", it->first);
+            it->second.print();
+        }
+        for (cfleaks_t::iterator it = cfleaks.begin(); it != cfleaks.end();
+             it++) {
+            printf("[pintool]  CFLEAK %" PRIx64 ": ", it->first);
+            it->second.print();
+        }
     }
 
     /**
      * Export evidence to binary format
      * @param f The file to export to
      */
-    virtual void doexport(FILE* f) {
-      for (dleaks_t::iterator it = dleaks.begin(); it != dleaks.end(); it++) {
-        it->second.doexport(f);
-      }
-      for (cfleaks_t::iterator it = cfleaks.begin(); it != cfleaks.end(); it++) {
-        it->second.doexport(f);
-      }
+    virtual void doexport(FILE *f) {
+        for (dleaks_t::iterator it = dleaks.begin(); it != dleaks.end(); it++) {
+            it->second.doexport(f);
+        }
+        for (cfleaks_t::iterator it = cfleaks.begin(); it != cfleaks.end();
+             it++) {
+            it->second.doexport(f);
+        }
     }
 };
 
 class CallContext;
 class CallStack;
-typedef std::map<uint64_t, CallContext*> children_t;
+typedef std::map<uint64_t, CallContext *> children_t;
 
 /**
  * Wraps class Context for use in class CallStack
  */
 class CallContext : public Context {
-  friend class CallStack;
+    friend class CallStack;
+
   private:
     uint64_t caller;
     uint64_t callee;
-    CallContext* parent;
+    CallContext *parent;
     children_t children;
     int unknown_child_depth;
     bool used;
 
   public:
     CallContext(uint64_t caller = 0, uint64_t callee = 0)
-      : Context(), caller(caller), callee(callee), parent(NULL), unknown_child_depth(0), used(false) {
-    }
+        : Context(), caller(caller), callee(callee), parent(NULL),
+          unknown_child_depth(0), used(false) {}
 
     virtual void dleak_append(uint64_t ip, uint64_t data) {
-      if (used == false || unknown_child_depth) {
-        DEBUG(1) printf("[pintool] Warning: DLEAK %" PRIx64 ": skipping due to %d %d\n", ip, used, unknown_child_depth);
-      } else {
-        Context::dleak_append(ip, data);
-      }
+        if (used == false || unknown_child_depth) {
+            DEBUG(1)
+            printf("[pintool] Warning: DLEAK %" PRIx64
+                   ": skipping due to %d %d\n",
+                   ip, used, unknown_child_depth);
+        } else {
+            Context::dleak_append(ip, data);
+        }
     }
 
     virtual void cfleak_append(uint64_t bbl, uint64_t target) {
-      if (used == false || unknown_child_depth) {
-        DEBUG(1) printf("[pintool] Warning: CFLEAK %" PRIx64 ": skipping due to %d %d\n", bbl, used, unknown_child_depth);
-      } else {
-        Context::cfleak_append(bbl, target);
-      }
+        if (used == false || unknown_child_depth) {
+            DEBUG(1)
+            printf("[pintool] Warning: CFLEAK %" PRIx64
+                   ": skipping due to %d %d\n",
+                   bbl, used, unknown_child_depth);
+        } else {
+            Context::cfleak_append(bbl, target);
+        }
     }
 
-    virtual void print(Context* currentContext = NULL) {
-      if (this == currentContext) {
-          printf("*");
+    virtual void print(Context *currentContext = NULL) {
+        if (this == currentContext) {
+            printf("*");
         }
-      printf("%" PRIx64 "-->%" PRIx64 " (%d)(%d)\n", this->caller, this->callee, this->unknown_child_depth, this->used);
-      Context::print();
-      for (children_t::iterator it = children.begin(); it != children.end(); it++) {
-        it->second->print(currentContext);
-      }
-      printf("<\n");
+        printf("%" PRIx64 "-->%" PRIx64 " (%d)(%d)\n", this->caller,
+               this->callee, this->unknown_child_depth, this->used);
+        Context::print();
+        for (children_t::iterator it = children.begin(); it != children.end();
+             it++) {
+            it->second->print(currentContext);
+        }
+        printf("<\n");
     }
 
     /**
      * Export evidence to binary format
      * @param f The file to export to
      */
-    virtual void doexport(FILE* f) {
-      uint8_t type = FUNC_ENTRY;
-      uint8_t res = 0;
-      res += fwrite(&type, sizeof(type), 1, f) != 1;
-      res += fwrite(&caller, sizeof(caller), 1, f) != 1;
-      res += fwrite(&callee, sizeof(callee), 1, f) != 1;
-      ASSERT(!res, "[pintool] Error: Unable to write file");
-      Context::doexport(f);
-      for (children_t::iterator it = children.begin(); it != children.end(); it++) {
-        it->second->doexport(f);
-      }
-      type = FUNC_EXIT;
-      res = fwrite(&type, sizeof(type), 1, f) != 1;
-      ASSERT(!res, "[pintool] Error: Unable to write file");
+    virtual void doexport(FILE *f) {
+        uint8_t type = FUNC_ENTRY;
+        uint8_t res = 0;
+        res += fwrite(&type, sizeof(type), 1, f) != 1;
+        res += fwrite(&caller, sizeof(caller), 1, f) != 1;
+        res += fwrite(&callee, sizeof(callee), 1, f) != 1;
+        PT_ASSERT(!res, "Unable to write file");
+        Context::doexport(f);
+        for (children_t::iterator it = children.begin(); it != children.end();
+             it++) {
+            it->second->doexport(f);
+        }
+        type = FUNC_EXIT;
+        res = fwrite(&type, sizeof(type), 1, f) != 1;
+        PT_ASSERT(!res, "Unable to write file");
     }
 };
 
@@ -522,20 +808,20 @@ class CallContext : public Context {
  */
 class AbstractLeakContainer {
   protected:
-    std::set<uint64_t> traced_dataleaks; /* List of data leaks which shall be instrumented */
-    std::set<uint64_t> traced_cfleaks;   /* List of control-flow leaks which shall be instrumented */
-    std::set<uint64_t> erased_dataleaks; /* List of data leaks which are already instrumented */
-    std::set<uint64_t> erased_cfleaks;   /* List of control-flow leaks which are already instrumented */
-    Context* currentContext;
+    std::set<uint64_t>
+        traced_dataleaks; /* List of data leaks which shall be instrumented */
+    std::set<uint64_t> traced_cfleaks; /* List of control-flow leaks which shall
+                                          be instrumented */
+    std::set<uint64_t> erased_dataleaks; /* List of data leaks which are already
+                                            instrumented */
+    std::set<uint64_t> erased_cfleaks;   /* List of control-flow leaks which are
+                                            already instrumented */
+    Context *currentContext;
 
   public:
-    size_t get_uninstrumented_dleak_size() {
-      return traced_dataleaks.size();
-    }
+    size_t get_uninstrumented_dleak_size() { return traced_dataleaks.size(); }
 
-    size_t get_uninstrumented_cfleak_size() {
-      return traced_cfleaks.size();
-    }
+    size_t get_uninstrumented_cfleak_size() { return traced_cfleaks.size(); }
 
     /**
      * Checks whether an instruction shall be instrumented and if yes,
@@ -544,20 +830,18 @@ class AbstractLeakContainer {
      * @return a value != 0 if successful
      */
     size_t get_erase_dleak(uint64_t ip) {
-      size_t er = traced_dataleaks.erase(ip);
-      if (er) {
-        erased_dataleaks.insert(ip);
-      }
-      return er;
+        size_t er = traced_dataleaks.erase(ip);
+        if (er) {
+            erased_dataleaks.insert(ip);
+        }
+        return er;
     }
 
     /**
      * Returns whether an instruction was previously
      * instrumented and, thus, erased.
      */
-    bool was_erased_dleak(uint64_t ip) {
-      return erased_dataleaks.count(ip);
-    }
+    bool was_erased_dleak(uint64_t ip) { return erased_dataleaks.count(ip); }
 
     /**
      * Checks whether an instruction shall be instrumented and if yes,
@@ -566,34 +850,34 @@ class AbstractLeakContainer {
      * @return a value != 0 if successful
      */
     size_t get_erase_cfleak(uint64_t ip) {
-      size_t er = traced_cfleaks.erase(ip);
-      if (er) {
-        erased_cfleaks.insert(ip);
-      }
-      return er;
+        size_t er = traced_cfleaks.erase(ip);
+        if (er) {
+            erased_cfleaks.insert(ip);
+        }
+        return er;
     }
 
     /**
      * Returns whether an instruction was previously
      * instrumented and, thus, erased.
      */
-    bool was_erased_cfleak(uint64_t ip) {
-      return erased_cfleaks.count(ip);
-    }
+    bool was_erased_cfleak(uint64_t ip) { return erased_cfleaks.count(ip); }
 
     void print_uninstrumented_leaks() {
-      if (traced_dataleaks.size() > 0) {
-        printf("[pintool] Uninstrumented DLEAKS:\n");
-        for (std::set<uint64_t>::iterator it = traced_dataleaks.begin(); it != traced_dataleaks.end(); it++) {
-          printf(" %" PRIx64 "\n", *it);
+        if (traced_dataleaks.size() > 0) {
+            printf("[pintool] Uninstrumented DLEAKS:\n");
+            for (std::set<uint64_t>::iterator it = traced_dataleaks.begin();
+                 it != traced_dataleaks.end(); it++) {
+                printf(" %" PRIx64 "\n", *it);
+            }
         }
-      }
-      if (traced_cfleaks.size() > 0) {
-        printf("[pintool] Uninstrumented CFLEAKS:\n");
-        for (std::set<uint64_t>::iterator it = traced_cfleaks.begin(); it != traced_cfleaks.end(); it++) {
-          printf(" %" PRIx64 "\n", *it);
+        if (traced_cfleaks.size() > 0) {
+            printf("[pintool] Uninstrumented CFLEAKS:\n");
+            for (std::set<uint64_t>::iterator it = traced_cfleaks.begin();
+                 it != traced_cfleaks.end(); it++) {
+                printf(" %" PRIx64 "\n", *it);
+            }
         }
-      }
     }
 
     /**
@@ -631,9 +915,9 @@ class AbstractLeakContainer {
      * @param ip The instruction to trace
      */
     virtual void dleak_create(uint64_t ip) {
-      ASSERT(currentContext, "[pintool] Error: Context not initialized");
-      traced_dataleaks.insert(ip);
-      currentContext->dleak_create(ip);
+        PT_ASSERT(currentContext, "Context not initialized");
+        traced_dataleaks.insert(ip);
+        currentContext->dleak_create(ip);
     }
 
     /**
@@ -642,10 +926,10 @@ class AbstractLeakContainer {
      * @param mp The merge point (unused)
      * @param len The length of the branch (branch point-> merge point) (unused)
      */
-    virtual void cfleak_create(uint64_t bp, uint64_t* mp, uint8_t len) {
-      ASSERT(currentContext, "[pintool] Error: Context not initialized");
-      traced_cfleaks.insert(bp);
-      currentContext->cfleak_create(bp, mp, len);
+    virtual void cfleak_create(uint64_t bp, uint64_t *mp, uint8_t len) {
+        PT_ASSERT(currentContext, "Context not initialized");
+        traced_cfleaks.insert(bp);
+        currentContext->cfleak_create(bp, mp, len);
     }
 
     /**
@@ -655,9 +939,9 @@ class AbstractLeakContainer {
      *             We do not (need to) distinguish between read and write here.
      */
     virtual void dleak_consume(uint64_t ip, uint64_t data) {
-      ASSERT(currentContext, "[pintool] Error: Context not initialized");
-      DEBUG(1) printf("[pintool] Consuming DLEAK %" PRIx64 "\n", ip);
-      currentContext->dleak_append(ip, data);
+        PT_ASSERT(currentContext, "Context not initialized");
+        DEBUG(1) printf("[pintool] Consuming DLEAK %" PRIx64 "\n", ip);
+        currentContext->dleak_append(ip, data);
     }
 
     /**
@@ -666,9 +950,9 @@ class AbstractLeakContainer {
      * @param target The taken branch target (the evidence)
      */
     virtual void cfleak_consume(uint64_t bbl, uint64_t target) {
-      ASSERT(currentContext, "[pintool] Error: Context not initialized");
-      DEBUG(1) printf("[pintool] Consuming CFLEAK %" PRIx64 "\n", bbl);
-      currentContext->cfleak_append(bbl, target);
+        PT_ASSERT(currentContext, "Context not initialized");
+        DEBUG(1) printf("[pintool] Consuming CFLEAK %" PRIx64 "\n", bbl);
+        currentContext->cfleak_append(bbl, target);
     }
 
     virtual void print_all() = 0;
@@ -677,9 +961,9 @@ class AbstractLeakContainer {
      * Export evidence to binary format
      * @param f The file to export to
      */
-    virtual void doexport(FILE* f) {
-      ASSERT(currentContext, "[pintool] Error: Context not initialized");
-      currentContext->doexport(f);
+    virtual void doexport(FILE *f) {
+        PT_ASSERT(currentContext, "Context not initialized");
+        currentContext->doexport(f);
     }
 };
 
@@ -691,25 +975,17 @@ class AbstractLeakContainer {
 class Flat : public AbstractLeakContainer {
 
   public:
-    Flat() {
-      currentContext = new Context();
-    }
+    Flat() { currentContext = new Context(); }
 
-    virtual void call_create(uint64_t caller, uint64_t callee) {
-    }
+    virtual void call_create(uint64_t caller, uint64_t callee) {}
 
-    virtual void ret_create(uint64_t ip) {
-    }
+    virtual void ret_create(uint64_t ip) {}
 
-    virtual void call_consume(uint64_t caller, uint64_t callee) {
-    }
+    virtual void call_consume(uint64_t caller, uint64_t callee) {}
 
-    virtual void ret_consume(uint64_t ip) {
-    }
+    virtual void ret_consume(uint64_t ip) {}
 
-    virtual void print_all() {
-      currentContext->print();
-    }
+    virtual void print_all() { currentContext->print(); }
 };
 
 /**
@@ -730,94 +1006,98 @@ class Flat : public AbstractLeakContainer {
 class CallStack : public AbstractLeakContainer {
 
   protected:
-    /* Generate a hash of caller and callee by swapping callee's DWORDS and XORING both. */
+    /* Generate a hash of caller and callee by swapping callee's DWORDS and
+     * XORING both. */
     uint64_t get_call_id(uint64_t caller, uint64_t callee) {
-      uint64_t id = caller;
-      uint32_t lower = callee & 0x00000000FFFFFFFFULL;
-      uint32_t upper = callee >> 32ULL;
-      id ^= upper | ((uint64_t)lower << 32ULL);
-      return id;
-    }
-  public:
-    CallStack() {
+        uint64_t id = caller;
+        uint32_t lower = callee & 0x00000000FFFFFFFFULL;
+        uint32_t upper = callee >> 32ULL;
+        id ^= upper | ((uint64_t)lower << 32ULL);
+        return id;
     }
 
+  public:
+    CallStack() {}
+
     void call_create(uint64_t caller, uint64_t callee) {
-      ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-      DEBUG(2) printf("[pintool] Building callstack %" PRIx64 " --> %" PRIx64 "\n", caller, callee);
-      uint64_t id = get_call_id(caller, callee);
-      if (currentContext == NULL) {
-        currentContext = new CallContext(caller, callee);
-      } else {
-        CallContext* top = static_cast<CallContext*>(currentContext);
-        if (top->children.find(id) == top->children.end()) {
-          CallContext* newcs = new CallContext(caller, callee);
-          newcs->used = true;
-          newcs->parent = top;
-          top->children[id] = newcs;
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        DEBUG(3)
+        printf("[pintool] Building callstack %" PRIx64 " --> %" PRIx64 "\n",
+               caller, callee);
+        uint64_t id = get_call_id(caller, callee);
+        if (currentContext == NULL) {
+            currentContext = new CallContext(caller, callee);
+        } else {
+            CallContext *top = static_cast<CallContext *>(currentContext);
+            if (top->children.find(id) == top->children.end()) {
+                CallContext *newcs = new CallContext(caller, callee);
+                newcs->used = true;
+                newcs->parent = top;
+                top->children[id] = newcs;
+            }
+            CallContext *move = top->children[id];
+            currentContext = top = move;
         }
-        CallContext* move = top->children[id];
-        currentContext = top = move;
-      }
     }
 
     void call_consume(uint64_t caller, uint64_t callee) {
-      ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-      ASSERT(currentContext, "[pintool] Error: Callstack is not initialized");
-      DEBUG(3) print_all();
-      DEBUG(2) printf("[pintool] Calling %" PRIx64 " --> %" PRIx64 "\n", caller, callee);
-      uint64_t id = get_call_id(caller, callee);
-      CallContext* top = static_cast<CallContext*>(currentContext);
-      if (!top->used) {
-        if (top->caller == caller && top->callee == callee) {
-          DEBUG(2) printf("[pintool] Entered first leaking callstack\n");
-          top->used = true;
-        }
-      } else {
-        if (top->unknown_child_depth || top->children.find(id) == top->children.end()) {
-          top->unknown_child_depth++;
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        PT_ASSERT(currentContext, "Callstack is not initialized");
+        DEBUG(3) print_all();
+        DEBUG(3)
+        printf("[pintool] Calling %" PRIx64 " --> %" PRIx64 "\n", caller,
+               callee);
+        uint64_t id = get_call_id(caller, callee);
+        CallContext *top = static_cast<CallContext *>(currentContext);
+        if (!top->used) {
+            if (top->caller == caller && top->callee == callee) {
+                DEBUG(3) printf("[pintool] Entered first leaking callstack\n");
+                top->used = true;
+            }
         } else {
-          CallContext* move = top->children[id];
-          currentContext = top = move;
+            if (top->unknown_child_depth ||
+                top->children.find(id) == top->children.end()) {
+                top->unknown_child_depth++;
+            } else {
+                CallContext *move = top->children[id];
+                currentContext = top = move;
+            }
         }
-      }
-      DEBUG(3) print_all();
+        DEBUG(3) print_all();
     }
 
     void ret_consume(uint64_t ip) {
-      ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-      ASSERT(currentContext, "[pintool] Error: Callstack is not initialized");
-      DEBUG(2) printf("[pintool] Returning %" PRIx64 "\n", ip);
-      CallContext* top = static_cast<CallContext*>(currentContext);
-      if (top->unknown_child_depth) {
-        top->unknown_child_depth--;
-      } else {
-        if (top->parent) {
-          ASSERT(top->parent, "[pintool] Error: Callstack parent is empty");
-          currentContext = top = top->parent;
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        PT_ASSERT(currentContext, "Callstack is not initialized");
+        DEBUG(3) printf("[pintool] Returning %" PRIx64 "\n", ip);
+        CallContext *top = static_cast<CallContext *>(currentContext);
+        if (top->unknown_child_depth) {
+            top->unknown_child_depth--;
         } else {
-          DEBUG(2) printf("[pintool] Warning: Ignoring return\n");
+            if (top->parent) {
+                PT_ASSERT(top->parent, "Callstack parent is empty");
+                currentContext = top = top->parent;
+            } else {
+                DEBUG(3) printf("[pintool] Warning: Ignoring return\n");
+            }
         }
-      }
     }
 
-    void ret_create(uint64_t ip) {
-      ret_consume(ip);
-    }
+    void ret_create(uint64_t ip) { ret_consume(ip); }
 
     bool empty() {
-      ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-      CallContext* top = static_cast<CallContext*>(currentContext);
-      return top == NULL || top->used == false;
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        CallContext *top = static_cast<CallContext *>(currentContext);
+        return top == NULL || top->used == false;
     }
 
-    CallContext* get_begin() {
-      ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-      CallContext* c = static_cast<CallContext*>(currentContext);
-      while(c && c->parent) {
-        c = c->parent;
-      }
-      return c;
+    CallContext *get_begin() {
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        CallContext *c = static_cast<CallContext *>(currentContext);
+        while (c && c->parent) {
+            c = c->parent;
+        }
+        return c;
     }
 
     /**
@@ -825,51 +1105,53 @@ class CallStack : public AbstractLeakContainer {
      * initial context
      */
     void rewind() {
-      ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-      CallContext* top = get_begin();
-      ASSERT(top, "[pintool] Error: Leaks not initialized");
-      top->used = false;
-      currentContext = top;
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        CallContext *top = get_begin();
+        PT_ASSERT(top, "Leaks not initialized");
+        top->used = false;
+        currentContext = top;
     }
 
     void print_all() {
-      ASSERT(use_callstack, "[pintool] Error: Wrong usage of callstack");
-      CallContext* top = get_begin();
-      if (top) {
-        printf("[pintool] Callstack:\n");
-        top->print(currentContext);
-      }
+        PT_ASSERT(use_callstack, "Wrong usage of callstack");
+        CallContext *top = get_begin();
+        if (top) {
+            printf("[pintool] Callstack:\n");
+            top->print(currentContext);
+        }
     }
 };
 
-AbstractLeakContainer* leaks = NULL;
+AbstractLeakContainer *leaks = NULL;
 
 /***********************************************************************/
 /** Thread/Main recording and initialization                           */
 /***********************************************************************/
 
 void init() {
-  //ASSERT(PIN_MutexInit(&lock), "[pintool] Error: Mutex init failed");
+    // PT_ASSERT(PIN_MutexInit(&lock), "Mutex init failed");
 }
 
 /**
  * Add an entry to the trace
  * This function is not thread-safe. Lock first.
  */
-VOID record_entry(entry_t entry)
-{
-  trace.push_back(entry);
-}
+VOID record_entry(entry_t entry) { trace.push_back(entry); }
 
 /**
  * Start recording.
  * @param threadid The thread
  * @param ins The first recorded instruction
+ * @param target UNUSED
  */
-VOID RecordMainBegin(THREADID threadid, ADDRINT ins) {
-  Record = true;
-  DEBUG(1) printf("[pintool] Start main() %lx\n", (long unsigned int)ins);
-  RecordFunctionEntry(threadid, 0, 0, false, ins, false);
+VOID RecordMainBegin(THREADID threadid, ADDRINT ins, ADDRINT target,
+                     const CONTEXT *ctxt) {
+    PIN_LockClient();
+    Record = true;
+    DEBUG(1)
+    printf("Start main() %x to %x\n", (unsigned int)ins, (unsigned int)target);
+    RecordFunctionEntry(threadid, 0, 0, false, ins, ctxt, false);
+    PIN_UnlockClient();
 }
 
 /**
@@ -878,9 +1160,11 @@ VOID RecordMainBegin(THREADID threadid, ADDRINT ins) {
  * @param ins The last recorded instruction
  */
 VOID RecordMainEnd(THREADID threadid, ADDRINT ins) {
-  Record = false;
-  DEBUG(1) printf("[pintool] End main()\n");
-  RecordFunctionExit(threadid, ins, ins, NULL, false);
+    PIN_LockClient();
+    Record = false;
+    DEBUG(1) printf("[pintool] End main()\n");
+    RecordFunctionExit(threadid, ins, ins, NULL, false);
+    PIN_UnlockClient();
 }
 
 /**
@@ -892,22 +1176,22 @@ VOID RecordMainEnd(THREADID threadid, ADDRINT ins) {
  * @param flags Unused
  * @param v Unused
  */
-VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
-{
-    ASSERT(threadid == 0, "[pintool] Error: Multithreading detected but not supported!");
-    DEBUG(1) printf("[pintool] Thread begin %d\n",threadid);
-    //PIN_MutexLock(&lock);
+VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v) {
+    PT_ASSERT(threadid == 0, "Multithreading detected but not supported!");
+    DEBUG(1) printf("[pintool] Thread begin %d\n", threadid);
+    // PIN_MutexLock(&lock);
+
     if (thread_state.size() <= threadid) {
-      thread_state_t newstate;
-      newstate.RetIP = 0;
-      newstate.newbbl = 0;
-      thread_state.push_back(newstate);
+        thread_state_t newstate;
+        newstate.RetIP = 0;
+        newstate.newbbl = 0;
+        thread_state.push_back(newstate);
     } else {
-      thread_state[threadid].RetIP = 0;
-      thread_state[threadid].newbbl = 0;
+        thread_state[threadid].RetIP = 0;
+        thread_state[threadid].newbbl = 0;
     }
-    ASSERT(thread_state.size() > threadid, "[pintool] Error: thread_state corrupted");
-    //PIN_MutexUnlock(&lock);
+    PT_ASSERT(thread_state.size() > threadid, "thread_state corrupted");
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -917,154 +1201,211 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
  * @param code Unused
  * @param v Unused
  */
-VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
-{
-    //PIN_MutexLock(&lock);
-    DEBUG(1) printf("[pintool] Thread end %d code %d\n",threadid, code);
-    //PIN_MutexUnlock(&lock);
+VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v) {
+    // PIN_MutexLock(&lock);
+    DEBUG(1) printf("[pintool] Thread end %d code %d\n", threadid, code);
+    // PIN_MutexUnlock(&lock);
 }
 
 /***********************************************************************/
 /** Heap recording                                                     */
 /***********************************************************************/
 
-void printheap() {
-  std::cout << "[pintool] Heap:" << std::endl;
-  for(HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-    std::cout << std::hex << it->id << ":" << it->base << "-" << it->size << " used:" << it->used << std::endl;
-  }
-}
+/**
+ * calculate sha1-hash and use the 4 bytes of the hash as the memory Index
+ */
+void calculate_sha1_hash(memobj_t *obj) {
+    PT_DEBUG(2, "HashMap callstack " << obj->callstack);
 
-memobj_t* lookup_heap(uint64_t addr) {
-  uint64_t paddr = addr;
-  if (heapcache) {
-    ASSERT(heapcache->used, "[pintool] Error: Heapcache corrupt");
-    if (paddr >= heapcache->base && paddr < heapcache->base + heapcache->size) {
-      return heapcache;
-    }
-  }
+    /* Hash shall be unique wrt. calling location */
+    std::stringstream to_hash(obj->type, ios_base::app | ios_base::out);
+    to_hash << obj->callstack;
 
-  for(HEAPVEC::reverse_iterator it = heap.rbegin(); it != heap.rend(); ++it) {
-    if (!it->used) {
-      continue;
-    }
-    if (paddr >= it->base) {
-      if (paddr < it->base + it->size) {
-        return heapcache = &(*it);
-      } else {
-        break;
-      }
-    }
-  }
-  return NULL;
-}
+    /**
+     * A hash, i.e. logical base address, shall only occur once.
+     * For variation the occurence of a hash is counted within hashmap.
+     * This count is used together with the calling location to create an
+     * unique hash.
+     */
+    std::stringstream count;
+    count << hex << hashmap[to_hash.str()];
+    hashmap[to_hash.str()] += 1;
 
-VOID test_mem_heap(entry_t* pentry) {
-  memobj_t* obj = lookup_heap(pentry->data);
-  if (obj) {
-    uint64_t pdata = pentry->data;
-    pdata -= obj->base;
-    ASSERT((pdata & 0xFFFFFFFF00000000ULL) == 0, "[pintool] Error: Heap object too big");
-    pdata |= (uint64_t)obj->id << 32ULL;
-    pentry->data = pdata;
-    pentry->type |= MASK_HEAP;
-  }
+    SHA1 hash;
+    to_hash << count.str();
+    hash.update(to_hash.str());
+    obj->hash = hash.final();
+
+    PT_DEBUG(1, "HashMap for    " << to_hash.str());
+    PT_DEBUG(1, "HashMap count  0x" << count.str());
+    PT_DEBUG(1, "Object hash    " << hex << obj->hash);
 }
 
 /**
- * Add alloc/free to the trace
- * This function is not thread-safe. Lock first.
+ * gets the call stack and converts every IP Virtual address to it's new
+ * representation identified uniquely by its image name and offset to address
+ * ASLR All the new IPs are then added to form a unique value per call stack
+ * which is used later in the calculate_sha1_hash function
  */
-void record_heap_op(memobj_t *obj, ADDRINT addr) {
-  entry_t entry;
-  entry.type = obj->used ? HALLOC : HFREE;
-  entry.ip = (((uint64_t)obj->id << 32ULL) | obj->size);
-  entry.data = addr;
-  record_entry(entry);
+
+void print_callstack(THREADID threadid) {
+    auto mngr = CALLSTACK::CallStackManager::get_instance();
+    auto cs = mngr->get_stack(threadid);
+    std::vector<string> out;
+    CALLSTACK::IPVEC ipvec;
+    cs.emit_stack(cs.depth(), out, ipvec);
+    for (uint32_t i = 0; i < out.size(); i++) {
+        std::cout << out[i];
+    }
+}
+
+std::string getcallstack(THREADID threadid) {
+    auto mngr = CALLSTACK::CallStackManager::get_instance();
+    auto cs = mngr->get_stack(threadid);
+    std::vector<string> out;
+    CALLSTACK::IPVEC ipvec;
+    cs.emit_stack(cs.depth(), out, ipvec);
+    DEBUG(2) for (uint32_t i = 0; i < out.size(); i++) {
+        DEBUG(2) std::cout << out[i];
+    }
+    std::stringstream unique_cs(ios_base::app | ios_base::out);
+
+    for (auto i : ipvec) {
+        unique_cs << " 0x" << hex << i.ipaddr;
+    }
+    PT_DEBUG(2, "callstack " << unique_cs.str());
+    return unique_cs.str();
+}
+
+/**
+ * Handle calls to free by maintaining a list of all heap objects
+ * This function is not thread-safe. Lock first.
+ * The returned value is the logical base address of the freed heap object
+ */
+void dofree(ADDRINT addr) {
+    PT_DEBUG(1, "dofree 0x" << std::hex << addr);
+
+    if (!addr) {
+        PT_DEBUG(3, "dofree called with NULL");
+        return;
+    }
+
+    if (allocmap.find(addr) == allocmap.end()) {
+        PT_ERROR("dofree didnot found an element in allocmap");
+    }
+    allocmap.erase(addr);
+
+    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
+        if (it->base != addr) {
+            continue;
+        }
+        heap.erase(it);
+        return;
+    }
+
+    std::stringstream unique_cs(ios_base::app | ios_base::out);
+    PT_ERROR("dofree didnot found an element in heap");
 }
 
 /**
  * Handle calls to [m|re|c]alloc by keeping a list of all heap objects
  * This function is not thread-safe. Lock first.
  */
-void domalloc(ADDRINT addr, ADDRINT size, uint32_t objid) {
-  heapcache = NULL;
-  memobj_t obj;
-  if (objid) {
-    obj.id = objid;
-  } else {
-    obj.id = nextheapid++;
-  }
-
-  obj.base = addr;
-  obj.size = size;
-  obj.used = true;
-  record_heap_op(&obj, addr);
-
-  DEBUG(2) std::cout << "[pintool] Domalloc " << std::hex << addr << " " << size << std::endl;
-  /* Keep heap vector sorted */
-  HEAPVEC::iterator prev = heap.end();
-  HEAPVEC::iterator found = heap.end();
-  for(HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-    if (it->used) {
-      if (it->base >= obj.base) {
-        /* insert before*/
-        if (obj.base + obj.size > it->base) {
-          DEBUG(2) printheap();
-          DEBUG(2) std::cout << "[pintool] Inserting new object" << std::hex << obj.base << "-" << obj.size << std::endl;
-          ASSERT(false, "[pintool] Error: Corrupted heap A?!");
-        }
-        found = it;
-        break;
-      }
+void doalloc(ADDRINT addr, alloc_state_t *alloc_state,
+             realloc_state_t *realloc_state) {
+    if (alloc_state == nullptr && realloc_state == nullptr) {
+        PT_ERROR("doalloc failed as only NULL states were passed");
     }
-    prev = it;
-  }
+    if (alloc_state != nullptr && realloc_state != nullptr) {
+        PT_ERROR("doalloc failed as multiple states were passed");
+    }
 
-  if (found == heap.end()) {
-    /* no match found, append to the end */
-    heap.push_back(obj);
-  } else {
-    if (prev == heap.end()) {
-      heap.insert(found, obj);
-    } else if (prev->used) {
-        /* We cannot reuse prev, insert at 'found' */
-        if(prev->used && prev->base + prev->size > obj.base) {
-          DEBUG(2) printheap();
-          DEBUG(2) std::cout << "[pintool] Inserting new object" << std::hex << obj.base << "-" << obj.size << std::endl;
-          ASSERT(false, "[pintool] Error: Corrupted heap B?!");
+    /* Convert (re)alloc_state to memobj */
+    memobj_t obj;
+    obj.base = addr;
+    obj.size = (alloc_state) ? alloc_state->size : realloc_state->size;
+    obj.type = (alloc_state) ? alloc_state->type : realloc_state->type;
+    obj.callstack =
+        (alloc_state) ? alloc_state->callstack : realloc_state->callstack;
+
+    PT_DEBUG(1, "doalloc " << hex << addr << " " << hex << obj.size << " type "
+                           << obj.type);
+
+    /* Edit object in heap vector, if in-place reallocation */
+    /* allocmap does not require any update, as base address is not changed */
+    if (realloc_state && addr == realloc_state->old) {
+        for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); it++) {
+            if (obj.base != it->base) {
+                continue;
+            }
+            it->size = obj.size;
+            PT_DEBUG(2, "in-place reallocation addr " << std::hex << addr);
+            return;
         }
-        heap.insert(found, obj);
+        PT_ERROR("in-place reallocation failed");
+    }
+
+    /* Write allocmap */
+    ADDRINT log_addr = 0;
+    if (alloc_state) {
+        /* Create log_addr, if allocation */
+        calculate_sha1_hash(&obj);
+        log_addr = getIndex(obj.hash.substr(32, 8));
     } else {
-        /* prev is unused, reuse it */
-        *prev = obj;
+        /* Read log_addr, if not in-place reallocation */
+        if (allocmap.find(realloc_state->old) == allocmap.end()) {
+            PT_ERROR("doalloc used invalid allocmap addr "
+                     << std::hex << realloc_state->old);
+        }
+        log_addr = allocmap[realloc_state->old];
+        dofree(realloc_state->old);
     }
-  }
-}
+    allocmap[addr] = log_addr;
 
-/**
- * Handle calls to free by maintaining a list of all heap objects
- * This function is not thread-safe. Lock first.
- */
-uint32_t dofree(ADDRINT addr) {
-  heapcache = NULL;
-  DEBUG(2) std::cout << "[pintool] Dofree " << std::hex << addr << std::endl;
-  if (!addr) {
-    return 0;
-  }
-  for(HEAPVEC::iterator it = heap.begin(); it != heap.end(); ++it) {
-    if (!it->used) {
-      continue;
+    /* Insert object into heap vector for allocation or not-inplace reallocation
+     */
+    /* Keep heap vector sorted */
+    HEAPVEC::iterator below = heap.begin();
+    HEAPVEC::iterator above = heap.end();
+    for (HEAPVEC::iterator it = heap.begin(); it != heap.end(); it++) {
+        if (obj.base < it->base) {
+            above = it;
+            break;
+        }
+        below = it;
     }
-    if (it->base == addr) {
-      it->used = false;
-      record_heap_op(it, addr);
-      return it->id;
+
+    if (!heap.size() || (below == &heap.back() &&
+                         obj.base >= heap.back().base + heap.back().size)) {
+        /* No inbetween slot found, thus append to the end */
+        PT_INFO("Push to heap end");
+        heap.push_back(obj);
+    } else if (
+        /* Insert in front, if obj does not overlap first element */
+        (above == heap.begin() && obj.base + obj.size <= above->base)
+        /* Valid inbetween slot found, thus insert before 'above' */
+        || (obj.base >= below->base + below->size &&
+            obj.base + obj.size <= above->base)) {
+        heap.insert(above, obj);
+    } else if (
+        /* Insert in front, if below is of type MMAP/MREMAP and spans over obj
+         */
+        (below->type == std::string(MMAP) ||
+         below->type == std::string(MREMAP)) &&
+        (obj.base >= below->base) &&
+        (obj.base + obj.size <= below->base + below->size)) {
+        heap.insert(below, obj);
+    } else {
+        /* Invalid inbetween slot found, thus quit */
+        printheap();
+        PT_INFO("below.base " << below->base);
+        PT_INFO("above.base " << above->base);
+        PT_INFO("obj.base   " << obj.base);
+        PT_INFO("obj.size   " << obj.size);
+        PT_ASSERT(false, "Corrupted heap?!");
     }
-  }
-  std::cout << "[pintool] Warning: Invalid free!" << std::endl;
-  DEBUG(2) printheap();
-  return 0;
+    DEBUG(3) printheap();
+    DEBUG(3) print_allocmap();
 }
 
 /**
@@ -1072,17 +1413,26 @@ uint32_t dofree(ADDRINT addr) {
  * @param threadid The thread
  * @param size The size parameter passed to malloc
  */
-VOID RecordMallocBefore(THREADID threadid, VOID* ip, ADDRINT size) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  if (thread_state[threadid].realloc_state.size() == 0) {
-    DEBUG(1) std::cout << "[pintool] Malloc called with " << std::hex << size << " at " << ip << std::endl;
-    alloc_state_t state = { .size = size };
-    thread_state[threadid].malloc_state.push_back(state);
-  } else {
-    DEBUG(1) std::cout << "[pintool] Malloc ignored due to realloc_pending (size= " << std::hex << size << ") at " << ip << std::endl;
-  }
-  //PIN_MutexUnlock(&lock);
+VOID RecordMallocBefore(THREADID threadid, VOID *ip, ADDRINT size) {
+    PT_DEBUG(1, "malloc called with 0x" << std::hex << size << " at " << ip);
+    // PIN_MutexLock(&lock);
+    if (thread_state[threadid].realloc_state.size() == 0) {
+        SHA1 hash;
+        hash.update(getcallstack(threadid)); /* calculte the hash of the set of
+                                                IPs in the Callstack */
+        alloc_state_t state = {
+            .type = "malloc",
+            .size = size,
+            .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+        };
+        thread_state[threadid].malloc_state.push_back(state);
+    } else {
+        PT_DEBUG(1, "malloc ignored due to realloc_pending (size= "
+                        << std::hex << size << ") at " << ip);
+    }
+    if (StopTrace)
+        Trace = false;
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1090,15 +1440,24 @@ VOID RecordMallocBefore(THREADID threadid, VOID* ip, ADDRINT size) {
  * @param threadid The thread
  * @param addr The allocated heap pointer
  */
-VOID RecordMallocAfter(THREADID threadid, VOID* ip, ADDRINT addr) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Malloc returned " << std::hex << addr << std::endl;
-  ASSERT(thread_state[threadid].malloc_state.size() > 0, "[pintool] Error: Malloc returned but not called");
-  alloc_state_t state = thread_state[threadid].malloc_state.back();
-  thread_state[threadid].malloc_state.pop_back();
-  domalloc(addr, state.size, 0);
-  //PIN_MutexUnlock(&lock);
+VOID RecordMallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
+    PT_DEBUG(1, "malloc returned " << std::hex << addr);
+    // PIN_MutexLock(&lock);
+    PT_ASSERT(thread_state[threadid].malloc_state.size() > 0,
+              "Malloc returned but not called");
+    alloc_state_t state = thread_state[threadid].malloc_state.back();
+    thread_state[threadid].malloc_state.pop_back();
+    doalloc(addr, &state, nullptr);
+    if (thread_state[threadid].vector_realloc_state.size()) {
+        PT_DEBUG(1, "malloc nested within vector relocate");
+        vector_realloc_state_t state =
+            thread_state[threadid].vector_realloc_state.back();
+        thread_state[threadid].vector_realloc_state.pop_back();
+        state.addr = addr;
+        thread_state[threadid].vector_realloc_state.push_back(state);
+    }
+    Trace = true;
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1107,15 +1466,24 @@ VOID RecordMallocAfter(THREADID threadid, VOID* ip, ADDRINT addr) {
  * @param addr The heap pointer param of realloc
  * @param size The size parameter passed to realloc
  */
-VOID RecordReallocBefore(THREADID threadid, VOID* ip, ADDRINT addr, ADDRINT size) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Realloc called with " << std::hex << addr << " " << size << " at " << ip << std::endl;
-  realloc_state_t state;
-  state.size = size;
-  state.old = addr;
-  thread_state[threadid].realloc_state.push_back(state);
-  //PIN_MutexUnlock(&lock);
+VOID RecordReallocBefore(THREADID threadid, VOID *ip, ADDRINT addr,
+                         ADDRINT size) {
+    PT_DEBUG(1, "realloc called with " << std::hex << addr << " " << size
+                                       << " at " << ip);
+    // PIN_MutexLock(&lock);
+    SHA1 hash;
+    hash.update(getcallstack(
+        threadid)); /* calculte the hash of the set of IPs in the Callstack */
+    realloc_state_t state = {
+        .type = "realloc",
+        .old = addr,
+        .size = size,
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
+    thread_state[threadid].realloc_state.push_back(state);
+    if (StopTrace)
+        Trace = false;
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1123,20 +1491,17 @@ VOID RecordReallocBefore(THREADID threadid, VOID* ip, ADDRINT addr, ADDRINT size
  * @param threadid The thread
  * @param addr The allocated heap pointer
  */
-VOID RecordReallocAfter(THREADID threadid, VOID* ip, ADDRINT addr) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Realloc returned " << std::hex << addr << " at " << ip << std::endl;
-  ASSERT(thread_state[threadid].realloc_state.size() > 0, "[pintool] Error: Realloc returned but not called");
-  realloc_state_t state = thread_state[threadid].realloc_state.back();
-  thread_state[threadid].realloc_state.pop_back();
+VOID RecordReallocAfter(THREADID threadid, VOID *ip, ADDRINT addr) {
+    PT_DEBUG(1, "realloc returned " << std::hex << addr << " at " << ip);
+    // PIN_MutexLock(&lock);
+    PT_ASSERT(thread_state[threadid].realloc_state.size() > 0,
+              "realloc returned but not called");
+    realloc_state_t state = thread_state[threadid].realloc_state.back();
+    thread_state[threadid].realloc_state.pop_back();
 
-  uint32_t objid = 0;
-  if (state.old) {
-    objid = dofree(state.old);
-  }
-  domalloc(addr, state.size, objid);
-  //PIN_MutexUnlock(&lock);
+    doalloc(addr, nullptr, &state);
+    Trace = true;
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1145,13 +1510,25 @@ VOID RecordReallocAfter(THREADID threadid, VOID* ip, ADDRINT addr) {
  * @param nelem The number of elements parameter passed to calloc
  * @param size The size parameter passed to calloc
  */
-VOID RecordCallocBefore(THREADID threadid, VOID* ip, ADDRINT nelem, ADDRINT size) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Calloc called with " << std::hex << nelem << " " << size << " at " << ip << std::endl;
-  alloc_state_t state = { .size = size };
-  thread_state[threadid].calloc_state.push_back(state);
-  //PIN_MutexUnlock(&lock);
+VOID RecordCallocBefore(CHAR *name, THREADID threadid, ADDRINT nelem,
+                        ADDRINT size, ADDRINT ret) {
+    PT_DEBUG(1, "calloc called with " << hex << nelem << "*" << hex << size);
+    // PIN_MutexLock(&lock);
+    if (thread_state[threadid].calloc_state.size() == 0) {
+        SHA1 hash;
+        hash.update(getcallstack(threadid)); /* calculate the hash of the set of
+                                                IPs in the Callstack */
+        alloc_state_t state = {
+            .type = name,
+            .size = nelem * size,
+            .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+        };
+
+        thread_state[threadid].calloc_state.push_back(state);
+    }
+    if (StopTrace)
+        Trace = false;
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1159,15 +1536,24 @@ VOID RecordCallocBefore(THREADID threadid, VOID* ip, ADDRINT nelem, ADDRINT size
  * @param threadid The thread
  * @param addr The allocated heap pointer
  */
-VOID RecordCallocAfter(THREADID threadid, VOID* ip, ADDRINT addr) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Calloc returned " << std::hex << addr << " at " << ip << std::endl;
-  ASSERT(thread_state[threadid].calloc_state.size() > 0, "[pintool] Error: Calloc returned but not called");
-  alloc_state_t state = thread_state[threadid].calloc_state.back();
-  thread_state[threadid].calloc_state.pop_back();
-  domalloc(addr, state.size, 0);
-  //PIN_MutexUnlock(&lock);
+VOID RecordCallocAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
+    PT_DEBUG(1, "calloc returned " << hex << addr);
+    // PIN_MutexLock(&lock);
+    PT_ASSERT(thread_state[threadid].calloc_state.size() != 0,
+              "calloc returned but not called");
+    alloc_state_t state = thread_state[threadid].calloc_state.back();
+    thread_state[threadid].calloc_state.pop_back();
+    doalloc(addr, &state, nullptr);
+    if (thread_state[threadid].vector_realloc_state.size()) {
+        PT_DEBUG(1, "calloc nested within vector relocate");
+        vector_realloc_state_t state =
+            thread_state[threadid].vector_realloc_state.back();
+        thread_state[threadid].vector_realloc_state.pop_back();
+        state.addr = addr;
+        thread_state[threadid].vector_realloc_state.push_back(state);
+    }
+    Trace = true;
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1175,12 +1561,324 @@ VOID RecordCallocAfter(THREADID threadid, VOID* ip, ADDRINT addr) {
  * @param threadid The thread
  * @param addr The heap pointer which is freed
  */
-VOID RecordFreeBefore(THREADID threadid, VOID* ip, ADDRINT addr) {
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  DEBUG(1) std::cout << "[pintool] Free called with " << std::hex << addr << " at " << ip << std::endl;
-  dofree(addr);
-  //PIN_MutexUnlock(&lock);
+VOID RecordFreeBefore(THREADID threadid, VOID *ip, ADDRINT addr) {
+    PT_DEBUG(1, "free called with " << std::hex << addr << " at " << ip);
+    DEBUG(2) print_callstack(threadid);
+    // PIN_MutexLock(&lock);
+    if (thread_state[threadid].vector_realloc_state.size()) {
+        PT_DEBUG(1, "free nested within vector relocate");
+        vector_realloc_state_t state =
+            thread_state[threadid].vector_realloc_state.back();
+        thread_state[threadid].vector_realloc_state.pop_back();
+        state.old = addr;
+        thread_state[threadid].vector_realloc_state.push_back(state);
+
+        PT_DEBUG(1, "replace addr 0x" << hex << allocmap[state.addr]
+                                      << " with old 0x" << hex
+                                      << allocmap[state.old]);
+        allocmap[state.addr] = allocmap[state.old];
+    }
+    dofree(addr);
+    if (StopTrace)
+        Trace = false;
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record free
+ * @param threadid The thread
+ * @param addr The heap pointer which is freed
+ */
+VOID RecordFreeAfter(VOID) {
+    PT_DEBUG(1, "free returned");
+    Trace = true;
+}
+
+/**
+ * Record munmap
+ * @param threadid The thread
+ * @param addr The heap pointer which is munmapped
+ */
+VOID RecordMunmapBefore(THREADID threadid, ADDRINT addr, ADDRINT len) {
+    PT_DEBUG(1, "munmap called with " << std::hex << addr << "*" << len);
+    DEBUG(2) print_callstack(threadid);
+    // PIN_MutexLock(&lock);
+    dofree(addr);
+    //  PIN_MutexUnlock(&lock);
+}
+/**
+ * Record mmap
+ * @param threadid      thread
+ * @param size          size parameter passed to mmap
+ * @param ret           TODO
+ * @param force
+ */
+VOID RecordMmapBefore(CHAR *name, THREADID threadid, ADDRINT size,
+                      ADDRINT ret) {
+    PT_DEBUG(1, "mmap called with " << std::hex << size);
+    if (thread_state[threadid].mremap_state.size() != 0) {
+        PT_DEBUG(1, "mmap ignored due to mremap_pending (size= "
+                        << std::hex << size << ")");
+        return;
+    }
+    if (thread_state[threadid].malloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap stemming from pending malloc"
+                        << " (size= " << std::hex << size << ")");
+    }
+    if (thread_state[threadid].realloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap stemming from pending realloc"
+                        << " (size= " << std::hex << size << ")");
+    }
+    // PIN_MutexLock(&lock);
+    SHA1 hash;
+    hash.update(getcallstack(threadid)); /* calculate the hash of the set of
+                                            IPs in the Callstack */
+    alloc_state_t state = {
+        .type = name,
+        .size = size,
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
+
+    thread_state[threadid].mmap_state.push_back(state);
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mmap's result
+ *@param threadid The thread
+ * @param addr The allocated heap pointer
+ */
+VOID RecordMmapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
+    PT_DEBUG(1, "mmap returned " << std::hex << addr);
+    if (thread_state[threadid].mremap_state.size() != 0) {
+        PT_DEBUG(1, "mmap ignored due to mremap_pending");
+        return;
+    }
+    if (thread_state[threadid].malloc_state.size() != 0 ||
+        thread_state[threadid].realloc_state.size() != 0) {
+        PT_DEBUG(1, "nested mmap due to [m,re]alloc pending");
+    }
+    // PIN_MutexLock(&lock);
+
+    PT_ASSERT(thread_state[threadid].mmap_state.size() != 0,
+              "mmap returned but not called");
+
+    alloc_state_t state = thread_state[threadid].mmap_state.back();
+    thread_state[threadid].mmap_state.pop_back();
+
+    doalloc(addr, &state, nullptr);
+
+    //  PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mremap
+ * @param threadid The thread
+ * @param addr The heap pointer param of mremap
+ * @param size The size parameter passed to mremap
+ */
+VOID RecordMremapBefore(CHAR *name, THREADID threadid, ADDRINT addr,
+                        ADDRINT old_size, ADDRINT new_size, ADDRINT ret) {
+    PT_DEBUG(1, "mremap called with " << std::hex << addr << " " << new_size);
+    // PIN_MutexLock(&lock);
+
+    SHA1 hash;
+    hash.update(getcallstack(
+        threadid)); /* calculte the hash of the set of IPs in the Callstack */
+    realloc_state_t state = {
+        .type = name,
+        .old = addr,
+        .size = new_size,
+        .callstack = hash.final().substr(28, 12), /* 6 byte SHA1 hash */
+    };
+    thread_state[threadid].mremap_state.push_back(state);
+
+    //  PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record mremap's result
+ * @param threadid The thread
+ * @param addr The allocated heap pointer
+ */
+VOID RecordMremapAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
+    PT_DEBUG(1, "mremap returned " << std::hex << addr);
+    // PIN_MutexLock(&lock);
+    PT_ASSERT(thread_state[threadid].mremap_state.size() != 0,
+              "mremap returned but not called");
+
+    realloc_state_t state = thread_state[threadid].mremap_state.back();
+    thread_state[threadid].mremap_state.pop_back();
+
+    doalloc(addr, nullptr, &state);
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record brk's call
+ *@param threadid The thread
+ * @param addr The returned program break end address
+ */
+VOID RecordBrkBefore(THREADID threadid, ADDRINT addr) {
+    PT_DEBUG(1, "brk called with " << std::hex << addr);
+    DEBUG(3) print_callstack(threadid);
+    if (addr != 0) {
+        return;
+    }
+    // PIN_MutexLock(&lock);
+
+    program_break_obj_t program_break;
+    brk_vec.push_back(program_break);
+
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Record brk's result
+ *@param threadid The thread
+ * @param addr The returned program break end address
+ */
+VOID RecordBrkAfter(THREADID threadid, ADDRINT addr, ADDRINT ret) {
+    PT_DEBUG(1, "brk returned from " << std::hex << ret << " with " << std::hex
+                                     << addr);
+    // PIN_MutexLock(&lock);
+
+    imgobj_t img;
+    for (auto i : imgvec) {
+        if ((uint64_t)ret < i.baseaddr || (uint64_t)ret >= i.endaddr) {
+            continue;
+        }
+        img = i;
+        break;
+    }
+
+    program_break_obj_t program_break = brk_vec.back();
+    brk_vec.pop_back();
+
+    program_break.high = addr;
+    brk_range.endaddr = addr;
+    if (program_break.image.name.empty()) {
+        program_break.image = img;
+        program_break.low = addr;
+        PT_INFO("new brk owned by image: " << img.name);
+        PT_DEBUG(1, "ranging from " << program_break.low << " to "
+                                    << program_break.high);
+    } else if (program_break.image.name.compare(img.name) != 0) {
+        PT_INFO("brk called before from image: " << program_break.image.name);
+        PT_INFO("brk called now from image: " << img.name);
+        PT_ASSERT(false, "brk syscalls called within different images");
+    }
+
+    if (brk_range.baseaddr == 0) {
+        brk_range.baseaddr = addr;
+    }
+
+    brk_vec.push_back(program_break);
+
+    // PIN_MutexUnlock(&lock);
+}
+
+/**
+ * Detect C++ vector relocate
+ */
+VOID RelocateBefore(THREADID threadid) {
+    PT_DEBUG(1, "relocate called");
+    DEBUG(2) print_callstack(threadid);
+    // PIN_MutexLock(&lock);
+    vector_realloc_state_t state{
+        .old = 0,
+        .addr = 0,
+    };
+    thread_state[threadid].vector_realloc_state.push_back(state);
+    // PIN_MutexUnlock(&lock);
+}
+
+VOID RelocateAfter(THREADID threadid) {
+    PT_DEBUG(1, "relocate returned");
+    // PIN_MutexLock(&lock);
+    thread_state[threadid].vector_realloc_state.pop_back();
+    // PIN_MutexUnlock(&lock);
+}
+
+std::ofstream outFile;
+
+// Holds instruction count for a single procedure
+typedef struct RtnCount {
+    string _name;
+    string _image;
+    ADDRINT _address;
+    RTN _rtn;
+    UINT64 _rtnCount;
+    UINT64 _icount;
+    struct RtnCount *_next;
+} RTN_COUNT;
+
+// Linked list of instruction counts for each routine
+RTN_COUNT *RtnList = 0;
+
+// This function is called before every instruction is executed
+VOID docount(UINT64 *counter) { (*counter)++; }
+
+const char *StripPath(const char *path) {
+    const char *file = strrchr(path, '/');
+    if (file)
+        return file + 1;
+    else
+        return path;
+}
+
+// Pin calls this function every time a new rtn is executed
+VOID Routine(RTN rtn, VOID *v) {
+
+    // Allocate a counter for this routine
+    RTN_COUNT *rc = new RTN_COUNT;
+
+    // The RTN goes away when the image is unloaded, so save it now
+    // because we need it in the fini
+    rc->_name = PIN_UndecorateSymbolName(RTN_Name(rtn), UNDECORATION_NAME_ONLY);
+    rc->_image = StripPath(IMG_Name(SEC_Img(RTN_Sec(rtn))).c_str());
+    rc->_address = RTN_Address(rtn);
+    rc->_icount = 0;
+    rc->_rtnCount = 0;
+
+    // Add to list of routines
+    rc->_next = RtnList;
+    RtnList = rc;
+
+    RTN_Open(rtn);
+
+    // Insert a call at the entry point of a routine to increment the call count
+    RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)docount, IARG_PTR,
+                   &(rc->_rtnCount), IARG_END);
+
+    // For each instruction of the routine
+    for (INS ins = RTN_InsHead(rtn); INS_Valid(ins); ins = INS_Next(ins)) {
+        // Insert a call to docount to increment the instruction counter for
+        // this rtn
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)docount, IARG_PTR,
+                       &(rc->_icount), IARG_END);
+    }
+
+    // Add special tracking for C++ vector tracking
+    // TODO move to other alloc functions
+    size_t pos = rc->_name.find("_M_default_append");
+    if (pos != string::npos) {
+        PT_DEBUG(1, "found _M_default_append in " << rc->_name);
+        RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)RelocateBefore,
+                       IARG_THREAD_ID, IARG_END);
+        RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR)RelocateAfter,
+                       IARG_THREAD_ID, IARG_END);
+    }
+    pos = rc->_name.find("_M_realloc_insert");
+    if (pos != string::npos) {
+        PT_DEBUG(1, "found _M_realloc_insert in " << rc->_name);
+        RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)RelocateBefore,
+                       IARG_THREAD_ID, IARG_END);
+        RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR)RelocateAfter,
+                       IARG_THREAD_ID, IARG_END);
+    }
+
+    RTN_Close(rtn);
 }
 
 /***********************************************************************/
@@ -1194,22 +1892,25 @@ VOID RecordFreeBefore(THREADID threadid, VOID* ip, ADDRINT addr) {
  * @param addr The data address being read
  * @param fast_recording For fast recording
  */
-VOID RecordMemRead(THREADID threadid, VOID * ip, VOID * addr, bool fast_recording)
-{
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  entry_t entry;
-  entry.type = READ;
-  entry.ip = (uint64_t)((uintptr_t)ip);
-  entry.data = (uint64_t)((uintptr_t)addr);
-  test_mem_heap(&entry);
-  DEBUG(3) printf("[pintool] Read %" PRIx64 " to %" PRIx64 "\n", (uint64_t)entry.ip, (uint64_t)entry.data);
-  if (fast_recording) {
-    leaks->dleak_consume((uint64_t)entry.ip, (uint64_t)entry.data);
-  } else {
-    record_entry(entry);
-  }
-  //PIN_MutexUnlock(&lock);
+VOID RecordMemRead(THREADID threadid, VOID *ip, VOID *addr, bool fast_recording,
+                   const CONTEXT *ctxt) {
+    if (!Record || !Trace)
+        return;
+    PT_DEBUG(3, "ip in memread is   " << (uint64_t)ip);
+    // PIN_MutexLock(&lock);
+    entry_t entry;
+    entry.type = READ;
+    entry.ip = ip;
+    entry.data = getLogicalAddress(addr, ip);
+    DEBUG(3)
+    printf("Read %llx to %llx\n", (long long unsigned int)entry.ip,
+           (long long unsigned int)entry.data);
+    if (fast_recording) {
+        leaks->dleak_consume((uint64_t)entry.ip, (uint64_t)entry.data);
+    } else {
+        record_entry(entry);
+    }
+    //  PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1219,22 +1920,28 @@ VOID RecordMemRead(THREADID threadid, VOID * ip, VOID * addr, bool fast_recordin
  * @param addr The data address being written
  * @param fast_recording For fast recording
  */
-VOID RecordMemWrite(THREADID threadid, VOID * ip, VOID * addr, bool fast_recording)
-{
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  entry_t entry;
-  entry.type = WRITE;
-  entry.ip = (uint64_t)((uintptr_t)ip);
-  entry.data = (uint64_t)((uintptr_t)addr);
-  test_mem_heap(&entry);
-  DEBUG(3) printf("[pintool] Write %" PRIx64 " to %" PRIx64 "\n", (uint64_t)entry.ip, (uint64_t)entry.data);
-  if (fast_recording) {
-    leaks->dleak_consume((uint64_t)entry.ip, (uint64_t)entry.data);
-  } else {
-    record_entry(entry);
-  }
-  //PIN_MutexUnlock(&lock);
+VOID RecordMemWrite(THREADID threadid, VOID *ip, VOID *addr,
+                    bool fast_recording, const CONTEXT *ctxt) {
+    if (!Record || !Trace)
+        return;
+    // PIN_MutexLock(&lock);
+    entry_t entry;
+    entry.type = WRITE;
+    ADDRINT target =
+        ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_STACK_PTR) : 0;
+    PT_DEBUG(4, " TOP from WRITE is " << target);
+    PT_DEBUG(3, "ip in memwrite is   " << (uint64_t)ip);
+    entry.ip = ip;
+    entry.data = getLogicalAddress(addr, ip);
+    DEBUG(3)
+    printf("Write %llx to %llx\n", (long long unsigned int)entry.ip,
+           (long long unsigned int)entry.data);
+    if (fast_recording) {
+        leaks->dleak_consume((uint64_t)entry.ip, (uint64_t)entry.data);
+    } else {
+        record_entry(entry);
+    }
+    // PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1245,14 +1952,20 @@ VOID RecordMemWrite(THREADID threadid, VOID * ip, VOID * addr, bool fast_recordi
  * @param ins The branching instruction
  * @param target The next instruction (e.g. branch target)
  */
-VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target)
-{
-  if (!Record) return;
-  entry_t entry;
-  entry.type = BRANCH;
-  entry.ip = ins;
-  entry.data = target;
-  record_entry(entry);
+VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
+                           const CONTEXT *ctxt) {
+    if (!Record || !Trace)
+        return;
+    entry_t entry;
+    entry.type = BRANCH;
+    entry.ip = (void *)ins;
+    entry.data = (void *)target;
+    record_entry(entry);
+    PT_DEBUG(4, "Branch entry");
+    PT_DEBUG(4, "ip \t" << std::hex << entry.ip);
+    PT_DEBUG(4, "data \t" << std::hex << entry.data);
+    PT_DEBUG(4, "ins \t" << std::hex << ins);
+    PT_DEBUG(4, "target \t" << std::hex << target);
 }
 
 /**
@@ -1263,18 +1976,26 @@ VOID RecordBranch_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target)
  * @param ctxt The CPU context of bp
  * @param fast_recording For fast recording
  */
-VOID RecordBranch(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT * ctxt, bool fast_recording)
-{
-  //PIN_MutexLock(&lock);
-  ADDRINT target = (ADDRINT)PIN_GetContextReg( ctxt, REG_INST_PTR );
-  DEBUG(3) std::cout << "[pintool] Branch " << std::hex << bp << " to " << target << std::endl;
-  RecordBranch_unlocked(threadid, bp, target);
-  if (fast_recording) {
-    leaks->cfleak_consume(bp, target);
-  }
-  //PIN_MutexUnlock(&lock);
+VOID RecordBranch(THREADID threadid, ADDRINT bbl, ADDRINT bp,
+                  const CONTEXT *ctxt, bool fast_recording) {
+    //  PIN_MutexLock(&lock);
+    ADDRINT target = (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR);
+    PT_DEBUG(3, "Branch " << std::hex << bp << " to " << target);
+    PT_DEBUG(3, "fast_recording " << fast_recording);
+    RecordBranch_unlocked(threadid, bp, target, ctxt);
+    if (fast_recording) {
+        auto ix = (void *)bp;
+        uint64_t *li = static_cast<uint64_t *>(ix);
+        uint64_t b = (uint64_t)li;
+        auto id = (void *)target;
+        uint64_t *ld = static_cast<uint64_t *>(id);
+        uint64_t t = (uint64_t)ld;
+        leaks->cfleak_consume(b, t);
+    }
+    //  PIN_MutexUnlock(&lock);
 }
 
+#if 0
 /**
  * Record conditional branch due to REP-prefix. 
  * @param threadid The thread
@@ -1294,6 +2015,7 @@ VOID RecordRep(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT * ctxt,
   }
   //PIN_MutexUnlock(&lock);
 }
+#endif
 
 /**
  * Record call instructions.
@@ -1304,16 +2026,21 @@ VOID RecordRep(THREADID threadid, ADDRINT bbl, ADDRINT bp, const CONTEXT * ctxt,
  * @param indirect For indirect calls
  * @param target The called function's entry
  */
-VOID RecordFunctionEntry_unlocked(THREADID threadid, ADDRINT ins, BOOL indirect, ADDRINT target)
-{
-  if (!Record) return;
-  entry_t entry;
-  entry.type = FUNC_ENTRY;
-  entry.ip = ins;
-  entry.data = target;
-  DEBUG(3) std::cout << "[pintool] Call " << std::hex << ins << " to " << target << std::endl;
-  leaks->call_consume(ins, target);
-  record_entry(entry);
+VOID RecordFunctionEntry_unlocked(THREADID threadid, ADDRINT ins, BOOL indirect,
+                                  ADDRINT target, const CONTEXT *ctxt) {
+    if (!Record || !Trace)
+        return;
+    entry_t entry;
+    entry.type = FUNC_ENTRY;
+    entry.ip = (void *)ins;
+    if (entry.ip == nullptr) {
+        entry.ip = (void *)ins;
+    }
+    entry.data = (void *)target;
+    PT_DEBUG(3, "Call " << std::hex << ins << " to " << target);
+    // leaks->call_consume(ins, target);
+    leaks->call_consume((uint64_t)entry.ip, (uint64_t)entry.data);
+    record_entry(entry);
 }
 
 /**
@@ -1326,24 +2053,32 @@ VOID RecordFunctionEntry_unlocked(THREADID threadid, ADDRINT ins, BOOL indirect,
  * @param target The called function's entry
  * @param fast_recording For fast recording
  */
-VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins, BOOL indirect, ADDRINT target, bool fast_recording)
-{
-  if (WaitForFirstFunction) {
-    Record = true;
-    WaitForFirstFunction = false;
-  }
-  if (!Record) return;
-  //PIN_MutexLock(&lock);
-  if (indirect) {
-    DEBUG(2) std::cout << "[pintool] Icall to  " << std::hex << target << std::endl;
-  }
-  if (KnobFunc.Value()) {
-    RecordFunctionEntry_unlocked(threadid, ins, indirect, target);
-  }
-  if (fast_recording) {
-    leaks->cfleak_consume(ins, target);
-  }
-  //PIN_MutexUnlock(&lock);
+VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins,
+                         BOOL indirect, ADDRINT target, const CONTEXT *ctxt,
+                         bool fast_recording) {
+    if (WaitForFirstFunction) {
+        Record = true;
+        WaitForFirstFunction = false;
+    }
+    if (!Record || !Trace)
+        return;
+    //  PIN_MutexLock(&lock);
+    if (indirect) {
+        PT_DEBUG(2, "Icall to  " << std::hex << target);
+    }
+    if (KnobFunc.Value()) {
+        RecordFunctionEntry_unlocked(threadid, ins, indirect, target, ctxt);
+    }
+    if (fast_recording) {
+        auto ix = (void *)ins;
+        uint64_t *li = static_cast<uint64_t *>(ix);
+        uint64_t i = (uint64_t)li;
+        auto id = (void *)target;
+        uint64_t *ld = static_cast<uint64_t *>(id);
+        uint64_t t = (uint64_t)ld;
+        leaks->cfleak_consume(i, t);
+    }
+    //  PIN_MutexUnlock(&lock);
 }
 
 /**
@@ -1354,16 +2089,20 @@ VOID RecordFunctionEntry(THREADID threadid, ADDRINT bbl, ADDRINT ins, BOOL indir
  * @param ins The ret instruction
  * @param target The instruction to continue after ret
  */
-VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target)
-{
-  if (!Record) return;
-  entry_t entry;
-  entry.type = FUNC_EXIT;
-  entry.ip = ins;
-  entry.data = target;
-  DEBUG(2) std::cout << "[pintool] Ret " << std::hex << ins << " to " << target << std::endl;
-  leaks->ret_consume(ins);
-  record_entry(entry);
+VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target,
+                                 const CONTEXT *ctxt) {
+    if (!Record || !Trace)
+        return;
+    entry_t entry;
+    entry.type = FUNC_EXIT;
+    PT_DEBUG(4, " TOP from func EXIT is "
+                    << PIN_GetContextReg(ctxt, REG_STACK_PTR));
+    entry.ip = (void *)ins;
+    entry.data = (void *)target;
+    PT_DEBUG(2, "Ret " << std::hex << ins << " to " << target);
+    // leaks->ret_consume(ins);
+    leaks->ret_consume((uint64_t)entry.ip);
+    record_entry(entry);
 }
 
 /**
@@ -1375,162 +2114,315 @@ VOID RecordFunctionExit_unlocked(THREADID threadid, ADDRINT ins, ADDRINT target)
  * @param ctxt The CPU context of ins
  * @param fast_recording For fast recording
  */
-VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins, const CONTEXT * ctxt, bool fast_recording)
-{
-  if (!Record) return;
-  ADDRINT target = ctxt != NULL ? (ADDRINT)PIN_GetContextReg( ctxt, REG_INST_PTR ) : 0;
-  //PIN_MutexLock(&lock);
-  if (KnobFunc.Value()) {
-    RecordFunctionExit_unlocked(threadid, ins, target);
-  }
-  if (fast_recording) {
-    leaks->cfleak_consume(ins, target);
-  }
-  //PIN_MutexUnlock(&lock);
+VOID RecordFunctionExit(THREADID threadid, ADDRINT bbl, ADDRINT ins,
+                        const CONTEXT *ctxt, bool fast_recording) {
+    if (!Record || !Trace)
+        return;
+    ADDRINT target =
+        ctxt != NULL ? (ADDRINT)PIN_GetContextReg(ctxt, REG_INST_PTR) : 0;
+    //  PIN_MutexLock(&lock);
+    if (KnobFunc.Value()) {
+        RecordFunctionExit_unlocked(threadid, ins, target, ctxt);
+    }
+    if (fast_recording) {
+        auto ix = (void *)ins;
+        uint64_t *li = static_cast<uint64_t *>(ix);
+        uint64_t i = (uint64_t)li;
+        auto id = (void *)target;
+        uint64_t *ld = static_cast<uint64_t *>(id);
+        uint64_t t = (uint64_t)ld;
+        leaks->cfleak_consume(i, t);
+    }
+    //  PIN_MutexUnlock(&lock);
 }
 
 /***********************************************************************/
 /** Instrumentation Code                                               */
 /***********************************************************************/
 
+VOID Image(IMG img, VOID *v) {}
 
 /**
  * Instruments program entry and exit as well as heap functions of libc.
  * @param img The loaded image
  * @param v UNUSED
  */
-VOID instrumentMainAndAlloc(IMG img, VOID *v)
-{
-  string name = IMG_Name(img);
-  DEBUG(1) std::cout << "[pintool] Instrumenting " << name << std::endl;
-  if (imgfile.is_open()) {
-    uint64_t high = IMG_HighAddress(img);
-    uint64_t low = IMG_LowAddress(img);
-
-    if (vdsofile.is_open() && IMG_IsVDSO(img)) {
-      /* For VDSO, the HighAddress does not point to end of ELF file,
-       * leading to a truncated ELF file. We over-approximate the ELF size
-       * with IMG_SizeMapped instead.
-       */
-      high = low + IMG_SizeMapped(img);
-      DEBUG(1) std::cout << "[pintool] VDSO low:   0x" << std::hex << low << std::endl;
-      DEBUG(1) std::cout << "[pintool] VDSO high:  0x" << std::hex << high << std::endl;
-      DEBUG(1) std::cout << "[pintool] VDSO size mapped:  0x" << std::hex << IMG_SizeMapped(img) << std::endl;
-      vdsofile.write((const char*)low, IMG_SizeMapped(img));
-      vdsofile.close();
-      name = KnobVDSO.Value();
+VOID instrumentMainAndAlloc(IMG img, VOID *v) {
+    if (!IMG_Valid(img)) {
+        PT_ERROR("loaded image is invalid");
     }
 
-    imgfile << "Image:" << std::endl;
-    imgfile << name << std::endl;
-    imgfile << std::hex << low << ":" << high << std::endl;
-  }
+    string name = IMG_Name(img);
+    PT_DEBUG(1, "Instrumenting " << name);
 
-  if (IMG_Valid(img)) {
     if (imgfile.is_open()) {
-      for( SYM sym = IMG_RegsymHead(img); SYM_Valid(sym); sym = SYM_Next(sym) ) {
-        imgfile << std::hex << SYM_Address(sym) << ":" + SYM_Name(sym) << std::endl;
-      }
+        uint64_t high = IMG_HighAddress(img);
+        uint64_t low = IMG_LowAddress(img);
+
+        if (vdsofile.is_open() && IMG_IsVDSO(img)) {
+            /* For VDSO, the HighAddress does not point to end of ELF file,
+             * leading to a truncated ELF file. We over-approximate the ELF size
+             * with IMG_SizeMapped instead.
+             */
+            high = low + IMG_SizeMapped(img);
+            PT_DEBUG(1, "vdso low:   0x" << std::hex << low);
+            PT_DEBUG(1, "vdso high:  0x" << std::hex << high);
+            PT_DEBUG(1, "vdso size mapped:  0x" << std::hex
+                                                << IMG_SizeMapped(img));
+            vdsofile.write((const char *)low, IMG_SizeMapped(img));
+            vdsofile.close();
+            name = KnobVDSO.Value();
+        }
+
+        PT_DEBUG(1, "image name: " << name);
+        PT_DEBUG(1, "image low:  0x " << std::hex << low);
+        PT_DEBUG(1, "image high: 0x " << std::hex << high);
+        imgfile << "Image:" << std::endl;
+        imgfile << name << std::endl;
+        imgfile << std::hex << low << ":" << high << std::endl;
+
+        imgobj_t imgdata;
+        imgdata.name = name;
+        imgdata.baseaddr = low;
+        imgdata.endaddr = high;
+
+        SHA1 hash;
+        hash.update(imgdata.name);
+        imgdata.hash = hash.final().substr(32, 8);
+
+        for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec)) {
+            string sec_name = SEC_Name(sec);
+            low = SEC_Address(sec);
+            high = SEC_Address(sec) + SEC_Size(sec);
+
+            PT_DEBUG(1, "sec name: " << sec_name);
+            PT_DEBUG(1, "sec low:  0x " << std::hex << low);
+            PT_DEBUG(1, "sec high: 0x " << std::hex << high);
+            if (!SEC_Mapped(sec)) {
+                PT_INFO("unmapped sec dropped: " << sec_name);
+                continue;
+            }
+            imgdata.baseaddr =
+                (imgdata.baseaddr > low) ? low : imgdata.baseaddr;
+            imgdata.endaddr = (imgdata.endaddr < high) ? high : imgdata.endaddr;
+        }
+
+        PT_DEBUG(1, "image low:  0x " << std::hex << imgdata.baseaddr);
+        PT_DEBUG(1, "image high: 0x " << std::hex << imgdata.endaddr);
+        imgvec.push_back(imgdata);
+
+        for (SYM sym = IMG_RegsymHead(img); SYM_Valid(sym);
+             sym = SYM_Next(sym)) {
+            imgfile << std::hex << SYM_Address(sym)
+                    << ":" + PIN_UndecorateSymbolName(SYM_Name(sym),
+                                                      UNDECORATION_NAME_ONLY)
+                    << std::endl;
+        }
     }
-    DEBUG(1) std::cout << "[pintool] KnobMain: " << KnobMain.Value() << std::endl;
+
+    PT_DEBUG(1, "KnobMain: " << KnobMain.Value());
     if (KnobMain.Value().compare("ALL") != 0) {
-      RTN mainRtn = RTN_FindByName(img, KnobMain.Value().c_str());
-      if (mainRtn.is_valid()) {
-        RTN_Open(mainRtn);
-        RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
-          IARG_THREAD_ID,
-          IARG_ADDRINT, RTN_Address(mainRtn), IARG_END);
-        RTN_InsertCall(mainRtn, IPOINT_AFTER, (AFUNPTR)RecordMainEnd,
-          IARG_THREAD_ID,
-          IARG_ADDRINT, RTN_Address(mainRtn), IARG_END);
-        RTN_Close(mainRtn);
-      }
+        RTN mainRtn = RTN_FindByName(img, KnobMain.Value().c_str());
+        if (mainRtn.is_valid()) {
+            PT_DEBUG(1, "KnobMain is valid");
+            RTN_Open(mainRtn);
+            RTN_InsertCall(mainRtn, IPOINT_BEFORE, (AFUNPTR)RecordMainBegin,
+                           IARG_THREAD_ID, IARG_ADDRINT, RTN_Address(mainRtn),
+                           IARG_END, IARG_CONTEXT, IARG_END);
+            RTN_InsertCall(mainRtn, IPOINT_AFTER, (AFUNPTR)RecordMainEnd,
+                           IARG_THREAD_ID, IARG_ADDRINT, RTN_Address(mainRtn),
+                           IARG_END);
+            RTN_Close(mainRtn);
+        }
     } else {
-      DEBUG(1) std::cout << "[pintool] Recording all" << std::endl;
-      if (!Record) {
-        WaitForFirstFunction = true;
-      }
+        PT_DEBUG(1, "Recording all");
+        if (!Record) {
+            WaitForFirstFunction = true;
+        }
     }
 
-    if (name.find("alloc.so") != std::string::npos ||
-        name.find("libc.so") != std::string::npos) {
-      /* If alloc.so is pre-loaded, it will always be before libc
-       * We only instrument once
-       */
-      if (alloc_instrumented) {
-        DEBUG(1) std::cout << "[pintool] Allocation already instrumented" << std::endl;
-      } else {
-        DEBUG(1) std::cout << "[pintool] Instrumenting allocation" << std::endl;
-        if (KnobTrackHeap.Value()) {
-          RTN mallocRtn = RTN_FindByName(img, MALLOC);
-          if (mallocRtn.is_valid()) {
-            DEBUG(1) std::cout << "[pintool] Malloc found in " << IMG_Name(img) << std::endl;
+    if (!KnobTrackHeap.Value()) {
+        PT_INFO("heap tracking inactive");
+        return;
+    }
+
+    if (alloc_instrumented && vector_alloc_instrumented) {
+        PT_DEBUG(1, "allocation already instrumented");
+        return;
+    }
+
+    if (alloc_instrumented == 0 &&
+        (name.find("alloc.so") != std::string::npos ||
+         name.find("libc.so") != std::string::npos)) {
+        /* If alloc.so is pre-loaded, it will always be before libc
+         * We only instrument once
+         */
+        PT_DEBUG(1, "Instrumenting allocation");
+        RTN mallocRtn = RTN_FindByName(img, MALLOC);
+        if (mallocRtn.is_valid()) {
+            PT_DEBUG(1, "malloc found in " << IMG_Name(img));
             RTN_Open(mallocRtn);
-            RTN_InsertCall(mallocRtn, IPOINT_BEFORE, (AFUNPTR)RecordMallocBefore,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-              IARG_END);
+            RTN_InsertCall(mallocRtn, IPOINT_BEFORE,
+                           (AFUNPTR)RecordMallocBefore, IARG_THREAD_ID,
+                           IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                           IARG_END);
             RTN_InsertCall(mallocRtn, IPOINT_AFTER, (AFUNPTR)RecordMallocAfter,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCRET_EXITPOINT_VALUE,
-              IARG_END);
+                           IARG_THREAD_ID, IARG_INST_PTR,
+                           IARG_FUNCRET_EXITPOINT_VALUE, IARG_END);
             RTN_Close(mallocRtn);
-          }
+        }
 
-          RTN reallocRtn = RTN_FindByName(img, REALLOC);
-          if (reallocRtn.is_valid()) {
-            DEBUG(1) std::cout << "[pintool] Realloc found in " << IMG_Name(img) << std::endl;
+        RTN reallocRtn = RTN_FindByName(img, REALLOC);
+        if (reallocRtn.is_valid()) {
+            PT_DEBUG(1, "realloc found in " << IMG_Name(img));
             RTN_Open(reallocRtn);
-            RTN_InsertCall(reallocRtn, IPOINT_BEFORE, (AFUNPTR)RecordReallocBefore,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-              IARG_END);
-            RTN_InsertCall(reallocRtn, IPOINT_AFTER, (AFUNPTR)RecordReallocAfter,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCRET_EXITPOINT_VALUE,
-              IARG_END);
+            RTN_InsertCall(reallocRtn, IPOINT_BEFORE,
+                           (AFUNPTR)RecordReallocBefore, IARG_THREAD_ID,
+                           IARG_INST_PTR, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                           IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_END);
+            RTN_InsertCall(reallocRtn, IPOINT_AFTER,
+                           (AFUNPTR)RecordReallocAfter, IARG_THREAD_ID,
+                           IARG_INST_PTR, IARG_FUNCRET_EXITPOINT_VALUE,
+                           IARG_END);
             RTN_Close(reallocRtn);
-          }
+        }
 
-          RTN callocRtn = RTN_FindByName(img, CALLOC);
-          if (callocRtn.is_valid()) {
-            DEBUG(1) std::cout << "[pintool] Calloc found in " << IMG_Name(img) << std::endl;
+        RTN callocRtn = RTN_FindByName(img, CALLOC);
+        if (callocRtn.is_valid()) {
+            PT_DEBUG(1, "calloc found in " << IMG_Name(img));
             RTN_Open(callocRtn);
-            RTN_InsertCall(callocRtn, IPOINT_BEFORE, (AFUNPTR)RecordCallocBefore,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-              IARG_END);
+            RTN_InsertCall(callocRtn, IPOINT_BEFORE,
+                           (AFUNPTR)RecordCallocBefore, IARG_ADDRINT, CALLOC,
+                           IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+                           IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_RETURN_IP,
+                           IARG_END);
             RTN_InsertCall(callocRtn, IPOINT_AFTER, (AFUNPTR)RecordCallocAfter,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCRET_EXITPOINT_VALUE,
-              IARG_END);
+                           IARG_THREAD_ID, IARG_FUNCRET_EXITPOINT_VALUE,
+                           IARG_RETURN_IP, IARG_END);
+            PT_DEBUG(1, "after Calloc insert ");
             RTN_Close(callocRtn);
-          }
+        }
 
-          RTN freeRtn = RTN_FindByName(img, FREE);
-          if (freeRtn.is_valid()) {
-            DEBUG(1) std::cout << "[pintool] Free found in " << IMG_Name(img) << std::endl;
+        RTN freeRtn = RTN_FindByName(img, FREE);
+        if (freeRtn.is_valid()) {
+            PT_DEBUG(1, "free found in " << IMG_Name(img));
             RTN_Open(freeRtn);
             RTN_InsertCall(freeRtn, IPOINT_BEFORE, (AFUNPTR)RecordFreeBefore,
-              IARG_THREAD_ID,
-              IARG_INST_PTR,
-              IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-              IARG_END);
+                           IARG_THREAD_ID, IARG_INST_PTR,
+                           IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_END);
+            RTN_InsertCall(freeRtn, IPOINT_AFTER, (AFUNPTR)RecordFreeAfter,
+                           IARG_END);
             RTN_Close(freeRtn);
-          }
         }
         alloc_instrumented = 1;
-      }
     } /* alloc.so or libc */
-  }
+}
+
+// Print syscall number and arguments
+VOID SysBefore(ADDRINT ip, ADDRINT num, ADDRINT arg0, ADDRINT arg1,
+               ADDRINT arg2, ADDRINT arg3, ADDRINT arg4, ADDRINT arg5) {
+#if defined(TARGET_LINUX) && defined(TARGET_IA32)
+    // On ia32 Linux, there are only 5 registers for passing system call
+    // arguments, but mmap needs 6. For mmap on ia32, the first argument to the
+    // system call is a pointer to an array of the 6 arguments
+    if (num == SYS_mmap) {
+        ADDRINT *mmapArgs = reinterpret_cast<ADDRINT *>(arg0);
+        arg0 = mmapArgs[0];
+        arg1 = mmapArgs[1];
+        arg2 = mmapArgs[2];
+        arg3 = mmapArgs[3];
+        arg4 = mmapArgs[4];
+        arg5 = mmapArgs[5];
+    }
+#endif
+
+    PT_DEBUG(1, "syscall " << std::hex << ip << " " << std::hex << num << " "
+                           << std::hex << arg0 << " " << std::hex << arg1 << " "
+                           << std::hex << arg2 << " " << std::hex << arg3 << " "
+                           << std::hex << arg4 << " " << std::hex << arg5);
+}
+
+// Print the return value of the system call
+VOID SysAfter(ADDRINT ret) { PT_DEBUG(1, "returns: " << std::hex << ret); }
+
+VOID SyscallEntry(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
+                  VOID *v) {
+    syscall_number = PIN_GetSyscallNumber(ctxt, std);
+    SysBefore(PIN_GetContextReg(ctxt, REG_INST_PTR), syscall_number,
+              PIN_GetSyscallArgument(ctxt, std, 0),
+              PIN_GetSyscallArgument(ctxt, std, 1),
+              PIN_GetSyscallArgument(ctxt, std, 2),
+              PIN_GetSyscallArgument(ctxt, std, 3),
+              PIN_GetSyscallArgument(ctxt, std, 4),
+              PIN_GetSyscallArgument(ctxt, std, 5));
+
+    // https://filippo.io/linux-syscall-table/
+    switch (syscall_number) {
+    case 9:
+        if (PIN_GetSyscallArgument(ctxt, std, 0)) {
+            PT_INFO("mmap syscall dropped.");
+            syscall_number = -1;
+            break;
+        }
+        PT_INFO("mmap syscall.");
+        RecordMmapBefore((char *)MMAP, threadid,
+                         PIN_GetSyscallArgument(ctxt, std, 1),
+                         PIN_GetContextReg(ctxt, REG_INST_PTR));
+        break;
+    case 11:
+        PT_INFO("munmap syscall.");
+        RecordMunmapBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0),
+                           PIN_GetSyscallArgument(ctxt, std, 1));
+        break;
+    case 12:
+        PT_INFO("brk syscall.");
+        RecordBrkBefore(threadid, PIN_GetSyscallArgument(ctxt, std, 0));
+        break;
+    case 25:
+        PT_INFO("mremap syscall.");
+        RecordMremapBefore((char *)MREMAP, threadid,
+                           PIN_GetSyscallArgument(ctxt, std, 0),
+                           PIN_GetSyscallArgument(ctxt, std, 1),
+                           PIN_GetSyscallArgument(ctxt, std, 2),
+                           PIN_GetContextReg(ctxt, REG_INST_PTR));
+        break;
+    default:
+        syscall_number = -1;
+        PT_INFO("Syscall not catched. syscall number: "
+                << std::hex << PIN_GetSyscallNumber(ctxt, std));
+        break;
+    }
+}
+
+VOID SyscallExit(THREADID threadid, CONTEXT *ctxt, SYSCALL_STANDARD std,
+                 VOID *v) {
+    SysAfter(PIN_GetSyscallReturn(ctxt, std));
+
+    // https://filippo.io/linux-syscall-table/
+    switch (syscall_number) {
+    case -1:
+        // Syscall will be dropped, as its number is set to -1 in SyscallEntry
+        break;
+    case 9:
+        RecordMmapAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
+                        PIN_GetContextReg(ctxt, REG_INST_PTR));
+        break;
+    case 11:
+        break;
+    case 12:
+        PT_INFO("brk syscall returned.");
+        RecordBrkAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
+                       PIN_GetContextReg(ctxt, REG_INST_PTR));
+        break;
+    case 25:
+        RecordMremapAfter(threadid, PIN_GetSyscallReturn(ctxt, std),
+                          PIN_GetContextReg(ctxt, REG_INST_PTR));
+        break;
+    default:
+        PT_ERROR("syscall unknown. syscall number: " << syscall_number);
+        break;
+    }
+    syscall_number = -1;
 }
 
 /**
@@ -1539,40 +2431,34 @@ VOID instrumentMainAndAlloc(IMG img, VOID *v)
  * @param fast_recording Fast recording
  * @return True if the instruction could be instrumented
  */
-BOOL instrumentMemIns(INS ins, bool fast_recording)
-{
-  if (KnobMem.Value()) {
-    UINT32 memOperands = INS_MemoryOperandCount(ins);
-    bool found = false;
-    ADDRINT ip = INS_Address(ins);
-    DEBUG(1) printf("[pintool] Adding %lx to instrumentation\n", (long unsigned int)ip);
+BOOL instrumentMemIns(INS ins, bool fast_recording) {
+    if (KnobMem.Value()) {
+        UINT32 memOperands = INS_MemoryOperandCount(ins);
+        bool found = false;
+        ADDRINT ip = INS_Address(ins);
+        /* convert this Virtual IP to corresponding Memory Index here */
+        DEBUG(3) printf("Adding %lx to instrumentation\n", ip);
 
-    for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
-      if (INS_MemoryOperandIsRead(ins, memOp)) {
-        INS_InsertCall(
-                ins, IPOINT_BEFORE, (AFUNPTR) RecordMemRead,
-                IARG_THREAD_ID,
-                IARG_INST_PTR,
-                IARG_MEMORYOP_EA, memOp,
-                IARG_BOOL, fast_recording,
-                IARG_END);
-        found = true;
-      }
-      if (INS_MemoryOperandIsWritten(ins, memOp)) {
-        INS_InsertCall(
-                ins, IPOINT_BEFORE, (AFUNPTR) RecordMemWrite,
-                IARG_THREAD_ID,
-                IARG_INST_PTR,
-                IARG_MEMORYOP_EA, memOp,
-                IARG_BOOL, fast_recording,
-                IARG_END);
-        found = true;
-      }
+        for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
+            if (INS_MemoryOperandIsRead(ins, memOp)) {
+                INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)RecordMemRead,
+                               IARG_THREAD_ID, IARG_INST_PTR, IARG_MEMORYOP_EA,
+                               memOp, IARG_BOOL, fast_recording, IARG_CONTEXT,
+                               IARG_END);
+                found = true;
+            }
+            if (INS_MemoryOperandIsWritten(ins, memOp)) {
+                INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)RecordMemWrite,
+                               IARG_THREAD_ID, IARG_INST_PTR, IARG_MEMORYOP_EA,
+                               memOp, IARG_BOOL, fast_recording, IARG_CONTEXT,
+                               IARG_END);
+                found = true;
+            }
+        }
+        return found;
+    } else {
+        return false;
     }
-    return found;
-  } else {
-    return false;
-  }
 }
 
 /**
@@ -1581,90 +2467,44 @@ BOOL instrumentMemIns(INS ins, bool fast_recording)
  * @param bp The branch point. Same as bbl, except for fast_recording
  * @param fast_recording Fast recording
  */
-bool instrumentCallBranch(INS bbl, INS bp, bool fast_recording)
-{
-  bool instrumented = false;
-  if (INS_IsCall(bp)) {
-    if (KnobFunc.Value() || KnobBbl.Value()) {
-      INS_InsertCall(bp, IPOINT_BEFORE, AFUNPTR(RecordFunctionEntry),
-                          IARG_THREAD_ID,
-                          IARG_ADDRINT, INS_Address(bbl),
-                          IARG_ADDRINT, INS_Address(bp),
-                          IARG_BOOL, INS_IS_INDIRECT(bp),
-                          IARG_BRANCH_TARGET_ADDR,
-                          IARG_BOOL, fast_recording,
-                          IARG_END);
-      DEBUG(1) printf("[pintool] Instrumented call@%lx\n", (long unsigned int)INS_Address(bp));
-      instrumented = true;
-    }
-  } else if (INS_IsRet(bp)) {
-    /* RET would be also detected as branch, therefore we use 'else if' */
-    if (KnobFunc.Value() || KnobBbl.Value()) {
-      ASSERT(INS_HAS_TAKEN_BRANCH(bp), "[pintool] Error: Return instruction should support taken branch.");
-      INS_InsertCall(bp, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordFunctionExit),
-                          IARG_THREAD_ID,
-                          IARG_ADDRINT, INS_Address(bbl),
-                          IARG_ADDRINT, INS_Address(bp),
-                          IARG_CONTEXT,
-                          IARG_BOOL, fast_recording,
-                          IARG_END);
-      DEBUG(1) printf("[pintool] Instrumented ret@%lx\n", (long unsigned int)INS_Address(bp));
-      instrumented = true;
-    }
-  } else if (INS_IsBranch(bp)) {
-    if (KnobBbl.Value()) {
-      if (!INS_HAS_TAKEN_BRANCH(bp)) {
-        std::cout << "[pintool] Warning: Branch instruction " << INS_Mnemonic(bp) << "@ 0x" << std::hex << INS_Address(bp) << " does not support taken branch. Ignoring." << std::endl;
-        // TODO: test for leaks in XBEGIN/XEND/XABORT
-      } else {
-        /* unconditional jumps */
-        INS_InsertCall(bp, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordBranch),
-                            IARG_THREAD_ID,
-                            IARG_ADDRINT, INS_Address(bbl),
-                            IARG_ADDRINT, INS_Address(bp),
-                            IARG_CONTEXT,
-                            IARG_BOOL, fast_recording,
-                            IARG_END);
-        DEBUG(1) printf("[pintool] Instrumented jump@%lx\n", (long unsigned int)INS_Address(bp));
-        instrumented = true;
-      }
-      
-      if (INS_HAS_IPOINT_AFTER(bp)) {
-        /* conditional/indirect jumps */
-        INS_InsertCall(bp, IPOINT_AFTER, AFUNPTR(RecordBranch),
-                            IARG_THREAD_ID,
-                            IARG_ADDRINT, INS_Address(bbl),
-                            IARG_ADDRINT, INS_Address(bp),
-                            IARG_CONTEXT,
-                            IARG_BOOL, fast_recording,
-                            IARG_END);
-        DEBUG(1) printf("[pintool] Instrumented indirect jump@%lx\n", (long unsigned int)INS_Address(bp));
-        instrumented = true;
-      }
-    }
-  } else if (INS_RepPrefix(bp)) {
-    ADDRINT ip = INS_Address(bp);
-    DEBUG(2) printf("[pintool] REP@%lx: REP-predicated instruction\n", (long unsigned int)ip);
+VOID instrumentCallBranch(INS bbl, INS bp, bool fast_recording) {
+    if (INS_IsCall(bp)) {
+        if (KnobFunc.Value() || KnobBbl.Value()) {
+            INS_InsertCall(bp, IPOINT_BEFORE, AFUNPTR(RecordFunctionEntry),
+                           IARG_THREAD_ID, IARG_ADDRINT, INS_Address(bbl),
+                           IARG_ADDRINT, INS_Address(bp), IARG_BOOL,
+                           INS_IS_INDIRECT(bp), IARG_BRANCH_TARGET_ADDR,
+                           IARG_CONTEXT, IARG_BOOL, fast_recording, IARG_END);
+        }
+    } else if (INS_IsRet(bp)) {
+        /* RET would be also detected as branch, therefore we use 'else if' */
+        if (KnobFunc.Value() || KnobBbl.Value()) {
+            INS_InsertCall(bp, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordFunctionExit),
+                           IARG_THREAD_ID, IARG_ADDRINT, INS_Address(bbl),
+                           IARG_ADDRINT, INS_Address(bp), IARG_CONTEXT,
+                           IARG_BOOL, fast_recording, IARG_END);
+        }
+    } else if (INS_IsBranch(bp)) {
+        if (KnobBbl.Value()) {
+            if (INS_Opcode(bp) == XED_ICLASS_XEND) {
+                PT_DEBUG(1, "Ignoring XEND");
+            } else {
+                /* unconditional jumps */
+                INS_InsertCall(bp, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordBranch),
+                               IARG_THREAD_ID, IARG_ADDRINT, INS_Address(bbl),
+                               IARG_ADDRINT, INS_Address(bp), IARG_CONTEXT,
+                               IARG_BOOL, fast_recording, IARG_END);
+            }
 
-    /* Rep-prefix does not necessarily show architectural effect
-     * E.g. repz retq (see http://pages.cs.wisc.edu/~lena/repzret.php)
-     */
-
-    if (INS_HAS_IPOINT_AFTER(bp)) {
-      DEBUG(2) printf("[pintool] REP@%lx has fall-through\n", (long unsigned int)ip);
-      /* REP-prefixed instruction where REP is in effect (e.g. rep stos) */
-      INS_InsertCall(bp, IPOINT_AFTER, AFUNPTR(RecordRep),
-                          IARG_THREAD_ID,
-                          IARG_ADDRINT, INS_Address(bbl),
-                          IARG_ADDRINT, INS_Address(bp),
-                          IARG_CONTEXT,
-                          IARG_BOOL, fast_recording,
-                          IARG_END);
-      instrumented = true;
-      DEBUG(1) printf("[pintool] Instrumented rep@%lx\n", (long unsigned int)INS_Address(bp));
+            if (INS_HasFallThrough(bp)) {
+                /* conditional/indirect jumps */
+                INS_InsertCall(bp, IPOINT_AFTER, AFUNPTR(RecordBranch),
+                               IARG_THREAD_ID, IARG_ADDRINT, INS_Address(bbl),
+                               IARG_ADDRINT, INS_Address(bp), IARG_CONTEXT,
+                               IARG_BOOL, fast_recording, IARG_END);
+            }
+        }
     }
-  }
-  return instrumented;
 }
 
 /**
@@ -1672,10 +2512,9 @@ bool instrumentCallBranch(INS bbl, INS bp, bool fast_recording)
  * @param ins The instruction to trace
  * @param v UNUSED
  */
-VOID instrumentAnyInstructions(INS ins, VOID *v)
-{
-  instrumentMemIns(ins, false);
-  instrumentCallBranch(ins, ins, false);
+VOID instrumentAnyInstructions(INS ins, VOID *v) {
+    instrumentMemIns(ins, false);
+    instrumentCallBranch(ins, ins, false);
 }
 
 /**
@@ -1684,233 +2523,304 @@ VOID instrumentAnyInstructions(INS ins, VOID *v)
  * @param ins The instruction to trace
  * @param v UNUSED
  */
-VOID instrumentLeakingInstructions(INS ins, VOID *v)
-{
-  ADDRINT ip = INS_Address(ins);
+VOID instrumentLeakingInstructions(INS ins, VOID *v) {
+    ADDRINT ip = INS_Address(ins);
 
-  if (leaks->get_erase_dleak(ip) || leaks->was_erased_dleak(ip)) {
-    /* Instrument dataleaking instruction */
-    DEBUG(1) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int)ip);
-    bool found = instrumentMemIns(ins, true);
-    ASSERT(found, "[pintool] Error: Memory instruction to instument not found. Have you provided the flag -mem?");
-  }
+    auto ix = (void *)ip;
+    uint64_t *la = static_cast<uint64_t *>(ix);
+    // std::cout << la << " la is " << std::endl;
+    uint64_t l = (uint64_t)la;
+    static int count;
+    DEBUG(3)
+    printf("leaking instruction  %x with count  %d \n", (unsigned int)ip,
+           count);
+    count++;
 
-  if (KnobFunc.Value()) {
-    /* Instrument call/ret for generating call stack */
-    if (INS_IsCall(ins)) {
-      INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(RecordFunctionEntry),
-                          IARG_THREAD_ID,
-                          IARG_ADDRINT, INS_Address(ins),
-                          IARG_ADDRINT, INS_Address(ins),
-                          IARG_BOOL, INS_IS_INDIRECT(ins),
-                          IARG_BRANCH_TARGET_ADDR,
-                          IARG_BOOL, false,
-                          IARG_END);
-      DEBUG(1) printf("[pintool] Instrumented call stack call@%lx\n", (long unsigned int)INS_Address(ins));
-    } else if (INS_IsRet(ins)) {
-      ASSERT(INS_HAS_TAKEN_BRANCH(ins), "[pintool] Error: Return instruction should support taken branch.");
-      INS_InsertCall(ins, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordFunctionExit),
-                          IARG_THREAD_ID,
-                          IARG_ADDRINT, INS_Address(ins),
-                          IARG_ADDRINT, INS_Address(ins),
-                          IARG_CONTEXT,
-                          IARG_BOOL, false,
-                          IARG_END);
-      DEBUG(1) printf("[pintool] Instrumented call stack ret@%lx\n", (long unsigned int)INS_Address(ins));
+    if (leaks->get_erase_dleak(l) || leaks->was_erased_dleak(l)) {
+        /* Instrument dataleaking instruction */
+        DEBUG(3) printf("[pintool] Tracing DLEAK %lx\n", (long unsigned int)ip);
+        bool found = instrumentMemIns(ins, true);
+        PT_ASSERT(found, "Memory instruction to instument not found. "
+                         "Have you provided the flag -mem?");
     }
-  }
 
-  if (leaks->get_erase_cfleak(ip) || leaks->was_erased_cfleak(ip)) {
-    /* Instrument cfleaking instruction */
-    DEBUG(1) printf("[pintool] Tracing CFLEAK %lx\n", (long unsigned int)ip);
+    if (KnobFunc.Value()) {
+        /* Instrument call/ret for generating call stack */
+        if (INS_IsCall(ins)) {
+            INS_InsertCall(ins, IPOINT_BEFORE, AFUNPTR(RecordFunctionEntry),
+                           IARG_THREAD_ID, IARG_ADDRINT, INS_Address(ins),
+                           IARG_ADDRINT, INS_Address(ins), IARG_BOOL,
+                           INS_IS_INDIRECT(ins), IARG_BRANCH_TARGET_ADDR,
+                           IARG_BOOL, false, IARG_END);
+            DEBUG(3)
+            printf("[pintool] Instrumented call stack call@%lx\n",
+                   (long unsigned int)INS_Address(ins));
+        } else if (INS_IsRet(ins)) {
+            PT_ASSERT(INS_HAS_TAKEN_BRANCH(ins),
+                      "Return instruction should support taken "
+                      "branch.");
+            INS_InsertCall(
+                ins, IPOINT_TAKEN_BRANCH, AFUNPTR(RecordFunctionExit),
+                IARG_THREAD_ID, IARG_ADDRINT, INS_Address(ins), IARG_ADDRINT,
+                INS_Address(ins), IARG_CONTEXT, IARG_BOOL, false, IARG_END);
+            DEBUG(3)
+            printf("[pintool] Instrumented call stack ret@%lx\n",
+                   (long unsigned int)INS_Address(ins));
+        }
+    }
 
-    /* Need to find actual branch inside BBL, since ins is start address of the whole BBL
-     * Therefore, we assume that the *first* branch/call inside the BBL is our conditional branch/call of interest.
-     * Unconditional branches must therefore have started a new BBL.
-     */
-    INS bp = ins;
-    bool found = false;
-    while (bp != INS_Invalid()) {
-      DEBUG(2) printf("[pintool] Testing ins %lx\n", (long unsigned int)INS_Address(bp));
-      if (instrumentCallBranch(ins, bp, true)) {
-        DEBUG(2) printf("[pintool] Found bp %lx\n", (long unsigned int)INS_Address(bp));
-        /* We instrument the actual branch point (bp) but report leaks
-         * with respect to the BBL (ins)
+    if (leaks->get_erase_cfleak(l) || leaks->was_erased_cfleak(l)) {
+        /* Instrument cfleaking instruction */
+        DEBUG(3)
+        printf("[pintool] Tracing CFLEAK %lx\n", (long unsigned int)ip);
+
+        /* Need to find actual branch inside BBL, since ins is start address of
+         * the whole BBL Therefore, we assume that the *first* branch/call
+         * inside the BBL is our conditional branch/call of interest.
+         * Unconditional branches must therefore have started a new BBL.
          */
-        found = true;
-        break;
-      }
-      bp = INS_Next(bp);
+        INS bp = ins;
+        bool found = false;
+        while (bp != INS_Invalid()) {
+            DEBUG(3)
+            printf("[pintool] Testing ins %lx\n",
+                   (long unsigned int)INS_Address(bp));
+            if (INS_HAS_TAKEN_BRANCH(bp)) {
+                DEBUG(3)
+                printf("[pintool] Found bp %lx\n",
+                       (long unsigned int)INS_Address(bp));
+                /* We instrument the actual branch point (bp) but report leaks
+                 * with respect to the BBL (ins)
+                 */
+                instrumentCallBranch(ins, bp, true);
+                found = true;
+                break;
+            }
+            bp = INS_Next(bp);
+        }
+        PT_ASSERT(found, "Instruction to instument not found");
     }
-    ASSERT(found, "[pintool] Error: Instruction to instument not found");
-  }
 }
 
 /***********************************************************************/
 /** CLI and Pin framework functions                                    */
 /***********************************************************************/
 typedef struct __attribute__((packed)) {
-  uint8_t type;
-  uint64_t ip;
-  uint8_t nopt;
+    uint8_t type;
+    uint64_t ip;
+    uint8_t nopt;
 } leakfmt_t;
 
 /**
  *  Loads leaks as exported by analyze.py show --leakout
  */
-VOID loadLeaks(VOID* v) {
-  FILE *f = NULL;
-  f = fopen(KnobLeakIn.Value().c_str(), "r");
-  ASSERT(f, "[pintool] Error: Leak file does not exist");
-  fseek(f, 0, SEEK_END);
-  long len = ftell(f);
-  rewind(f);
+VOID loadLeaks(VOID *v) {
+    FILE *f = NULL;
+    f = fopen(KnobLeakIn.Value().c_str(), "r");
+    PT_ASSERT(f, "Leak file does not exist");
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    rewind(f);
 
-  DEBUG(1) printf("[pintool] Reading leaks from %s, size %ld bytes\n", KnobLeakIn.Value().c_str(), len);
-  ASSERT(leaks, "[pintool] Error: Leaks not initialized");
-  while(ftell(f) < len) {
-    leakfmt_t elem;
-    ASSERT(fread(&elem, sizeof(elem), 1, f) == 1, "[pintool] Error: Failed reading leak file");
-    uint64_t callee = 0;
-    DEBUG(1) printf("[pintool] Loading leak element %x, %" PRIx64 ", %d\n", elem.type, elem.ip, elem.nopt);
-    switch(elem.type) {
-      case FUNC_ENTRY:
-        ASSERT(elem.nopt == 1, "[pintool] Error: Trace format corrupt");
-        ASSERT(fread(&callee, sizeof(callee), 1, f) == 1, "[pintool] Error: Failed reading leak file");
-        if (KnobCallstack.Value()) {
-          leaks->call_create(elem.ip, callee);
+    DEBUG(1)
+    printf("[pintool] Reading leaks from %s, size %ld bytes\n",
+           KnobLeakIn.Value().c_str(), len);
+    PT_ASSERT(leaks, "Leaks not initialized");
+    while (ftell(f) < len) {
+        leakfmt_t elem;
+        PT_ASSERT(fread(&elem, sizeof(elem), 1, f) == 1,
+                  "Failed reading leak file");
+        uint64_t callee = 0;
+        DEBUG(3)
+        printf("[pintool] Loading leak element %x, %" PRIx64 ", %d\n",
+               elem.type, elem.ip, elem.nopt);
+        switch (elem.type) {
+        case FUNC_ENTRY:
+            PT_ASSERT(elem.nopt == 1, "Trace format corrupt");
+            PT_ASSERT(fread(&callee, sizeof(callee), 1, f) == 1,
+                      "Failed reading leak file");
+            if (KnobCallstack.Value()) {
+                leaks->call_create(elem.ip, callee);
+            }
+            DEBUG(3) printf("[pintool] Func entry %" PRIx64 "\n", callee);
+            break;
+        case FUNC_EXIT:
+            PT_ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0,
+                      "Failed reading leak file");
+            if (KnobCallstack.Value()) {
+                leaks->ret_create(elem.ip);
+            }
+            DEBUG(3) printf("[pintool] Func exit\n");
+            break;
+        case DLEAK:
+            PT_ASSERT(elem.nopt == 0, "Trace format corrupt");
+            leaks->dleak_create(elem.ip);
+            DEBUG(3) printf("[pintool] Adding Dleak: %" PRIx64 "\n", elem.ip);
+            break;
+        case CFLEAK:
+            PT_ASSERT(elem.nopt > 0, "Trace format corrupt");
+            PT_ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0,
+                      "Failed reading leak file");
+            leaks->cfleak_create(elem.ip, NULL, 0);
+            DEBUG(3) printf("[pintool] Adding CFleak: %" PRIx64 "\n", elem.ip);
+            break;
+        default:
+            PT_ASSERT(false, "Invalid leak type");
         }
-        DEBUG(1) printf("[pintool] Func entry %" PRIx64 "\n", callee);
-        break;
-      case FUNC_EXIT:
-        ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0, "[pintool] Error: Failed reading leak file");
-        if (KnobCallstack.Value()) {
-          leaks->ret_create(elem.ip);
-        }
-        DEBUG(1) printf("[pintool] Func exit\n");
-        break;
-      case DLEAK:
-        ASSERT(elem.nopt == 0, "[pintool] Error: Trace format corrupt");
-        leaks->dleak_create(elem.ip);
-        DEBUG(1) printf("[pintool] Adding Dleak: %" PRIx64 "\n", elem.ip);
-        break;
-      case CFLEAK:
-        ASSERT(elem.nopt > 0, "[pintool] Error: Trace format corrupt");
-        ASSERT(fseek(f, elem.nopt * sizeof(uint64_t), SEEK_CUR) == 0, "[pintool] Error: Failed reading leak file");
-        leaks->cfleak_create(elem.ip, NULL, 0);
-        DEBUG(1) printf("[pintool] Adding CFleak: %" PRIx64 "\n", elem.ip);
-        break;
-      default:
-        ASSERT(false, "[pintool] Error: Invalid leak type");
     }
-  }
-  ASSERT(ftell(f) == len, "[pintool] Error: Trace format corrupt");
-  DEBUG(2) leaks->print_all();
-  fflush(stdout);
+    PT_ASSERT(ftell(f) == len, "Trace format corrupt");
+    DEBUG(3) leaks->print_all();
+    fflush(stdout);
 
-  if (use_callstack) {
-    static_cast<CallStack*>(leaks)->rewind();
-  }
+    if (use_callstack) {
+        static_cast<CallStack *>(leaks)->rewind();
+    }
 }
 
 /**
  * Write traces to files
  */
-VOID Fini(INT32 code, VOID *v)
-{
-  if (!KnobLeaks.Value()) {
-    if (!KnobRawFile.Value().empty()) {
-      FILE* ftrace = fopen(KnobRawFile.Value().c_str(), "w");
-      if (!ftrace) {
-        std::cout << "[pintool] Error: Unable to open file " << KnobRawFile.Value() << std::endl;
-      } else {
-        std::cout << "[pintool] Writing raw results to " << KnobRawFile.Value() << std::endl;
-        bool res;
-        res = fwrite(&trace[0], sizeof(entry_t), trace.size(), ftrace) == trace.size();
-        fclose(ftrace);
-        ASSERT(res, "[pintool] Error: Unable to write complete trace file. Out of disk memory?");
-      }
-    }
-  /* KnobLeaks is set */
-  } else {
-    DEBUG(1) leaks->print_all();
-    DEBUG(1) printf("[pintool] Number of uninstrumented data leaks: %zu\n", leaks->get_uninstrumented_dleak_size());
-    DEBUG(1) printf("[pintool] Number of uninstrumented cflow leaks: %zu\n", leaks->get_uninstrumented_cfleak_size());
-    DEBUG(1) leaks->print_uninstrumented_leaks();
-
-    if (!KnobLeakOut.Value().empty()) {
-      ASSERT(!KnobLeakIn.Value().empty(), "[pintool] Error: leakout requires leakin");
-      ASSERT(leaks, "[pintool] Error: Leaks not initialized");
-      FILE* fleaks = fopen(KnobLeakOut.Value().c_str(), "w");
-      if (!fleaks) {
-        std::cout << "[pintool] Unable to open file " << KnobLeakOut.Value() << std::endl;
-      } else {
-        std::cout << "[pintool] Writing leak results to " << KnobLeakOut.Value() << std::endl;
-        if (use_callstack) {
-          static_cast<CallStack*>(leaks)->rewind();
+VOID Fini(INT32 code, VOID *v) {
+    if (!KnobLeaks.Value()) {
+        if (!KnobRawFile.Value().empty()) {
+            FILE *ftrace = fopen(KnobRawFile.Value().c_str(), "w");
+            if (!ftrace) {
+                PT_ERROR("Unable to open file " << KnobRawFile.Value());
+            } else {
+                PT_INFO("Writing raw results to " << KnobRawFile.Value());
+                bool res;
+                res = fwrite(&trace[0], sizeof(entry_t), trace.size(),
+                             ftrace) == trace.size();
+                fclose(ftrace);
+                PT_ASSERT(res, "Unable to write complete trace file. Out "
+                               "of disk memory?");
+            }
         }
-        leaks->doexport(fleaks);
-        fclose(fleaks);
-      }
-    }
-  }
+        /* KnobLeaks is set */
+    } else {
+        DEBUG(3) leaks->print_all();
+        DEBUG(3)
+        printf("[pintool] Number of uninstrumented data leaks: %zu\n",
+               leaks->get_uninstrumented_dleak_size());
+        DEBUG(3)
+        printf("[pintool] Number of uninstrumented cflow leaks: %zu\n",
+               leaks->get_uninstrumented_cfleak_size());
+        DEBUG(3) leaks->print_uninstrumented_leaks();
 
-  if (imgfile.is_open()) {
-    imgfile.close();
-  }
+        if (!KnobLeakOut.Value().empty()) {
+            PT_ASSERT(!KnobLeakIn.Value().empty(), "leakout requires leakin");
+            PT_ASSERT(leaks, "Leaks not initialized");
+            FILE *fleaks = fopen(KnobLeakOut.Value().c_str(), "w");
+            if (!fleaks) {
+                PT_ERROR("Unable to open file " << KnobLeakOut.Value());
+            } else {
+                PT_INFO("Writing leak results to " << KnobLeakOut.Value());
+                if (use_callstack) {
+                    static_cast<CallStack *>(leaks)->rewind();
+                }
+                leaks->doexport(fleaks);
+                fclose(fleaks);
+            }
+        }
+    }
+
+    if (imgfile.is_open()) {
+        imgfile.close();
+    }
+
+    outFile << setw(23) << "Procedure"
+            << " " << setw(15) << "Image"
+            << " " << setw(18) << "Address"
+            << " " << setw(12) << "Calls"
+            << " " << setw(12) << "Instructions" << endl;
+
+    for (RTN_COUNT *rc = RtnList; rc; rc = rc->_next) {
+        if (rc->_icount > 0)
+            outFile << setw(23) << rc->_name << " " << setw(15) << rc->_image
+                    << " " << setw(18) << hex << rc->_address << dec << " "
+                    << setw(12) << rc->_rtnCount << " " << setw(12)
+                    << rc->_icount << endl;
+    }
 }
 
-INT32 Usage()
-{
-  PIN_ERROR("Address Leak Detector\n"
-          + KNOB_BASE::StringKnobSummary() + "\n");
-  return -1;
+INT32 Usage() {
+    PIN_ERROR("Address Leak Detector\n" + KNOB_BASE::StringKnobSummary() +
+              "\n");
+    return -1;
 }
 
-int main(int argc, char *argv[])
-{
-  if (PIN_Init(argc, argv)) return Usage();
+int main(int argc, char *argv[]) {
+    if (PIN_Init(argc, argv))
+        return Usage();
 
-  PIN_InitSymbols();
+    PIN_InitSymbols();
 
-  if (KnobLeaks.Value() && KnobCallstack.Value()) {
-    leaks = new CallStack();
-    use_callstack = true;
-  } else {
-    leaks = new Flat();
-    use_callstack = false;
-  }
-  IMG_AddInstrumentFunction(instrumentMainAndAlloc, 0);
-  if (!KnobSyms.Value().empty()) {
-      imgfile.open(KnobSyms.Value().c_str());
-  }
-  if (!KnobVDSO.Value().empty()) {
-      vdsofile.open(KnobVDSO.Value().c_str());
-  }
+    fast_recording = (bool)KnobLeaks.Value();
 
-  if (!KnobLeaks.Value()) {
-    /* Traditional tracing */
-    if (KnobBbl.Value() || KnobMem.Value() || KnobFunc.Value()) {
-      INS_AddInstrumentFunction(instrumentAnyInstructions, 0);
+    if (KnobLeaks.Value() && KnobCallstack.Value()) {
+        leaks = new CallStack();
+        use_callstack = true;
+    } else {
+        leaks = new Flat();
+        use_callstack = false;
     }
-  } else {
-    /* Tracing only leaks specified by leak file */
-    DEBUG(1) std::cout << "[pintool] Tracing leaks" << std::endl;
-    /* calling loadLeaks via PIN_AddApplicationStartFunction.
-     * This ensures the program under instrumentation is already completely loaded
-     * before loadLeaks is called, thus preserving the order (and thus
-     * the memory layout) in which shared libraries are loaded.
-     */
-    PIN_AddApplicationStartFunction(loadLeaks, 0);
-    INS_AddInstrumentFunction(instrumentLeakingInstructions, 0);
-  }
+    IMG_AddInstrumentFunction(instrumentMainAndAlloc, 0);
+    if (!KnobSyms.Value().empty()) {
+        imgfile.open(KnobSyms.Value().c_str());
+    }
+    if (!KnobVDSO.Value().empty()) {
+        vdsofile.open(KnobVDSO.Value().c_str());
+    }
+    // Register Routine to be called to instrument rtn
+    RTN_AddInstrumentFunction(Routine, 0);
 
-  PIN_AddThreadStartFunction(ThreadStart, 0);
-  PIN_AddThreadFiniFunction(ThreadFini, 0);
-  PIN_AddFiniFunction(Fini, 0);
+    if (!KnobLeaks.Value()) {
+        /* Traditional tracing */
+        if (KnobBbl.Value() || KnobMem.Value() || KnobFunc.Value()) {
+            INS_AddInstrumentFunction(instrumentAnyInstructions, 0);
+        }
+    } else {
+        /* Tracing only leaks specified by leak file */
+        PT_DEBUG(1, "[pintool] Tracing leaks");
+        /* calling loadLeaks via PIN_AddApplicationStartFunction.
+         * This ensures the program under instrumentation is already completely
+         * loaded before loadLeaks is called, thus preserving the order (and
+         * thus the memory layout) in which shared libraries are loaded.
+         */
+        PIN_AddApplicationStartFunction(loadLeaks, 0);
+        INS_AddInstrumentFunction(instrumentLeakingInstructions, 0);
+    }
+    PIN_AddSyscallEntryFunction(SyscallEntry, 0);
+    PIN_AddSyscallExitFunction(SyscallExit, 0);
 
-  init();
-  PIN_StartProgram();
+    /* Getting the stack and vvar address range for this process */
+    stack.baseaddr = execute_commands("stack", 1, " ");
+    stack.endaddr = execute_commands("stack", 2, " ");
+    PT_DEBUG(1, "stackBaseAddr is " << std::hex << stack.baseaddr);
+    PT_DEBUG(1, "stackEndAddr  is " << std::hex << stack.endaddr);
 
-  return 0;
+    imgobj_t imgdata;
+    imgdata.name = "vvar";
+    SHA1 hash;
+    hash.update(imgdata.name);
+    imgdata.hash = hash.final().substr(32, 8);
+
+    imgdata.baseaddr = execute_commands("vvar", 1, " ");
+    imgdata.endaddr = execute_commands("vvar", 2, " ");
+    PT_DEBUG(1, "vvarBaseAddr is " << std::hex << imgdata.baseaddr);
+    PT_DEBUG(1, "vvarEndAddr  is " << std::hex << imgdata.endaddr);
+
+    imgvec.push_back(imgdata);
+
+    auto mngr = CALLSTACK::CallStackManager::get_instance();
+    mngr->activate();
+
+    PIN_AddThreadStartFunction(ThreadStart, 0);
+    PIN_AddThreadFiniFunction(ThreadFini, 0);
+    PIN_AddFiniFunction(Fini, 0);
+
+    init();
+    PIN_StartProgram();
+
+    return 0;
 }
