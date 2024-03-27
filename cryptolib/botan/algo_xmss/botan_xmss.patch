@@ -1,0 +1,93 @@
+diff --git a/src/lib/pubkey/xmss/xmss_hash.cpp b/src/lib/pubkey/xmss/xmss_hash.cpp
+index 957e9e989..f14c3a305 100644
+--- a/src/lib/pubkey/xmss/xmss_hash.cpp
++++ b/src/lib/pubkey/xmss/xmss_hash.cpp
+@@ -40,8 +40,8 @@ void XMSS_Hash::h_msg_init(std::span<const uint8_t> randomness,
+    m_msg_hash->clear();
+    m_msg_hash->update(m_zero_padding);
+    m_msg_hash->update(0x02);
+-   m_msg_hash->update(randomness.data(), randomness.size());
+-   m_msg_hash->update(root.data(), root.size());
++   // m_msg_hash->update(randomness.data(), randomness.size());
++   // m_msg_hash->update(root.data(), root.size());
+    m_msg_hash->update(index_bytes.data(), index_bytes.size());
+    }
+ 
+diff --git a/src/lib/pubkey/xmss/xmss_parameters.cpp b/src/lib/pubkey/xmss/xmss_parameters.cpp
+index b53f6eaed..d5c0790e4 100644
+--- a/src/lib/pubkey/xmss/xmss_parameters.cpp
++++ b/src/lib/pubkey/xmss/xmss_parameters.cpp
+@@ -30,6 +30,8 @@ XMSS_Parameters::xmss_algorithm_t XMSS_Parameters::xmss_id_from_string(const std
+       { return XMSS_SHA2_16_512; }
+    if(param_set == "XMSS-SHA2_20_512")
+       { return XMSS_SHA2_20_512; }
++   if(param_set == "XMSS-SHAKE_2_256")
++      { return XMSS_SHAKE_2_256; }
+    if(param_set == "XMSS-SHAKE_10_256")
+       { return XMSS_SHAKE_10_256; }
+    if(param_set == "XMSS-SHAKE_16_256")
+@@ -42,6 +44,8 @@ XMSS_Parameters::xmss_algorithm_t XMSS_Parameters::xmss_id_from_string(const std
+       { return XMSS_SHAKE_16_512; }
+    if(param_set == "XMSS-SHAKE_20_512")
+       { return XMSS_SHAKE_20_512; }
++   if(param_set == "XMSS-SHA2_2_192")
++      { return XMSS_SHA2_2_192; }
+    if(param_set == "XMSS-SHA2_10_192")
+       { return XMSS_SHA2_10_192; }
+    if(param_set == "XMSS-SHA2_16_192")
+@@ -139,6 +143,17 @@ XMSS_Parameters::XMSS_Parameters(xmss_algorithm_t oid)
+          m_strength = 512;
+          m_wots_oid = XMSS_WOTS_Parameters::ots_algorithm_t::WOTSP_SHA2_512;
+          break;
++      case XMSS_SHAKE_2_256:
++         m_element_size = 32;
++         m_hash_id_size = 32;
++         m_w = 16;
++         m_len = 67;
++         m_tree_height = 2;
++         m_name = "XMSS-SHAKE_2_256";
++         m_hash_name = "SHAKE-128(256)";
++         m_strength = 256;
++         m_wots_oid = XMSS_WOTS_Parameters::ots_algorithm_t::WOTSP_SHAKE_256;
++         break;
+       case XMSS_SHAKE_10_256:
+          m_element_size = 32;
+          m_hash_id_size = 32;
+@@ -205,6 +220,17 @@ XMSS_Parameters::XMSS_Parameters(xmss_algorithm_t oid)
+          m_strength = 512;
+          m_wots_oid = XMSS_WOTS_Parameters::ots_algorithm_t::WOTSP_SHAKE_512;
+          break;
++      case XMSS_SHA2_2_192:
++         m_element_size = 24;
++         m_hash_id_size = 4;
++         m_w = 16;
++         m_len = 51;
++         m_tree_height = 2;
++         m_name = "XMSS-SHA2_2_192";
++         m_hash_name = "Truncated(SHA-256,192)";
++         m_strength = 192;
++         m_wots_oid = XMSS_WOTS_Parameters::ots_algorithm_t::WOTSP_SHA2_192;
++         break;
+       case XMSS_SHA2_10_192:
+          m_element_size = 24;
+          m_hash_id_size = 4;
+diff --git a/src/lib/pubkey/xmss/xmss_parameters.h b/src/lib/pubkey/xmss/xmss_parameters.h
+index 27564390a..f1275f57f 100644
+--- a/src/lib/pubkey/xmss/xmss_parameters.h
++++ b/src/lib/pubkey/xmss/xmss_parameters.h
+@@ -149,6 +149,7 @@ class BOTAN_PUBLIC_API(2,0) XMSS_Parameters
+          XMSS_SHA2_10_512 = 0x00000004,
+          XMSS_SHA2_16_512 = 0x00000005,
+          XMSS_SHA2_20_512 = 0x00000006,
++         XMSS_SHAKE_2_256 = 0x000000f7,
+          XMSS_SHAKE_10_256 = 0x00000007,
+          XMSS_SHAKE_16_256 = 0x00000008,
+          XMSS_SHAKE_20_256 = 0x00000009,
+@@ -157,6 +158,7 @@ class BOTAN_PUBLIC_API(2,0) XMSS_Parameters
+          XMSS_SHAKE_20_512 = 0x0000000c,
+ 
+          // from NIST SP.800-208
++         XMSS_SHA2_2_192 = 0x000000fd,
+          XMSS_SHA2_10_192 = 0x0000000d,
+          XMSS_SHA2_16_192 = 0x0000000e,
+          XMSS_SHA2_20_192 = 0x0000000f,

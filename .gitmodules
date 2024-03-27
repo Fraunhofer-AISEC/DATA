@@ -2,3 +2,6 @@
 	path = data-gui
 	url = https://github.com/IAIK/data-gui.git
 	branch = master
+[submodule "cryptolib/botan/botan"]
+	path = cryptolib/botan/botan
+	url = https://github.com/randombit/botan.git
